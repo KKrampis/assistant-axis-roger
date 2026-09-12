@@ -28,6 +28,10 @@
 #   ./pipeline/run_pipeline.sh --skip-gpu-check                # bypass pre-flight
 #   ./pipeline/run_pipeline.sh --steps23serial                 # disable parallel steps 2+3
 #   ./pipeline/run_pipeline.sh --no-scan                       # skip post-pipeline audit
+#   ./pipeline/run_pipeline.sh --mode christina --reduce_questions 3 \
+#       --roles_dir ../data/traits/instructions/_moral_circle \
+#       --output_dir /workspace/outputs/qwen-3-32b/moral-circle
+#       # christina mode now forwards --reduce_questions to steps 1 and 4
 #
 # Post-pipeline scan (default ON): after step 5, runs
 # pipeline/scan_missing_vectors.py to audit every (activation, vector) pair
@@ -134,6 +138,8 @@ while [[ $# -gt 0 ]]; do
             MODEL="$2"; shift 2 ;;
         --tensor_parallel_size)
             TENSOR_PARALLEL_SIZE="$2"; shift 2 ;;
+        --reduce_questions)
+            REDUCE_QUESTIONS="$2"; shift 2 ;;
         --no-tmpfs)
             USE_TMPFS=false; shift ;;
         --tmpfs-dir)
@@ -423,7 +429,12 @@ symlink_default() {
     fi
 }
 
-# ---- Christina mode (unchanged) -------------------------------------------
+# ---- Christina mode -------------------------------------------------------
+# NOTE: --reduce_questions is now forwarded to steps 1 and 4 (previously
+# silently ignored in this branch, so christina-mode runs always used
+# 1_generate.py's own default of reduce_questions=1 / question_count=240,
+# regardless of the $REDUCE_QUESTIONS config above -- this matches how
+# roger mode already threads $REDUCE_QUESTIONS through steps 1 and 4).
 if [ "$MODE" = "christina" ]; then
 
     echo "=== Step 1: Generating responses ==="
@@ -432,6 +443,7 @@ if [ "$MODE" = "christina" ]; then
         --model "$MODEL" \
         --roles_dir "$ROLES_DIR" \
         --tensor_parallel_size "$TENSOR_PARALLEL_SIZE" \
+        --reduce_questions "$REDUCE_QUESTIONS" \
         --output_dir "$OUTPUT_DIR/responses"
 
     echo ""
@@ -493,7 +505,8 @@ if [ "$MODE" = "christina" ]; then
     uv run 4_vectors.py \
         --activations_dir "$OUTPUT_DIR/activations" \
         --scores_dir "$OUTPUT_DIR/scores" \
-        --output_dir "$OUTPUT_DIR/vectors"
+        --output_dir "$OUTPUT_DIR/vectors" \
+        --reduce_questions "$REDUCE_QUESTIONS"
 
     echo ""
     echo "=== Step 5: Computing axis ==="
