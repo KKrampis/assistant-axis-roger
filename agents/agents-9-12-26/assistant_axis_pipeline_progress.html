@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Assistant Axis Pipeline — Stage Progress</title>
+<style>
+  :root{
+    --bg:#14171B;
+    --panel:#1C2028;
+    --panel-border:#2A2F3A;
+    --ink:#E7E4DC;
+    --ink-dim:#8B92A0;
+    --ink-faint:#565D6B;
+    --amber:#E8A33D;
+    --amber-dim:#3A2E14;
+    --coral:#D9636B;
+    --coral-dim:#3A1A1D;
+    --sage:#7FB069;
+    --sage-dim:#1E2B18;
+    --track:#20242C;
+    --line:#333A46;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family: ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  .mono{ font-family: ui-monospace, "SF Mono", "Cascadia Code", "Roboto Mono", Menlo, monospace; }
+
+  .bgtex{
+    position:fixed; inset:0; pointer-events:none; z-index:0;
+    background-image: radial-gradient(circle, #2A2F3A 1px, transparent 1px);
+    background-size: 28px 28px;
+    opacity:0.3;
+  }
+
+  header{
+    position:relative; z-index:1;
+    padding: 34px 40px 18px;
+    border-bottom:1px solid var(--panel-border);
+  }
+  h1{
+    font-family: ui-serif, Georgia, "Iowan Old Style", "Times New Roman", serif;
+    font-weight:500;
+    font-size: 27px;
+    margin: 0 0 8px;
+    color:#F2EFE7;
+  }
+  header p{
+    margin:0;
+    color:var(--ink-dim);
+    font-size:14px;
+    max-width:760px;
+    line-height:1.55;
+  }
+  header p .mono{ color:var(--ink); }
+
+  main{ position:relative; z-index:1; padding: 26px 40px 10px; }
+
+  /* stage rail */
+  .rail{
+    display:grid;
+    grid-template-columns: 190px repeat(5, 1fr);
+    align-items:center;
+    margin: 0 0 6px;
+  }
+  .rail .stage-head{
+    font-size:11.5px;
+    color:var(--ink-dim);
+    text-align:center;
+    padding: 0 6px 10px;
+    border-bottom: 1px solid var(--panel-border);
+  }
+  .rail .stage-head .num{
+    display:inline-flex; align-items:center; justify-content:center;
+    width:18px; height:18px; border-radius:50%;
+    background:var(--track); color:var(--ink-dim);
+    font-size:10.5px; margin-right:6px;
+  }
+  .rail .stage-head .script{
+    display:block; margin-top:3px; color:var(--ink-faint); font-size:10px;
+  }
+  .rail .corner{ border-bottom: 1px solid var(--panel-border); }
+
+  .group-title{
+    margin: 22px 0 4px;
+    font-size:13px;
+    color:var(--ink);
+    display:flex; align-items:center; gap:10px;
+  }
+  .group-title .count{ color:var(--ink-faint); font-size:12px; }
+  .group-note{
+    margin: 0 0 12px; font-size:12px; color:var(--ink-faint); max-width:760px; line-height:1.5;
+  }
+
+  .row{
+    display:grid;
+    grid-template-columns: 190px repeat(5, 1fr);
+    align-items:center;
+    height:34px;
+    border-bottom: 1px solid #1D212A;
+    cursor:pointer;
+  }
+  .row:hover{ background: rgba(255,255,255,0.02); }
+  .row .rowlabel{
+    font-size:12px;
+    padding-right:10px;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .row .cell{ position:relative; height:100%; display:flex; align-items:center; padding: 0 6px; }
+  .row .cell .track{
+    height:6px; width:100%; background:var(--track); border-radius:3px; position:relative; overflow:visible;
+  }
+  .row .cell .fill{ position:absolute; top:0; left:0; height:100%; border-radius:3px; }
+  .row .cell .dot{
+    position:absolute; right:0; top:50%; transform:translate(50%,-50%);
+    width:11px; height:11px; border-radius:50%; border:2px solid var(--bg);
+  }
+
+  .fill-a{ background: var(--amber-dim); }
+  .dot-a{ background: var(--amber); }
+  .fill-r{ background: var(--coral-dim); }
+  .dot-r{ background: var(--coral); }
+  .fill-done{ background: var(--sage-dim); }
+  .dot-done{ background: var(--sage); }
+  .fill-empty{ background: transparent; }
+
+  .legend{
+    display:flex; gap:22px; flex-wrap:wrap;
+    margin-top: 26px; padding-top:14px;
+    border-top:1px solid var(--panel-border);
+    font-size:12px; color:var(--ink-dim);
+  }
+  .legend-item{ display:flex; align-items:center; gap:7px; }
+  .legend-dot{ width:10px; height:10px; border-radius:50%; }
+
+  /* detail panel */
+  #panel{
+    position: sticky; bottom:0;
+    z-index:2;
+    margin-top: 24px;
+    background: var(--panel);
+    border-top:1px solid var(--panel-border);
+    padding: 18px 40px 22px;
+    display:none;
+  }
+  #panel.show{ display:block; }
+  .panel-inner{ max-width: 900px; display:flex; flex-direction:column; gap:8px;}
+  .panel-title-row{ display:flex; align-items:baseline; gap:12px; }
+  .panel-title{
+    font-family: ui-serif, Georgia, serif;
+    font-size:19px; color:#F2EFE7; margin:0;
+  }
+  .panel-stage{ font-size:12px; color: var(--ink-dim); }
+  .panel-desc{ font-size:13px; color:var(--ink); line-height:1.55; }
+  .panel-close{
+    all:unset; margin-left:auto; cursor:pointer; color:var(--ink-faint); font-size:12px;
+  }
+  .panel-close:hover{ color:var(--ink); }
+
+  footer{
+    position:relative; z-index:1;
+    padding: 14px 40px 30px;
+    font-size:11.5px; color:var(--ink-faint);
+  }
+</style>
+</head>
+<body>
+
+<div class="bgtex"></div>
+
+<header>
+  <h1>Assistant Axis pipeline — stage progress</h1>
+  <p>Every trait/role below is checked against the five stages of Christina Lu's method, as implemented in
+  <span class="mono">pipeline/1_generate.py</span> \u2026 <span class="mono">5_axis.py</span>. A bar reaching column 5
+  means the entity has a judge-correlated direction embedded in the shared persona-space PCA. Click any row for detail.</p>
+</header>
+
+<main>
+  <div class="rail">
+    <div class="corner"></div>
+    <div class="stage-head"><span class="num">1</span>generate<span class="script mono">1_generate.py</span></div>
+    <div class="stage-head"><span class="num">2</span>activations<span class="script mono">2_activations.py</span></div>
+    <div class="stage-head"><span class="num">3</span>judge<span class="script mono">3_judge.py</span></div>
+    <div class="stage-head"><span class="num">4</span>vectors<span class="script mono">4_vectors.py</span></div>
+    <div class="stage-head"><span class="num">5</span>axis / PCA<span class="script mono">5_axis.py</span></div>
+  </div>
+
+  <div id="rows"></div>
+
+  <div class="legend">
+    <div class="legend-item"><span class="legend-dot" style="background:var(--amber)"></span>Group A \u2014 never entered pipeline</div>
+    <div class="legend-item"><span class="legend-dot" style="background:var(--coral)"></span>Group B \u2014 regressed (rewritten, stage 2\u20135 invalidated)</div>
+    <div class="legend-item"><span class="legend-dot" style="background:var(--sage)"></span>reference \u2014 already cleared stage 5</div>
+  </div>
+</main>
+
+<div id="panel">
+  <div class="panel-inner">
+    <div class="panel-title-row">
+      <h3 class="panel-title" id="pTitle"></h3>
+      <span class="panel-stage" id="pStage"></span>
+      <button class="panel-close" id="pClose">close \u2715</button>
+    </div>
+    <div class="panel-desc" id="pDesc"></div>
+  </div>
+</div>
+
+<footer>Source: <span class="mono">KKrampis/assistant-axis-roger</span> \u00b7 stage boundaries taken from <span class="mono">pipeline/README.md</span> and <span class="mono">assistant_axis/axis.py</span>, <span class="mono">pca.py</span></footer>
+
+<script>
+(function(){
+  const rowsEl = document.getElementById('rows');
+
+  const groupA_note = "Full stage-1 prompts, questions, and judge rubric are committed. No responses, activations, judge scores, vectors, or axis/PCA embedding exist anywhere in the repo.";
+  const groupB_note = "These previously reached stage 5 \u2014 activations, vectors and an axis existed \u2014 but the stage-1 prompt was rewritten afterward, invalidating stages 2\u20135. Old cached output must not be reused.";
+  const refNote = "Already cleared all 5 stages: committed Spearman \u03c1 correlation in roger/axis_judge_experiments/gpt_vs_sonnet_rhos_di.json.";
+
+  const groups = [
+    {
+      title: 'Group A \u2014 moral-circle spectrum', count: '12 traits, stage 1 of 5',
+      note: groupA_note, kind:'a',
+      items: [
+        {id:'selfish', stage:1, desc:'Self-most pole of the moral-circle spectrum. ' + groupA_note},
+        {id:'clannish', stage:1, desc:groupA_note},
+        {id:'cliqueish', stage:1, desc:groupA_note},
+        {id:'insular', stage:1, desc:groupA_note},
+        {id:'parochial', stage:1, desc:groupA_note},
+        {id:'regionalist', stage:1, desc:groupA_note},
+        {id:'nationalist', stage:1, desc:groupA_note},
+        {id:'patriotic', stage:1, desc:groupA_note},
+        {id:'sectarian', stage:1, desc:'Cuts across the geographic spine (religious/ideological group). ' + groupA_note},
+        {id:'philanthropic', stage:1, desc:groupA_note},
+        {id:'humanitarian', stage:1, desc:'Widest human-scale pole. ' + groupA_note},
+        {id:'kind_to_animals', stage:1, desc:'Moral circle extended beyond humanity. ' + groupA_note},
+      ]
+    },
+    {
+      title: 'Group A \u2014 goal-role pairs', count: '8 roles / 4 pairs, stage 1 of 5',
+      note: groupA_note, kind:'a',
+      items: [
+        {id:'aligned_artificial_intelligence', stage:1, desc:'Highest-value pair \u2014 direct instrumental-convergence test case, paired against paperclip_maximizer. ' + groupA_note},
+        {id:'paperclip_maximizer', stage:1, desc:groupA_note},
+        {id:'guardian', stage:1, desc:groupA_note},
+        {id:'destroyer', stage:1, desc:groupA_note},
+        {id:'symbiont', stage:1, desc:groupA_note},
+        {id:'parasite', stage:1, desc:groupA_note},
+        {id:'predator', stage:1, desc:'Acts as a control pair \u2014 no moral charge on either pole. ' + groupA_note},
+        {id:'prey', stage:1, desc:groupA_note},
+      ]
+    },
+    {
+      title: 'Group A \u2014 brand-new traits', count: '3 traits, stage 1 of 5',
+      note: groupA_note, kind:'a',
+      items: [
+        {id:'conformist', stage:1, desc:'No prior activations of any kind exist. ' + groupA_note},
+        {id:'nonconformist', stage:1, desc:'No prior activations of any kind exist. ' + groupA_note},
+        {id:'indecisive', stage:1, desc:'No prior activations of any kind exist. ' + groupA_note},
+      ]
+    },
+    {
+      title: 'Group B \u2014 rewritten, regressed to stage 1', count: '5 traits (+ 30 t_*__unhelpful combos)',
+      note: groupB_note, kind:'r',
+      items: [
+        {id:'anthropocentric', stage:1, desc:'Instructions rewritten April 2026. ' + groupB_note},
+        {id:'ecocentric', stage:1, desc:'Instructions rewritten April 2026. ' + groupB_note},
+        {id:'obedient', stage:1, desc:'Instructions rewritten April 2026. ' + groupB_note},
+        {id:'rebellious', stage:1, desc:'Instructions rewritten April 2026. ' + groupB_note},
+        {id:'unhelpful', stage:1, desc:'Rewritten May 2026 (old passive definition gave near-zero steering effect). Also invalidates all 30 t_*__unhelpful role+trait combination files. ' + groupB_note},
+      ]
+    },
+    {
+      title: 'Reference \u2014 already at stage 5', count: '5 of 33 finished axes shown',
+      note: refNote, kind:'done',
+      items: [
+        {id:'helpful / unhelpful*', stage:5, desc:'*paired against the OLD unhelpful definition \u2014 see Group B. ' + refNote},
+        {id:'harmless / harmful', stage:5, desc:refNote},
+        {id:'honest / dishonest', stage:5, desc:refNote},
+        {id:'angel / demon', stage:5, desc:refNote},
+        {id:'progressive / conservative', stage:5, desc:refNote},
+      ]
+    }
+  ];
+
+  const panel = document.getElementById('panel');
+  const pTitle = document.getElementById('pTitle');
+  const pStage = document.getElementById('pStage');
+  const pDesc = document.getElementById('pDesc');
+  document.getElementById('pClose').addEventListener('click', ()=> panel.classList.remove('show'));
+
+  function stageWidthPct(stage){
+    // 5 columns; fill proportionally through the reached column
+    return (stage/5)*100;
+  }
+
+  groups.forEach(g=>{
+    const h = document.createElement('div');
+    h.className = 'group-title';
+    h.innerHTML = `${g.title} <span class="count">\u2014 ${g.count}</span>`;
+    rowsEl.appendChild(h);
+
+    g.items.forEach(item=>{
+      const row = document.createElement('div');
+      row.className = 'row';
+      const label = document.createElement('div');
+      label.className = 'rowlabel mono';
+      label.textContent = item.id;
+      row.appendChild(label);
+
+      for (let s=1; s<=5; s++){
+        const cell = document.createElement('div');
+        cell.className = 'cell';
+        const track = document.createElement('div');
+        track.className = 'track';
+        if (s <= item.stage){
+          const fillClass = g.kind === 'done' ? 'fill-done' : (g.kind === 'r' ? 'fill-r' : 'fill-a');
+          const dotClass = g.kind === 'done' ? 'dot-done' : (g.kind === 'r' ? 'dot-r' : 'dot-a');
+          const fill = document.createElement('div');
+          fill.className = 'fill ' + fillClass;
+          fill.style.width = '100%';
+          track.appendChild(fill);
+          if (s === item.stage){
+            const dot = document.createElement('div');
+            dot.className = 'dot ' + dotClass;
+            track.appendChild(dot);
+          }
+        }
+        cell.appendChild(track);
+        row.appendChild(cell);
+      }
+
+      row.addEventListener('click', ()=>{
+        pTitle.textContent = item.id;
+        pStage.textContent = `stage ${item.stage} of 5`;
+        pDesc.textContent = item.desc;
+        panel.classList.add('show');
+      });
+      rowsEl.appendChild(row);
+    });
+  });
+})();
+</script>
+
+</body>
+</html>
