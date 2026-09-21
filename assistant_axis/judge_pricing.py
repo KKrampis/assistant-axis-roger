@@ -30,9 +30,27 @@ cmd-line-error 1).
 PRICING
 -------
 USD per 1M tokens, separated into input and output streams.  These
-numbers are documented in README.md "Judging cost model" and are
-the same numbers the cost-vs-quality plot uses.  Update both places
-together if rates change.
+numbers are documented in README.md "Judging cost model".
+
+results_analysis/plot_batch_size_quality_vs_cost.py has its OWN copy of
+the legacy (gpt-4.1-mini / claude-sonnet-4) rates, deliberately NOT kept
+in sync with this module -- that script regenerates a chart from cached
+usage data that was actually billed at those historical rates, so its
+constants are pinned to history rather than updated. This module is the
+one to update when adding a new judge model or refreshing current prices;
+see the 2026-09 update note below.
+
+2026-09 update: Anthropic rates verified live via the claude-api skill's
+current-models table (Haiku 4.5 unchanged; Sonnet 5 and Opus 5 added --
+note Sonnet 5 is CHEAPER than Sonnet 4 was, and Opus 5 is far cheaper than
+this module's original May-2026 placeholder guess of $15/$75). OpenAI
+GPT-5.6 tier rates came from web search cross-confirming two independent
+queries against developers.openai.com model pages -- lower confidence
+than the Anthropic numbers (could not fetch developers.openai.com
+directly; it's a client-rendered app that returns an empty shell to non-
+JS fetchers). Re-verify at https://developers.openai.com/api/docs/pricing
+before trusting for a real budget-tracked run, particularly gpt-5.6-sol,
+whose rate is explicitly promotional through 2026-11-21 per the source.
 
 Note on caching: gpt-4.1-mini / gpt-4-class models support prompt
 caching (~5x cheaper for the cached prefix portion).  We do NOT
@@ -62,10 +80,30 @@ logger = logging.getLogger(__name__)
 
 GPT_MINI_RATE_IN = 0.40   # USD / 1M input tokens (gpt-4.1-mini)
 GPT_MINI_RATE_OUT = 1.60  # USD / 1M output tokens
-HAIKU_RATE_IN = 1.00      # claude-haiku-4-5
+
+# --- Legacy Anthropic rate, kept for pricing pre-existing cached runs ---
+# (e.g. roger/axis_judge_experiments/angel_vs_demon/sonnet/ actually used
+# claude-sonnet-4-20250514 at this rate; do not use for new judging).
+SONNET4_RATE_IN = 3.00    # claude-sonnet-4 / claude-sonnet-4-6 (unchanged through 4.6)
+SONNET4_RATE_OUT = 15.00
+
+# --- Current rates (verified 2026-09; see module docstring) ---
+HAIKU_RATE_IN = 1.00      # claude-haiku-4-5 -- unchanged since May 2026
 HAIKU_RATE_OUT = 5.00
-SONNET_RATE_IN = 3.00     # claude-sonnet-4
-SONNET_RATE_OUT = 15.00
+SONNET_RATE_IN = 2.00     # claude-sonnet-5 -- price CUT vs sonnet-4's $3.00/$15.00
+SONNET_RATE_OUT = 10.00
+OPUS_RATE_IN = 5.00       # claude-opus-5 (same rate as opus-4-6/4-7/4-8)
+OPUS_RATE_OUT = 25.00     # supersedes the never-verified $15/$75 May-2026 placeholder
+
+# --- OpenAI GPT-5.6 tier ladder (Sol/Terra/Luna), short-context rates ---
+# Lower-confidence sourcing than the Anthropic rates above -- see module
+# docstring. gpt-5.6-sol's rate is promotional through 2026-11-21.
+GPT_LUNA_RATE_IN = 0.20   # gpt-5.6-luna -- budget tier (~matches Haiku 4.5's cost profile)
+GPT_LUNA_RATE_OUT = 1.20
+GPT_TERRA_RATE_IN = 2.00  # gpt-5.6-terra -- mid tier (~matches Sonnet 5)
+GPT_TERRA_RATE_OUT = 12.00
+GPT_SOL_RATE_IN = 5.00    # gpt-5.6-sol -- flagship tier (~matches Opus 5); promotional pricing
+GPT_SOL_RATE_OUT = 30.00
 
 
 # --------------------------------------------------------------------------
@@ -147,14 +185,28 @@ def surgical_rejudge_cost_split(
 
 # (input_rate, output_rate) keyed by canonical model name.  Lookups
 # are case-insensitive and use substring matching (so e.g.
-# "gpt-4.1-mini-2024" still resolves to GPT_MINI rates).
+# "gpt-4.1-mini-2024" still resolves to GPT_MINI rates), checked in
+# order -- entries here are deliberately ordered MOST-specific first,
+# so an exact dated/versioned model id resolves to its own generation's
+# rate rather than falling through to a newer generic fallback that
+# would silently misprice it (e.g. "claude-sonnet-4-20250514" must hit
+# the "sonnet-4" entry, not the generic "sonnet" -> current-rate one).
 _MODEL_RATES: tuple[tuple[str, float, float], ...] = (
+    # OpenAI
     ("gpt-4.1-mini", GPT_MINI_RATE_IN, GPT_MINI_RATE_OUT),
     ("gpt-4o-mini", GPT_MINI_RATE_IN, GPT_MINI_RATE_OUT),
+    ("gpt-5.6-luna", GPT_LUNA_RATE_IN, GPT_LUNA_RATE_OUT),
+    ("gpt-5.6-terra", GPT_TERRA_RATE_IN, GPT_TERRA_RATE_OUT),
+    ("gpt-5.6-sol", GPT_SOL_RATE_IN, GPT_SOL_RATE_OUT),
+    # Anthropic -- versioned entries before the generic "sonnet"/"opus"
+    # fallbacks (see ordering note above).
+    ("sonnet-4-6", SONNET4_RATE_IN, SONNET4_RATE_OUT),
+    ("sonnet-4", SONNET4_RATE_IN, SONNET4_RATE_OUT),
+    ("sonnet-5", SONNET_RATE_IN, SONNET_RATE_OUT),
+    ("opus-5", OPUS_RATE_IN, OPUS_RATE_OUT),
     ("haiku", HAIKU_RATE_IN, HAIKU_RATE_OUT),
-    ("sonnet", SONNET_RATE_IN, SONNET_RATE_OUT),
-    # Future Opus pricing — placeholder, fail loud if hit:
-    # ("opus", 15.00, 75.00),
+    ("sonnet", SONNET_RATE_IN, SONNET_RATE_OUT),  # generic fallback -> current (5) rate
+    ("opus", OPUS_RATE_IN, OPUS_RATE_OUT),        # generic fallback -> current (5) rate; also correct for 4-6/4-7/4-8 (same price)
 )
 
 
@@ -176,8 +228,10 @@ def price_for_model(model: str) -> tuple[float, float]:
             return rate_in, rate_out
     raise KeyError(
         f"Unknown judge model {model!r} for pricing.  Add an entry "
-        f"to assistant_axis/judge_pricing.py:_MODEL_RATES (and the "
-        f"corresponding constants in plot_batch_size_quality_vs_cost.py)."
+        f"to assistant_axis/judge_pricing.py:_MODEL_RATES -- this is the "
+        f"one module to update (results_analysis/plot_batch_size_quality_vs_cost.py "
+        f"has its own copy deliberately pinned to the historical rates its "
+        f"archived chart data was actually billed at; see that file's comment)."
     )
 
 

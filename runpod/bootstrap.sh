@@ -7,12 +7,22 @@
 #   export OPENAI_API_KEY=sk-...
 #   bash runpod/bootstrap.sh
 #
+#   # Override the branch (default: personas-konstantinos):
+#   BRANCH=some-other-branch bash runpod/bootstrap.sh
+#
+#   # If GH_PUSH_TOKEN is set (a GitHub fine-grained PAT scoped to just this
+#   # repo, Contents: read/write -- NOT your personal SSH key, see
+#   # runpod/README.md "Pushing results from the pod"), the git remote is
+#   # configured for the pod to push results back itself:
+#   export GH_PUSH_TOKEN=github_pat_...
+#   bash runpod/bootstrap.sh
+#
 # Or pass it as the pod's startup command (see runpod/launch_pod.py).
 
 set -euo pipefail
 
 REPO_URL="https://github.com/KKrampis/assistant-axis-roger.git"
-BRANCH="anthropic-vllm-uv"
+BRANCH="${BRANCH:-personas-konstantinos}"
 REPO_DIR="/workspace/assistant-axis-roger"
 
 # --- Persist caches on the network volume, not container disk -------------
@@ -49,6 +59,23 @@ fi
 
 cd "$REPO_DIR"
 
+# --- Configure push access, if a scoped token was provided ------------------
+# GH_PUSH_TOKEN is a GitHub fine-grained PAT scoped to ONLY this repo
+# (Contents: read/write) -- deliberately not the personal SSH key from your
+# local machine, which would grant this pod push access to every repo you
+# own. Without GH_PUSH_TOKEN set, the remote stays as the default read-only
+# HTTPS clone URL and runpod/push_results.sh will fail with a clear auth
+# error rather than silently doing nothing.
+if [ -n "${GH_PUSH_TOKEN:-}" ]; then
+    git remote set-url origin "https://x-access-token:${GH_PUSH_TOKEN}@github.com/KKrampis/assistant-axis-roger.git"
+    git config user.name "Claude (RunPod)"
+    git config user.email "noreply@anthropic.com"
+    echo "Configured token-based push access for origin."
+else
+    echo "GH_PUSH_TOKEN not set -- this pod can pull but not push. See"
+    echo "runpod/README.md \"Pushing results from the pod\" if you want it to."
+fi
+
 # --- Install dependencies ---------------------------------------------------
 # pyproject.toml marks vllm as `sys_platform == 'linux'`-only, so this
 # correctly pulls vLLM here (it would be skipped on macOS).
@@ -68,9 +95,13 @@ echo "Repo:   $REPO_DIR (branch $BRANCH)"
 echo "HF_HOME:       $HF_HOME"
 echo "UV_CACHE_DIR:  $UV_CACHE_DIR"
 echo ""
-echo "Next, from $REPO_DIR/pipeline:"
-echo "  ./run_pipeline.sh --mode christina --reduce_questions 3 \\"
+echo "Next, from $REPO_DIR:"
+echo "  bash runpod/run_and_shutdown.sh --mode christina --reduce_questions 3 \\"
 echo "      --model Qwen/Qwen3-32B \\"
 echo "      --tensor_parallel_size 1 \\"
 echo "      --roles_dir ../data/traits/instructions/_moral_circle \\"
 echo "      --output_dir /workspace/outputs/qwen-3-32b/moral-circle"
+echo ""
+echo "(run_and_shutdown.sh wraps pipeline/run_pipeline.sh and stops this pod"
+echo " automatically once it finishes -- see runpod/README.md for details,"
+echo " or call pipeline/run_pipeline.sh directly if you don't want that.)"

@@ -2636,6 +2636,110 @@ Judge model defaults: `claude-sonnet-4-20250514` with `--provider anthropic`
 `<output_dir>/scores_*.json` and resume on rerun; pass `--no_cache` to
 rescore from scratch.
 
+### Judge model pricing (updated 2026-09)
+
+Single source of truth: `assistant_axis/judge_pricing.py:_MODEL_RATES`
+(`price_for_model()`). Table below is a snapshot — read the module
+docstring for sourcing/confidence notes before trusting it for a real
+budget-tracked run.
+
+| Tier | Model | $/1M in | $/1M out | Confidence |
+|---|---|---:|---:|---|
+| OpenAI (legacy) | `gpt-4.1-mini` | $0.40 | $1.60 | High — original project measurement |
+| Anthropic (legacy) | `claude-sonnet-4` / `-4-6` | $3.00 | $15.00 | High — original project measurement |
+| Anthropic small | `claude-haiku-4-5` | $1.00 | $5.00 | High — unchanged since May 2026 |
+| Anthropic mid | `claude-sonnet-5` | $2.00 | $10.00 | High — verified live (`claude-api` skill), price *cut* vs sonnet-4 |
+| Anthropic flagship | `claude-opus-5` | $5.00 | $25.00 | High — verified live; supersedes an unverified $15/$75 May-2026 placeholder that was never used |
+| OpenAI small | `gpt-5.6-luna` | $0.20 | $1.20 | Medium — cross-confirmed web search hitting `developers.openai.com`, not a direct fetch |
+| OpenAI mid | `gpt-5.6-terra` | $2.00 | $12.00 | Medium — same |
+| OpenAI flagship | `gpt-5.6-sol` | $5.00 | $30.00 | Medium — same; **promotional pricing through 2026-11-21** |
+
+`results_analysis/plot_batch_size_quality_vs_cost.py` has its own separate,
+deliberately-un-synced copy of the legacy rates (it regenerates a chart
+from cached usage data that was actually billed at those historical
+prices) — don't update it when refreshing current prices; see its own
+comment.
+
+### Evaluating a new judge tier without recomputing activations
+
+`judge_tier_cost_eval.py` scores a *new* judge model against an
+**already-computed** axis, reusing a cached `projections.json` instead of
+recomputing projections from raw activation vectors (which
+`axis_judge_correlation.py` itself always does — `--data_dir` is
+required there). Only two axes in this repo have that full reusable
+cache committed:
+`roger/axis_judge_experiments/{angel_vs_demon,decisive_vs_indecisive}/{gpt,sonnet}/projections.json`
+(571 entities × 8 slots × {raw, whitened} each) — every other axis in the
+35-axis GPT-vs-Sonnet comparison only has its aggregate summary committed
+(`gpt_vs_sonnet_rhos_di.json`), not the per-axis data this script needs.
+
+```bash
+# Preview cost, zero API calls:
+uv run python results_analysis/judge_tier_cost_eval.py \
+    --pair angel demon --pair_type roles \
+    --projections_file roger/axis_judge_experiments/angel_vs_demon/gpt/projections.json \
+    --judge_model claude-opus-5 --judge_model claude-sonnet-5 --judge_model claude-haiku-4-5 \
+    --judge_model gpt-5.6-sol --judge_model gpt-5.6-terra --judge_model gpt-5.6-luna \
+    --output_dir roger/axis_judge_experiments/angel_vs_demon_tier_eval \
+    --dry_run
+
+# Second reusable axis (traits, not roles):
+uv run python results_analysis/judge_tier_cost_eval.py \
+    --pair decisive indecisive --pair_type traits \
+    --projections_file roger/axis_judge_experiments/decisive_vs_indecisive/gpt/projections.json \
+    --judge_model claude-opus-5 --judge_model claude-sonnet-5 --judge_model claude-haiku-4-5 \
+    --judge_model gpt-5.6-sol --judge_model gpt-5.6-terra --judge_model gpt-5.6-luna \
+    --output_dir roger/axis_judge_experiments/decisive_vs_indecisive_tier_eval \
+    --dry_run
+
+# Drop --dry_run to actually run either (description-mode only, cheap:
+# all 6 tiers x both axes ≈ $15.76 total at current rates -- see the
+# pricing table above for the per-tier/per-axis breakdown).
+```
+
+Writes `scores_descriptions.json`, `usage.json` (real measured cost, not
+estimated), and `correlations.json` per judge model, in the same shape
+`axis_judge_correlation.py` itself writes.
+
+**Scope of what actually gets touched, running either command above:**
+
+- **What's scored**: not the pole pair itself (`angel`/`demon`, excluded by
+  design) — the other 571 entities in the corpus (every other committed
+  role/trait), each scored for where it falls on that axis's spectrum.
+- **Network**: only `api.anthropic.com` / `api.openai.com` (the judge
+  calls themselves). No GPU, no RunPod, no other service contacted.
+- **Filesystem**: only writes new files under the new `--output_dir`
+  (`roger/axis_judge_experiments/{pair}_tier_eval/<model>/`). Never
+  touches the existing committed `gpt/`/`sonnet/` subdirectories or their
+  cached scores/projections/correlations.
+- **Git**: nothing is committed or pushed automatically.
+
+### Plotting the cost/quality comparison
+
+`judge_tier_cost_plot.py` reads `judge_tier_cost_eval.py`'s output (the 6
+new tiers) plus the existing `{pair}/{gpt,sonnet}/correlations.json` (the
+2 legacy tiers — `descriptions`-mode rho there is directly comparable,
+same 571 entities, same measurement) and plots them together in the same
+visual language as `batch_size_cost_vs_quality.png`: quality = 1/(1-rho)
+on the y-axis, $/axis on the x-axis, one annotated point per tier.
+
+The 2 legacy tiers have no `usage.json` (that feature postdates their
+archived runs), so their cost is *estimated* from the same token/pricing
+model rather than measured — the chart marks this with marker style
+(filled = measured, hollow = estimated) rather than presenting all 8
+points as equally certain.
+
+```bash
+# Offline, no API calls -- only reads existing JSON. Run after
+# judge_tier_cost_eval.py has actually produced output.
+uv run python results_analysis/judge_tier_cost_plot.py \
+    --pair angel demon \
+    --tier_eval_dir roger/axis_judge_experiments/angel_vs_demon_tier_eval \
+    --legacy_dir roger/axis_judge_experiments/angel_vs_demon \
+    --slot 6 \
+    --output roger/axis_judge_experiments/angel_vs_demon_tier_eval/cost_vs_quality.png
+```
+
 ## Output layout
 
 ```

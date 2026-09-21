@@ -220,6 +220,14 @@ point to.)
 
 ## Judging the same responses with a different model
 
+> **Already have a computed axis and just want to try a new judge tier?**
+> If it's `angel_vs_demon` or `decisive_vs_indecisive`, you don't need any
+> of this — `results_analysis/judge_tier_cost_eval.py` reuses the already-
+> committed `projections.json` for those two axes directly, no GPU/pipeline
+> run needed at all. See
+> [`results_analysis/README.md`](../results_analysis/README.md#evaluating-a-new-judge-tier-without-recomputing-activations).
+> Everything below is for entities that aren't one of those two.
+
 This is the actual point of scoping a run to a couple of entities first —
 generation (steps 1–2) is the expensive, GPU-bound part; judging (step 3)
 is comparatively cheap. Once you have `responses/` and `activations/` for

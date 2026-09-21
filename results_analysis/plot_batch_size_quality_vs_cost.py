@@ -155,10 +155,17 @@ HAIKU_OUTPUT_SCALE = 2.17
 SONNET_INPUT_SCALE = HAIKU_INPUT_SCALE   # same Anthropic tokenizer
 SONNET_OUTPUT_SCALE = HAIKU_OUTPUT_SCALE  # CAVEAT: untested for Sonnet
 
-# Pricing (per 1M tokens), 2026 rates.
+# Pricing (per 1M tokens), pinned to what the archived batch-size-curve
+# experiment (roger/axis_judge_experiments/batch_size_curve_8slot/) actually
+# used: gpt-4.1-mini and claude-sonnet-4 (not the current claude-sonnet-5,
+# which is priced differently -- $2.00/$10.00 as of 2026-09 -- see
+# assistant_axis/judge_pricing.py for current, multi-tier, versioned rates).
+# Deliberately NOT updated to current rates: doing so would silently
+# misprice a regeneration of this specific chart from its existing cached
+# usage data, which was billed at these historical rates.
 GPT_MINI_RATE_IN, GPT_MINI_RATE_OUT = 0.40, 1.60
 HAIKU_RATE_IN, HAIKU_RATE_OUT = 1.00, 5.00
-SONNET_RATE_IN, SONNET_RATE_OUT = 3.00, 15.00
+SONNET_RATE_IN, SONNET_RATE_OUT = 3.00, 15.00  # claude-sonnet-4, not sonnet-5
 
 
 def _judge_cost_per_axis(rate_in: float, rate_out: float,
