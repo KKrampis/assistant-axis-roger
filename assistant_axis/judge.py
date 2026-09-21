@@ -488,6 +488,61 @@ async def call_judge_batch(
     return results
 
 
+async def call_judge_batch_unified(
+    prompts: List[str],
+    model: str,
+    max_tokens: int,
+    rate_limiter: RateLimiter,
+    batch_size: int = 50,
+    openai_client: Optional["openai.AsyncOpenAI"] = None,
+    anthropic_client: Optional["anthropic.AsyncAnthropic"] = None,
+    temperature: float = 1.0,
+    usage: Optional["MultiModelUsage"] = None,
+) -> List[Optional[str]]:
+    """Provider-agnostic equivalent of :func:`call_judge_batch`.
+
+    Same batching/gather shape as :func:`call_judge_batch`, but dispatches
+    each call through :func:`call_judge_single_unified` so ``model`` can be
+    an OpenAI or an Anthropic model name -- pass whichever client(s) the
+    models you intend to use actually need (unused clients can stay None).
+
+    Use this instead of :func:`call_judge_batch` at any call site that
+    should support judging with a Claude model, not just OpenAI models.
+    """
+    results = []
+
+    for i in range(0, len(prompts), batch_size):
+        batch = prompts[i:i + batch_size]
+
+        tasks = [
+            call_judge_single_unified(
+                prompt=prompt,
+                model=model,
+                max_tokens=max_tokens,
+                rate_limiter=rate_limiter,
+                openai_client=openai_client,
+                anthropic_client=anthropic_client,
+                temperature=temperature,
+                usage=usage,
+            )
+            for prompt in batch
+        ]
+
+        batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        processed = []
+        for result in batch_results:
+            if isinstance(result, Exception):
+                logger.error(f"Exception in batch: {result}")
+                processed.append(None)
+            else:
+                processed.append(result)
+
+        results.extend(processed)
+
+    return results
+
+
 async def score_responses(
     responses: List[Dict[str, str]],
     eval_prompt_template: str,

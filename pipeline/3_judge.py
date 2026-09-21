@@ -42,7 +42,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # take minutes-to-hours, so this shortcut is meaningful for startup time.
 #
 # The standard form would be:
-#     from assistant_axis.judge import RateLimiter, call_judge_batch, parse_judge_score
+#     from assistant_axis.judge import RateLimiter, call_judge_batch_unified, parse_judge_score
 # which works fine functionally but drags torch in via the package __init__.
 #
 # This is the only script in the repo using this pattern; it is not a
@@ -56,11 +56,13 @@ _judge_spec = _importlib_util.spec_from_file_location(
 _judge_mod = _importlib_util.module_from_spec(_judge_spec)
 _judge_spec.loader.exec_module(_judge_mod)
 RateLimiter = _judge_mod.RateLimiter
-call_judge_batch = _judge_mod.call_judge_batch
+call_judge_batch_unified = _judge_mod.call_judge_batch_unified
 parse_judge_score = _judge_mod.parse_judge_score
 warn_if_low_parse_rate = _judge_mod.warn_if_low_parse_rate
+provider_for_model = _judge_mod.provider_for_model
 
 import openai
+import anthropic
 
 load_dotenv()
 
@@ -69,6 +71,9 @@ logger = logging.getLogger(__name__)
 
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("openai").setLevel(logging.WARNING)
+logging.getLogger("anthropic").setLevel(logging.WARNING)
+
+_API_KEY_ENV_VAR = {"openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}
 
 
 # ---------------------------------------------------------------------------
@@ -312,12 +317,13 @@ async def score_entity(
     name: str,
     responses: List[dict],
     eval_prompt_template: str,
-    client: openai.AsyncOpenAI,
     rate_limiter: RateLimiter,
     judge_model: str,
     max_tokens: int,
     batch_size: int,
     existing_scores: Dict[str, int],
+    openai_client: Optional[openai.AsyncOpenAI] = None,
+    anthropic_client: Optional[anthropic.AsyncAnthropic] = None,
 ) -> Tuple[dict, int, int]:
     """Score responses for a single entity.
 
@@ -362,13 +368,14 @@ async def score_entity(
         return {}, 0, 0
 
     logger.info(f"Scoring {len(prompts)} new responses for {name}...")
-    responses_text = await call_judge_batch(
-        client=client,
+    responses_text = await call_judge_batch_unified(
         prompts=prompts,
         model=judge_model,
         max_tokens=max_tokens,
         rate_limiter=rate_limiter,
         batch_size=batch_size,
+        openai_client=openai_client,
+        anthropic_client=anthropic_client,
     )
 
     scores: Dict[str, int] = {}
@@ -403,7 +410,10 @@ async def main_async():
     parser.add_argument("--output_dir", type=str, required=True,
                         help="Output directory for score JSON files")
     parser.add_argument("--judge_model", type=str, default="gpt-4.1-mini",
-                        help="Judge model to use")
+                        help="Judge model to use. Any OpenAI model (gpt-/o1-/o3-/o4- "
+                             "prefix) or Anthropic model (claude- prefix); routed "
+                             "automatically by assistant_axis.judge.provider_for_model. "
+                             "Requires OPENAI_API_KEY or ANTHROPIC_API_KEY respectively.")
     parser.add_argument("--max_tokens", type=int, default=200,
                         help="Max tokens for judge response (must fit "
                              "2-3 sentences of reasoning + the SCORE: line; "
@@ -435,8 +445,15 @@ async def main_async():
                              "romantic, stoic). Use 'combination' for r_<role>_t_<trait> files.")
     args = parser.parse_args()
 
-    if not args.dry_run and not os.getenv("OPENAI_API_KEY"):
-        logger.error("OPENAI_API_KEY not found")
+    try:
+        provider = provider_for_model(args.judge_model)
+    except ValueError as e:
+        logger.error(str(e))
+        sys.exit(1)
+
+    required_env_var = _API_KEY_ENV_VAR[provider]
+    if not args.dry_run and not os.getenv(required_env_var):
+        logger.error(f"{required_env_var} not found (required for judge_model={args.judge_model!r})")
         sys.exit(1)
 
     output_dir = Path(args.output_dir)
@@ -544,7 +561,10 @@ async def main_async():
     # ------------------------------------------------------------------
     # Live scoring
     # ------------------------------------------------------------------
-    client = openai.AsyncOpenAI()
+    # Only the client for the selected provider is constructed -- the other
+    # stays None and is simply unused by call_judge_batch_unified.
+    openai_client = openai.AsyncOpenAI() if provider == "openai" else None
+    anthropic_client = anthropic.AsyncAnthropic() if provider == "anthropic" else None
     rate_limiter = RateLimiter(args.requests_per_second)
 
     successful = skipped = failed = 0
@@ -600,7 +620,8 @@ async def main_async():
                 name=name,
                 responses=responses,
                 eval_prompt_template=eval_tpl,
-                client=client,
+                openai_client=openai_client,
+                anthropic_client=anthropic_client,
                 rate_limiter=rate_limiter,
                 judge_model=args.judge_model,
                 max_tokens=args.max_tokens,

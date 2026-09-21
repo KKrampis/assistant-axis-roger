@@ -24,7 +24,7 @@ Default 30x30 produces 900 r_ + 900 t_ + ~245 traits + 1 default = ~2046 entitie
 
 Generates standalone roles (or traits) from `--roles_dir`. Run the pipeline separately for roles and traits using different `--roles_dir` and `--output_dir` to avoid filename collisions.
 
-`run_pipeline.sh`'s christina mode processes every `.json` file it finds in `--roles_dir` — there's no per-run entity filter. To scope a run to a subset (e.g. just a handful of traits out of 300+), point `--roles_dir` at a small directory of symlinks instead of the full instructions dir; see [`data/traits/instructions/_moral_circle/`](../data/traits/instructions/_moral_circle/README.md) for a worked example, including why it also needs its own `default.json` symlink.
+Neither mode has a built-in "just run these N entities" flag at the `run_pipeline.sh` level. See [`SUBSET_RUNS.md`](SUBSET_RUNS.md) for the two ways to scope a run to a specific subset of roles/traits — passing `--roles` to each script directly, or pointing `--roles_dir` at a small directory of symlinks (worked example: [`data/traits/instructions/_moral_circle/`](../data/traits/instructions/_moral_circle/README.md)).
 
 `--reduce_questions` is now forwarded to steps 1 and 4 in christina mode (previously silently ignored there, so christina runs always used the un-reduced defaults regardless of the script's `$REDUCE_QUESTIONS` setting).
 
