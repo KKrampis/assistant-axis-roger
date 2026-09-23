@@ -143,6 +143,9 @@ async def main_async() -> None:
     parser.add_argument("--output_dir", type=str, required=True)
     parser.add_argument("--dry_run", action="store_true",
                          help="Print entity count + estimated cost per judge model; make zero API calls.")
+    parser.add_argument("--limit", type=int, default=None,
+                         help="Only score the first N entities (alphabetical). For validating a new "
+                              "judge model cheaply before committing to the full corpus.")
     args = parser.parse_args()
 
     proj_path = Path(args.projections_file)
@@ -155,6 +158,10 @@ async def main_async() -> None:
         projections = {s: v for s, v in projections.items() if s in wanted}
     any_slot = next(iter(projections.values()))
     entity_names = sorted(any_slot.keys())
+    if args.limit is not None:
+        entity_names = entity_names[:args.limit]
+        logger.warning(f"--limit {args.limit}: only scoring {len(entity_names)} entities "
+                        f"(correlations below are NOT meaningful at this n, validation only)")
     logger.info(f"Loaded projections for {len(entity_names)} entities across {len(projections)} slots "
                 f"from {proj_path}")
 
@@ -213,7 +220,15 @@ async def main_async() -> None:
         anthropic_client = None
         if provider == "openai":
             import openai
-            openai_client = openai.AsyncOpenAI()
+            # Diagnosed 2026-09-23: a mismatched httpx2/Brotli version pairing
+            # in the (ad-hoc, not uv.lock-pinned) environment this was first
+            # run in raised "TypeError: process() takes no keyword arguments"
+            # deep in response decompression for gpt-5.6-* (larger/brotli-
+            # encoded responses than the older gpt-4.1-mini ever triggered).
+            # Disabling response compression sidesteps it regardless of root
+            # cause; harmless here since judge payloads are a short prompt +
+            # a few hundred tokens, not documents worth compressing.
+            openai_client = openai.AsyncOpenAI(default_headers={"Accept-Encoding": "identity"})
         else:
             import anthropic
             anthropic_client = anthropic.AsyncAnthropic()

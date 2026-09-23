@@ -644,6 +644,37 @@ def score_responses_sync(
 # prompt-instruction approach is simpler and works across both providers
 # uniformly).
 
+# Models where adaptive thinking runs BY DEFAULT (thinking param omitted
+# still thinks) and which accept output_config.effort to bound it.
+# Diagnosed 2026-09-23: Opus 5 (and Sonnet 5) put a ThinkingBlock first in
+# response.content by default -- code that blindly reads content[0].text
+# raises AttributeError on every call, which the broad except swallows as
+# a silent parse failure while the call still gets billed (thinking tokens
+# included). Passing effort="low" bounds the thinking-token spend for a
+# short rating task like judging; models NOT in this set (Haiku 4.5,
+# older Sonnet/Opus) reject the effort param outright, so it must stay
+# gated to only the models known to accept it.
+_ANTHROPIC_EFFORT_CAPABLE = ("opus-5", "sonnet-5", "fable-5", "mythos-5",
+                             "opus-4-6", "opus-4-7", "opus-4-8", "sonnet-4-6")
+
+
+def _anthropic_supports_effort(model: str) -> bool:
+    m = model.lower()
+    return any(frag in m for frag in _ANTHROPIC_EFFORT_CAPABLE)
+
+
+def _extract_text_block(content) -> Optional[str]:
+    """Find the actual text block in an Anthropic response's content list.
+
+    NOT content[0] -- models with thinking on by default (Opus 5, Sonnet 5,
+    ...) put a ThinkingBlock (or more than one) before the TextBlock.
+    """
+    for block in content or []:
+        if getattr(block, "type", None) == "text" and getattr(block, "text", None):
+            return block.text
+    return None
+
+
 async def call_anthropic_judge_single(
     client: "anthropic.AsyncAnthropic",
     prompt: str,
@@ -665,19 +696,26 @@ async def call_anthropic_judge_single(
     """
     await rate_limiter.acquire()
 
+    kwargs = dict(
+        model=model,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    if _anthropic_supports_effort(model):
+        kwargs["output_config"] = {"effort": "low"}
+
     try:
-        response = await client.messages.create(
-            model=model,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            messages=[{"role": "user", "content": prompt}],
-        )
+        response = await client.messages.create(**kwargs)
         if usage is not None:
             from .judge_pricing import extract_usage_anthropic
             pt, ct = extract_usage_anthropic(response)
             usage.charge(model, pt, ct)
-        if response.content and response.content[0].text:
-            return response.content[0].text
+        text = _extract_text_block(response.content)
+        if text:
+            return text
+        logger.error(f"No text block in response content for model {model} "
+                     f"(block types: {[getattr(b, 'type', '?') for b in (response.content or [])]})")
         return None
     except Exception as e:  # noqa: BLE001 - we deliberately catch everything
         logger.error(f"Error calling Anthropic judge model {model}: {e}")
