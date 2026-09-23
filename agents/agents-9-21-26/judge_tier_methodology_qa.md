@@ -184,10 +184,151 @@ from an earlier summary — including this one, if it's read back later.
   reads the above's output plus legacy `correlations.json`, plots
   cost-vs-quality in the house style of `batch_size_cost_vs_quality.png`.
 
-## 10. Status as of this writing
+## 10. Status as of this writing (updated)
 
 `ANTHROPIC_API_KEY`/`OPENAI_API_KEY` are configured (via `~/.config/assistant-axis/.env`,
 symlinked into the repo root, following the same outside-the-repo-tree
 convention already established in `.gitignore` for the Google Sheets OAuth
 credentials). Nothing has been executed yet — the ~$15.76 scoring run is
 still pending.
+
+## 11. The −3..+3 rubric was applied to 35 axes, not just angel/demon
+
+Angel/demon isn't methodologically special — it's one of **35 pole pairs**
+Roger ran this same procedure on, pulled directly from
+`gpt_vs_sonnet_rhos_di.json`:
+
+```
+helpful/unhelpful          harmless/harmful           honest/dishonest
+truthful/deceitful         guileless/scheming         egalitarian/elitist
+progressive/conservative   concise/verbose            ecocentric/anthropocentric
+improvisational/methodical relativist/absolutist      systems_thinker/analytical
+accessible/esoteric        benign/malicious           casual/formal
+compassionate/callous      confident/uncertain        constructive/destructive
+convergent/divergent       cooperative/competitive    ethereal/grounded
+forgiving/unforgiving      generous/stingy            idealistic/pragmatic
+individualistic/collectivistic  introverted/extroverted   obedient/rebellious
+passionate/dispassionate   playful/serious            practical/theoretical
+quantitative/qualitative   reductionist/holistic      trustworthy/untrustworthy
+decisive/indecisive        angel/demon
+```
+
+Every axis gets its own instance of the same shared rubric template
+(`_RUBRIC_HEADER` / `RUBRIC_STATIC`, `axis_judge_correlation.py:144–195`) —
+only the pole descriptions (and a few example names) change per axis. It's
+the same mechanism run 35 independent times, not 35 different mechanisms.
+
+Angel/demon and decisive/indecisive are special only in **data survival**:
+they're the 2 of 35 whose full per-entity projection data is still
+committed (see §5) — the underlying projection data for the other 33 was
+necessarily computed too (you can't get a ρ number without it), but never
+saved to git; only the resulting summary numbers survived.
+
+### 35 vs. 571/562 — two orthogonal numbers, reconciled
+
+**35** = how many axes were tested. **571** (or **562**) = how many
+entities get scored *per axis*, drawn from the same ~573-entity master
+corpus (278 roles + 293 traits) each time, minus that axis's own 2 poles.
+
+Verified directly: `angel_vs_demon`'s committed data has exactly 571
+entities, and includes all 9 of the known role/trait collision names
+(`ascetic`, `contrarian`, `cosmopolitan`, `generalist`, `pacifist`,
+`patient`, `perfectionist`, `romantic`, `stoic` — the names
+`AGENT_NOTES.md` flags as impossible to type-resolve from filename alone).
+The aggregate 35-axis `gpt_vs_sonnet_scatter` comparison shows `n=562` per
+axis instead — `571 − 9 = 562`, confirming that analysis excludes those 9
+collision names to sidestep the ambiguity. Sanity check: `562 × 35 =
+19,670`, exactly the pooled `n` reported in `gpt_vs_sonnet_scatter_pooled_di.png`.
+So it's not "35 becomes 571" — it's roughly 571 (or 562) entities scored,
+once per axis, 35 times over.
+
+## 12. Whole-range rubric examples (real data, `angel_vs_demon`, GPT judge)
+
+| Score | Meaning | Example entities |
+|---|---|---|
+| −3 | strongly demon-like | `cruel`, `evil`, `malicious` |
+| −2 | clearly demon-like | `gluttonous`, `parasite`, `opaque` |
+| −1 | leans demon-like | `devils_advocate`, `pirate`, `trickster` |
+| 0 | neutral / off-axis (311/571 entities — 54.5%) | `veteran`, `blogger`, `zeitgeist` |
+| +1 | leans angel-like | `advocate`, `resilient`, `holistic` |
+| +2 | clearly angel-like | `guardian`, `empathetic`, `tactful` |
+| +3 | strongly angel-like | `altruistic`, `compassionate`, `nurturing` |
+
+Reasoning traceable to the source text: `parasite` (−2) — *"survives by
+living on or in a host... often without providing benefit in return"* —
+exploitative but not maximally cruel, hence −2 not −3. `guardian` (+2) —
+*"takes on the responsibility of protecting others from harm... acting as
+a shield... for those who are vulnerable"* — protective but not framed in
+explicitly spiritual/altruistic language the way `compassionate` is,
+hence +2 not +3. `veteran` (0) — *"military experience, perspective,
+discipline..."* — genuinely unrelated to the angel/demon dimension,
+correctly lands in the huge neutral bucket (see §4's tie-handling
+discussion for what that bucket does to the correlation).
+
+## 13. Three scoring modes exist; only the cheapest has been used so far
+
+`axis_judge_correlation.py` supports:
+
+- **`descriptions`** and **`instructions`** — score the entity's *static
+  text* (the JSON's `description` field, or its `pos` instruction text).
+  Never touches anything the model generated. This is everything discussed
+  and built so far, including `judge_tier_cost_eval.py`.
+- **`responses`** — scores the model's *actual generated completions*
+  (real answers it gave while role-playing that entity), via
+  `RUBRIC_RESPONSE_BATCH`, a close cousin of the same rubric family and
+  scale. Far more expensive — per the cost model in §7, ~$40–50/axis vs.
+  ~$1–3/axis for description-mode, since it reads hundreds of real
+  multi-paragraph completions per entity instead of one short paragraph.
+  **Not used anywhere in this session's work.**
+
+## 14. Is "only 2 of 35 axes" a pipeline limitation, or a data limitation?
+
+**Data, not pipeline.** `axis_judge_correlation.py` itself has no
+restriction to these two — point it at any pair and it computes a fresh
+axis and fresh projections, provided `--data_dir` has raw activation
+vectors. Those vectors only ever existed on Roger's local machine and were
+never committed (§5), so the pipeline *can* target any of the other 33, or
+an entirely new pair — it just currently has nothing to compute from
+without redoing GPU work. `judge_tier_cost_eval.py` (this session's tool)
+is the one genuinely hard-restricted to these 2, because it was built
+specifically to exploit the one thing that did survive: the cached
+projections, which only exist for these two.
+
+## 15. What the pending $15.76 run would actually add over Roger's existing plots
+
+It only ever touches `angel_vs_demon` and `decisive_vs_indecisive` — no
+broader axis coverage. What's genuinely new:
+
+- **Untested judge tiers**: Roger's existing plots only ever compare
+  `gpt-4.1-mini` against `sonnet-4` and `haiku-4.5`. Opus has never been
+  tested as a judge in this repo, at any generation; no OpenAI model
+  beyond `gpt-4.1-mini` has been tested either.
+- **Current pricing**: Roger's cost figures are frozen at May-2026 rates.
+  Sonnet got cheaper since ($2/$10 now vs. $3/$15 then) — re-asking his
+  cost-efficiency question today can get a different answer than it did
+  then, independent of anything about judge quality.
+
+What it explicitly does **not** do: extend axis coverage beyond these 2;
+touch response-mode judging (§13); or improve/re-run Roger's
+judge-*agreement* work (`gpt_vs_sonnet_scatter.py`'s 35-axis comparison) —
+it only extends the judge-*validity*-against-projection check to new
+tiers, on 2 axes. Honest framing: a cheap, narrow pilot to see whether a
+wider tier ladder changes the cost-efficiency conclusion, not a broader or
+more complete version of Roger's study. A positive finding here (a cheap
+tier matching Opus, or Opus meaningfully winning) would be the actual
+argument for spending more to extend to the other 33 axes.
+
+## 16. Cost-inclusive plotting already exists, twice over
+
+- **Precedent, already in the repo**: `results_analysis/plot_batch_size_quality_vs_cost.py`
+  → `batch_size_cost_vs_quality.png` — $/axis on x, quality (`1/(1−ρ)`) on
+  y, one point per batch-size/ensemble-combo. Established house style for
+  putting cost and correlation quality on the same chart in this repo.
+- **Built this session**: `results_analysis/judge_tier_cost_plot.py` — the
+  direct equivalent for judge tiers instead of batch sizes. Same axes,
+  same transform, one point per tier; filled markers for measured cost
+  (the 6 new tiers, from real `usage.json`), hollow for estimated (the 2
+  legacy tiers, which predate cost tracking).
+
+Nothing further needs building here — the tooling is complete and waiting
+on the actual scoring run (§10) to have real data to plot.
