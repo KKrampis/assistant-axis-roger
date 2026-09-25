@@ -10,6 +10,19 @@
           }
         ]
       }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Read|Edit|Write|NotebookEdit|Glob|Grep",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/boundary_check.py\"",
+            "timeout": 10,
+            "statusMessage": "Checking the file-access boundary"
+          }
+        ]
+      }
     ]
   }
 }

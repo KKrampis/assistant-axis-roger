@@ -59,7 +59,10 @@ older context, or differs from the documented current default.
 ## File Access Boundary (HARD RULE)
 
 **You may read, write, search, or otherwise touch files only within
-`/Users/roger/Documents/GitHub/`.**  There should never be a need to
+`/Users/roger/Documents/GitHub/assistant-axis/`.**  (Corrected 2026-09-23:
+earlier copies of this rule said `GitHub/`; the boundary is this
+repository alone, and the sibling repositories under `GitHub/` are other
+projects and off-limits.)  There should never be a need to
 go outside this tree for any task in this project.  If you believe
 you need to, **stop and ask Roger first** with a specific request
 naming the exact path(s) you want access to and why; proceed only
@@ -69,8 +72,9 @@ This applies to all forms of access: `Read`, `Write`, `Edit`, `StrReplace`,
 `Grep`, `Glob`, `find`, `cat`, `ls`, `rg`, shell redirection, and any
 remote tools (mirroring or fetching files from this Mac to other
 machines counts as access from this side).  Read-only access is
-NOT exempt — `/Users/roger/Documents/` outside `GitHub/` and
-everything in `/Users/roger/` (other than `GitHub/`) is off-limits
+NOT exempt — `/Users/roger/Documents/` outside this repository (including
+the other repositories under `GitHub/`) and everything in `/Users/roger/`
+(other than this repository) is off-limits
 without explicit per-task permission.
 
 Remote machines (e.g. RunPod) are a separate scope; this rule
@@ -82,7 +86,7 @@ populates, and are expected reads — those are exempt by design (and
 are written by Cursor, not by you).
 
 Claude Code's equivalents are exempt on the same basis, and are the
-only other locations outside `GitHub/` an agent should ever touch:
+only other locations outside this repository an agent should ever touch:
 
 - `~/.claude/` — Claude Code's own state: per-project auto-memory
   under `~/.claude/projects/<project>/memory/`, plan-mode documents
@@ -90,13 +94,48 @@ only other locations outside `GitHub/` an agent should ever touch:
 - The per-session scratchpad Claude Code assigns under
   `/private/tmp/claude-<uid>/<project>/<session-id>/scratchpad/`.
 
-Everything else on this machine stays off-limits.  (Temp files made by
+Everything else on this machine stays off-limits.  **That includes
+"just checking what is installed"**: `~/.cache` (Hugging Face, pip, uv,
+torch caches), `~/.ssh`, `~/Library`, other projects under `~/Documents`,
+and any listing, `stat`, `du` or glob of them.  On 2026-09-18 five
+planning subagents listed `~/.cache/huggingface/hub`, `~/nltk_data` or
+`~/.ollama` to see whether a model was already downloaded, against this
+rule and against their brief (only three reported it);
+Roger treats that as a privacy breach, not a technicality: this laptop
+carries personal and other-project material, and a read-only listing is
+still a read.  The correct move when an agent wants to know whether a
+model or dataset is present outside the repo is to **say so and ask**
+("the plan needs X, about N GB; is it cached, or may I download it into
+`data/external/`?"), never to look.  Every subagent prompt that could
+touch the filesystem must restate this boundary in its own words; the
+project instructions alone did not stop it.  (Temp files made by
 the project's own tooling — `atomic_io` staging under `$TMPDIR`,
 pytest's `tmp_path` — are process behaviour, not agent file access.)
 
 ---
 
 ## Hotlink every file you mention to Roger (HARD RULE)
+**Enforced in Claude Code since 2026-09-24** by the PreToolUse hook
+[`.claude/hooks/boundary_check.py`](.claude/hooks/boundary_check.py),
+registered in [`.claude/settings.json`](.claude/settings.json) for
+`Bash|Read|Edit|Write|NotebookEdit|Glob|Grep`.  It returns
+`permissionDecision: "ask"` for any Bash command whose text names a
+home-directory path (`/Users/<user>/…`, `~/…`, `$HOME/…`) or climbs out of
+the working directory (`../`), and for any file-tool path, outside the
+allowlist above; Roger then sees the call and approves or declines.  It
+never allows or denies on its own, so the normal permission flow is
+unchanged for everything else.  Known false positive: the scan sees text,
+not shell syntax, so a Bash heredoc whose *body* mentions a home path (for
+example an edit to this section) also asks; the prompt's reason says when
+every match is inside a heredoc body, so such a prompt can be judged at a
+glance, but it stays an ask because a heredoc-fed script can open the path
+as easily as mention it.  Write such prose with the Write / Edit tools,
+which the hook checks by path only.  The hook is a backstop, not a licence: an agent that
+expects the prompt should still ask Roger in its reply rather than fire
+the call and let the prompt do the asking.  Cursor's agent is not covered
+(it does not run Claude Code hooks), so the written rule and the
+subagent-prompt restatement remain the primary protection there.
+
 
 **Every time you reference a file (plot, JSON, source, log, config,
 notebook, etc.) in a chat reply to Roger, format it as a markdown
