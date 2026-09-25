@@ -16,7 +16,7 @@ else prints nothing (the normal permission flow applies).
 Allowlist (all prefixes):
   - the repository itself
   - ~/.claude/            (Claude Code's own state: memory, plans, settings)
-  - /private/tmp/claude-* and /tmp/claude-*   (session scratchpads and task logs)
+  - /tmp and /private/tmp   (scratch generally, including the claude-* session scratchpads)
   - ~/.cursor/projects/*/terminals/ and */agent-tools/   (Cursor tool infrastructure)
 
 Known false positive: the Bash scan sees text, not shell syntax, so a heredoc
@@ -37,8 +37,8 @@ REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 ALLOWED_PREFIXES = (
     REPO,
     os.path.join(HOME, ".claude"),
-    "/private/tmp/claude-",
-    "/tmp/claude-",
+    "/tmp",  # Roger, 2026-09-25: /tmp generally, not only the claude-* scratchpads
+    "/private/tmp",
 )
 ALLOWED_PATTERNS = (
     re.compile(re.escape(os.path.join(HOME, ".cursor", "projects")) + r"/[^/]+/(terminals|agent-tools)(/|$)"),
