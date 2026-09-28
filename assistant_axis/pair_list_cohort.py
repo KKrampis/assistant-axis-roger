@@ -16,6 +16,13 @@ Starting May 2026, pair lists use *definition-stable* names:
 - ``pair_list_responses.json`` -- "axes with desc+instr + GPT-responses
   judging" (formerly ``pair_list_12.json``).
 
+Since 2026-09-28 a list that records judged work is copied to
+``pair_list_<cohort>_v1.json`` before it is edited for a changed corpus
+(a renamed pole, a pair that stopped being one), so the record and the
+list for new work are separate files with separate cohort tokens
+(``di`` and ``di_v1``).  See AGENT_NOTES "Current canonical local data
+dir".
+
 These names won't change as the cohorts grow.  Producer scripts pluck a
 ``cohort`` token from the pair-list filename and bake it into their
 auto-derived output filenames so that, e.g.,
