@@ -671,7 +671,7 @@ async def main_async():
                         default=str(data_dir / "combination_scores.json"),
                         help="Output JSON file (default: data/combination_scores.json)")
     parser.add_argument("--model", type=str,
-                        default="claude-sonnet-4-20250514",
+                        default="claude-sonnet-4-6",
                         help="Anthropic model")
     parser.add_argument("--batch_size", type=int, default=None,
                         help="Instruction pairs per API call (default: all)")

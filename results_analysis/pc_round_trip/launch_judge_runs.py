@@ -84,7 +84,7 @@ DEFAULT_PROVIDERS: list[str] = ["openai", "anthropic"]
 
 PROVIDER_MODEL = {
     "openai": "gpt-4.1-mini",
-    "anthropic": "claude-sonnet-4-20250514",
+    "anthropic": "claude-sonnet-4-6",
 }
 PROVIDER_SUBDIR = {
     "openai": "gpt",

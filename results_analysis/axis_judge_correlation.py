@@ -40,6 +40,7 @@ from assistant_axis.entity_id import (  # noqa: E402
     kind_long,
     normalize_to_file_name,
     parse_entity_id,
+    resolve_renamed_stem,
 )
 from assistant_axis.judge_pricing import (  # noqa: E402
     BudgetExceededError,
@@ -276,6 +277,26 @@ def _load_vector_file(path: Path) -> torch.Tensor:
     raise ValueError(f"{path}: unsupported payload type {type(d).__name__}")
 
 
+def _pole_instruction_path(instructions_root: Path, pair_type: str, name: str) -> Path:
+    """Instruction JSON holding the description of pole ``name``.
+
+    A pair list written before a rename (the ``pair_list_*_v1.json``
+    records) names the pole by its old stem, which still keys the
+    vectors and judge caches but no longer has a corpus file.  The
+    description is then read from the file whose ``renamed_from``
+    records that stem, with a warning, since that file's text is the
+    current one and may differ from what was judged under the old name.
+    """
+    current = resolve_renamed_stem(name, pair_type, data_dir=instructions_root)
+    if current != name:
+        logger.warning(
+            "pole %r (%s) has no instruction file; it was renamed %r, "
+            "reading the description from %s.json",
+            name, pair_type, current, current,
+        )
+    return Path(instructions_root) / pair_type / "instructions" / f"{current}.json"
+
+
 def resolve_axis(
     args: argparse.Namespace, n_slots: int, hidden_dim: int, layer: int
 ) -> AxisSpec:
@@ -299,16 +320,16 @@ def resolve_axis(
         neg_examples = args.neg_examples if args.neg_examples else [name2]
         pos_examples = args.pos_examples if args.pos_examples else [name1]
         # Pole descriptions: from instructions JSON descriptions, unless user overrode.
-        instructions_dir = Path(args.instructions_dir) / args.pair_type / "instructions"
+        instructions_root = Path(args.instructions_dir)
         if args.neg_pole:
             neg_pole = args.neg_pole
         else:
-            with open(instructions_dir / f"{name2}.json") as f:
+            with open(_pole_instruction_path(instructions_root, args.pair_type, name2)) as f:
                 neg_pole = json.load(f)["description"]
         if args.pos_pole:
             pos_pole = args.pos_pole
         else:
-            with open(instructions_dir / f"{name1}.json") as f:
+            with open(_pole_instruction_path(instructions_root, args.pair_type, name1)) as f:
                 pos_pole = json.load(f)["description"]
 
         # Direction per slot: v1 - v2 at the chosen layer.
@@ -1530,7 +1551,8 @@ async def call_judge(
 
 def _default_model_for_provider(provider: str) -> str:
     if provider == "anthropic":
-        return "claude-sonnet-4-20250514"
+        # Sonnet 4 retired Sep 2026; 4.6 keeps the same sampling semantics.
+        return "claude-sonnet-4-6"
     if provider == "openai":
         return "gpt-4.1-mini"
     raise SystemExit(f"Unknown provider: {provider}")
@@ -1728,6 +1750,111 @@ def _peek_per_entity_rubric_versions(path: Path) -> Dict[str, str]:
     if not isinstance(raw, dict):
         return {}
     return {str(k): str(v) for k, v in raw.items() if isinstance(v, str)}
+
+
+def _peek_judge_model(path: Path) -> Optional[str]:
+    """Extract the recorded ``judge_model`` from a judge cache's
+    provenance envelope (the ``producer_script`` InputSpec ``extras``
+    written by :func:`_build_axis_judge_inputs`), or ``None`` for a
+    missing / bare / pre-Phase-6 cache.
+    """
+    if not path.exists():
+        return None
+    try:
+        obj = json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+        return None
+    if not isinstance(obj, dict):
+        return None
+    prov = obj.get("_provenance")
+    if not isinstance(prov, dict):
+        return None
+    for inp in prov.get("inputs", []) or []:
+        if isinstance(inp, dict) and inp.get("dep_key") == "producer_script":
+            v = (inp.get("extras") or {}).get("judge_model")
+            if isinstance(v, str) and v:
+                return v
+    return None
+
+
+def _check_judge_model_on_resume(
+    cache_path: Path,
+    cache: Dict[str, Any],
+    *,
+    mode: str,
+    current_model: str,
+    strict: bool = False,
+    drop_unrecorded: bool = False,
+) -> Dict[str, Any]:
+    """Judge-model drift check on resume (Sep 2026).
+
+    Judge caches are keyed by judge *family* (``sonnet/``, ``gpt/``,
+    ``haiku_responses_traits_b7_t3/``), not by model id, so a change
+    of the default model -- Sonnet 4 -> 4.5 -> 4.6 -- would otherwise
+    append new-model scores into an old-model cohort with nothing but
+    the (rewritten) cohort-level provenance to show for it.  This
+    gate keeps every cache file single-model:
+
+    * recorded ``judge_model`` == ``current_model``: keep everything.
+    * recorded and **different**: drop every entry (the whole file is
+      rejudged under the current model), with a WARNING naming both
+      models; at ``strict=True`` raise :class:`SystemExit` instead.
+    * **unrecorded** (legacy pre-Phase-6 cache, 100+ GPT and Haiku
+      files): keep with a WARNING by default -- we cannot tell which
+      model wrote it and those judges have not changed.  Pass
+      ``drop_unrecorded=True`` (CLI ``--drop_unrecorded_judge_model``)
+      when migrating a family whose model *did* change (the Sonnet
+      4 / 4.5 -> 4.6 migration), which drops the file for a full
+      rejudge; at ``strict=True`` that combination aborts instead.
+
+    Returns the (possibly emptied) cache.  Empty caches pass through.
+    """
+    if not cache:
+        return cache
+    recorded = _peek_judge_model(cache_path)
+    n = len(cache)
+    if recorded == current_model:
+        return cache
+    if recorded is None:
+        if not drop_unrecorded:
+            logger.warning(
+                f"[{mode}] {cache_path.name}: cache records no judge_model "
+                f"(legacy envelope); keeping its {n} entries and appending "
+                f"{current_model!r} scores.  Pass --drop_unrecorded_judge_model "
+                f"to rejudge the whole file instead."
+            )
+            return cache
+        if strict:
+            raise SystemExit(
+                f"[{mode}] {cache_path.name}: cache records no judge_model and "
+                f"--drop_unrecorded_judge_model is set; --strict_judge_model "
+                f"refuses to silently rejudge its {n} entries under "
+                f"{current_model!r}.  Drop one of the two flags."
+            )
+        logger.warning(
+            f"[{mode}] {cache_path.name}: cache records no judge_model; "
+            f"--drop_unrecorded_judge_model set, dropping all {n} entries for a "
+            f"full rejudge under {current_model!r}."
+        )
+        return {}
+    # Recorded and different.
+    if strict:
+        raise SystemExit(
+            f"[{mode}] judge_model drift at {cache_path.name}: cache was "
+            f"written by {recorded!r}, current judge is {current_model!r}.  "
+            f"--strict_judge_model refuses to mix judges in one cohort.  "
+            f"Either re-run with --judge_model {recorded} to extend the "
+            f"existing cohort, or drop --strict_judge_model to rejudge all "
+            f"{n} entries under {current_model!r}."
+        )
+    logger.warning(
+        f"[{mode}] judge_model drift at {cache_path.name}: cache was written "
+        f"by {recorded!r}, current judge is {current_model!r}; dropping all "
+        f"{n} entries so the file is rejudged as a single-model cohort.  "
+        f"Pass --strict_judge_model to abort instead, or --judge_model "
+        f"{recorded} to keep extending the old cohort."
+    )
+    return {}
 
 
 def _check_rubric_version_on_resume(
@@ -2035,11 +2162,11 @@ def _build_axis_judge_inputs(
         pole_paths: List[Path] = []
         if not args.pos_pole:
             pole_paths.append(
-                Path(args.instructions_dir) / args.pair_type / "instructions" / f"{name1}.json"
+                _pole_instruction_path(Path(args.instructions_dir), args.pair_type, name1)
             )
         if not args.neg_pole:
             pole_paths.append(
-                Path(args.instructions_dir) / args.pair_type / "instructions" / f"{name2}.json"
+                _pole_instruction_path(Path(args.instructions_dir), args.pair_type, name2)
             )
         pole_paths = [p for p in pole_paths if p.exists()]
         if pole_paths:
@@ -2195,6 +2322,16 @@ async def score_static_mode(
         cache_path, cache, mode=mode,
         strict=bool(getattr(args, "strict_rubric_version", False)),
     )
+    # Judge-model drift check (Sep 2026): caches are keyed by judge
+    # family, so a model change (Sonnet 4/4.5 -> 4.6) must not append
+    # into an old-model cohort.  See _check_judge_model_on_resume.
+    cache = _check_judge_model_on_resume(
+        cache_path, cache, mode=mode,
+        current_model=args.judge_model or _default_model_for_provider(args.provider),
+        strict=bool(getattr(args, "strict_judge_model", False)),
+        drop_unrecorded=bool(getattr(args, "drop_unrecorded_judge_model", False)),
+    )
+    per_entity_rv = {k: v for k, v in per_entity_rv.items() if k in cache}
     # Phase 4 → 5 migration (May 2026): a v1 (bare-name) cache is
     # silently relabelled to v2 (entity_id keys) on resume.  The
     # corpus's ``descriptions`` map is the authoritative source for
@@ -2532,6 +2669,13 @@ async def score_responses_mode(
         cache_path, cache, mode="responses",
         strict=bool(getattr(args, "strict_rubric_version", False)),
     )
+    cache = _check_judge_model_on_resume(
+        cache_path, cache, mode="responses",
+        current_model=args.judge_model or _default_model_for_provider(args.provider),
+        strict=bool(getattr(args, "strict_judge_model", False)),
+        drop_unrecorded=bool(getattr(args, "drop_unrecorded_judge_model", False)),
+    )
+    per_entity_rv = {k: v for k, v in per_entity_rv.items() if k in cache}
     cache_inputs = _build_axis_judge_inputs(args, mode="responses")
     cache_title = f"axis_judge_correlation:responses:{axis_spec.axis_name}"
 
@@ -3115,7 +3259,7 @@ def parse_args() -> argparse.Namespace:
     j = p.add_argument_group("judge")
     j.add_argument("--provider", choices=["anthropic", "openai"], default="anthropic")
     j.add_argument("--judge_model", type=str, default=None,
-                   help="Defaults: claude-sonnet-4-20250514 (anthropic) / gpt-4.1-mini (openai).")
+                   help="Defaults: claude-sonnet-4-6 (anthropic) / gpt-4.1-mini (openai).")
     j.add_argument("--max_tokens", type=int, default=1024,
                    help="Token budget for the judge response (must fit reasoning + SCORE line).")
     j.add_argument("--temperature", type=float, default=0.0,
@@ -3134,6 +3278,26 @@ def parse_args() -> argparse.Namespace:
 
     # Rubric-version drift policy.
     rd = p.add_argument_group("rubric-version drift policy")
+    rd.add_argument(
+        "--strict_judge_model", action="store_true",
+        help=(
+            "On cache resume, if the cache's recorded judge_model differs "
+            "from the current --judge_model, abort instead of dropping the "
+            "whole file for a single-model rejudge.  Caches are keyed by "
+            "judge family (sonnet/, gpt/, ...), not model id, so this is "
+            "the only thing keeping a cohort single-model."
+        ),
+    )
+    rd.add_argument(
+        "--drop_unrecorded_judge_model", action="store_true",
+        help=(
+            "Treat caches with no recorded judge_model (legacy pre-Phase-6 "
+            "envelopes) as drifted and rejudge them whole.  Default keeps "
+            "them with a warning, because 100+ GPT and Haiku legacy caches "
+            "exist and those judges have not changed.  Use when migrating a "
+            "family whose model did change (Sonnet 4/4.5 -> 4.6)."
+        ),
+    )
     rd.add_argument(
         "--strict_rubric_version", action="store_true",
         help=(
@@ -3180,7 +3344,7 @@ def parse_args() -> argparse.Namespace:
             "expected cost + $5 floor** as a safety net for "
             "miscalculation.  Empirical residual prediction error "
             "after the new per-call scales + roles/traits factor is "
-            "~3-5%, so 1.25× leaves ~20pt headroom for "
+            "~3-5%%, so 1.25× leaves ~20pt headroom for "
             "model-drift or stupid-mistake catch.  For "
             "first-of-kind judges/prompts (no canary yet), keep "
             "~1.5× + $10 until calibrated.  Default = no cap "

@@ -39,6 +39,7 @@ from typing import Mapping, Optional, Sequence
 
 import matplotlib.pyplot as plt
 import numpy as np
+from assistant_axis.entity_id import corpus_display_name
 
 
 # ---------------------------------------------------------------------------
@@ -159,6 +160,9 @@ SEMANTIC_BASE_BONUS: Mapping[str, int] = {
     "constructive": 60, "destructive": 60,
     "angel": 60, "demon": 50, "saint": 60, "bodhisattva": 60,
     "paperclip_maximizer": 80, "aligned_artificial_intelligence": 80,
+    # aligned_artificial_intelligence was renamed 2026-09-28; both stems
+    # are listed so plots of older extractions keep their priority
+    "instrumentally_aligned_ai": 80, "virtue_aligned_ai": 80,
     "ecocentric": 40, "anthropocentric": 40, "individualistic": 40,
     "collectivistic": 40, "progressive": 40, "conservative": 40,
     "egalitarian": 35, "elitist": 35, "selfish": 30, "nihilistic": 30,
@@ -190,7 +194,7 @@ def collision_label(ax, candidates, *, fontsize: int = 7) -> int:
         offset = (-4, 4) if side == "L" else (4, 3)
         ha = "right" if side == "L" else "left"
         ann = ax.annotate(
-            name.replace("_", " "), (x, y),
+            corpus_display_name(name, etype), (x, y),
             fontsize=fontsize, xytext=offset, textcoords="offset points",
             ha=ha, color="#333", alpha=0.9, zorder=5,
             fontstyle="italic" if etype == "role" else "normal",

@@ -27,6 +27,12 @@ from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from assistant_axis.judge import warn_if_low_parse_rate  # noqa: E402
+from assistant_axis.judge_pricing import MultiModelUsage, extract_usage_anthropic  # noqa: E402
+
+MODEL = "claude-sonnet-4-6"
+# Cumulative token-usage record (AGENT_NOTES "Token usage logging is
+# mandatory on batched LLM call sites"); one level above instructions/.
+DEFAULT_USAGE_JSON = Path(__file__).resolve().parent.parent / "data" / "traits" / "antonym_check_usage.json"
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s",
@@ -112,6 +118,7 @@ async def classify_one(
     definition: str,
     instructions: list[dict],
     semaphore: asyncio.Semaphore,
+    usage: MultiModelUsage | None = None,
 ) -> dict:
     msg = build_user_message(positive_label, definition, instructions)
 
@@ -119,12 +126,14 @@ async def classify_one(
         async with semaphore:
             try:
                 response = await client.messages.create(
-                    model="claude-sonnet-4-20250514",
+                    model=MODEL,
                     max_tokens=512,
                     temperature=0,
                     system=SYSTEM_PROMPT,
                     messages=[{"role": "user", "content": msg}],
                 )
+                if usage is not None:
+                    usage.charge(MODEL, *extract_usage_anthropic(response))
                 raw = response.content[0].text.strip()
                 raw = re.sub(r"^```(?:json)?\s*\n?", "", raw)
                 raw = re.sub(r"\n?```\s*$", "", raw)
@@ -139,8 +148,9 @@ async def classify_one(
     return {"negative_label": "ERROR", "antonym_score": -1, "reasoning": "All retries failed"}
 
 
-async def main_async(trait_filter: list[str] | None = None):
+async def main_async(trait_filter: list[str] | None = None, usage_json: Path | None = None):
     traits_dir = Path(__file__).parent.parent / "data" / "traits" / "instructions"
+    usage = MultiModelUsage()
     trait_files = sorted(traits_dir.glob("*.json"))
 
     if trait_filter:
@@ -173,7 +183,7 @@ async def main_async(trait_filter: list[str] | None = None):
     print(f"Calling API for all {len(tasks)} traits", file=sys.stderr)
 
     async def run_one(pos_label, defn, insts):
-        result = await classify_one(client, pos_label, defn, insts, semaphore)
+        result = await classify_one(client, pos_label, defn, insts, semaphore, usage)
         if pos_label in KNOWN_ANTONYMS:
             result["known_antonym"] = KNOWN_ANTONYMS[pos_label]
             match = result["negative_label"].lower() == KNOWN_ANTONYMS[pos_label].lower()
@@ -195,11 +205,17 @@ async def main_async(trait_filter: list[str] | None = None):
         1 for _, r in api_results if r.get("negative_label") != "ERROR"
     )
     warn_if_low_parse_rate(
-        label="data_analysis/generate_antonyms:claude-sonnet-4-20250514",
+        label=f"data_analysis/generate_antonyms:{MODEL}",
         n_ok=n_call_ok,
         n_total=n_call_total,
         logger_obj=logger,
     )
+    logger.info(usage.log_line("[usage]"))
+    path = Path(usage_json) if usage_json is not None else DEFAULT_USAGE_JSON
+    total = MultiModelUsage.load_or_create(path)
+    total.merge_from(usage)
+    total.write_json(path)
+    logger.info(f"[usage] cumulative record: {path} (total ${total.total_cost_usd:.3f} over {total.n_calls} calls)")
 
     results = dict(sorted(results.items()))
 
@@ -248,12 +264,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         metavar="TRAIT",
         help="Trait names to process (default: all traits)",
     )
+    parser.add_argument(
+        "--usage-json",
+        default=str(DEFAULT_USAGE_JSON),
+        help=f"Cumulative token-usage record, merged into on every run (default: {DEFAULT_USAGE_JSON})",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None):
     args = parse_args(argv)
-    asyncio.run(main_async(trait_filter=args.traits))
+    asyncio.run(main_async(trait_filter=args.traits, usage_json=Path(args.usage_json)))
 
 
 if __name__ == "__main__":

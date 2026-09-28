@@ -364,6 +364,15 @@ Full reference (including `InputSpec` kinds, status taxonomy, and
 the migrated-script roster) lives in
 [`AGENT_NOTES.md` § End-to-End Data Provenance](AGENT_NOTES.md).
 
+## Agent collaboration guide
+
+[`AGENT_NOTES.md`](AGENT_NOTES.md) is the canonical working guide for AI
+agents on this repo (Cursor and Claude Code alike).  `CLAUDE.md` and
+everything under `.claude/` are generated from it by
+[`tools/sync_agent_notes.py`](tools/sync_agent_notes.py); after editing
+`AGENT_NOTES.md`, run `uv run python tools/sync_agent_notes.py` (a Claude
+Code session-start hook also runs it).
+
 ## Models from the Paper
 
 | Model | Target Layer | Best Activation Capping Setting |

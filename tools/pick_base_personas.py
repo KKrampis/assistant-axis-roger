@@ -95,6 +95,7 @@ VAGUE_OR_ABSTRACT_EXCLUDE = {
 # any axis adjacent to that one.
 SINGLE_AXIS_EXTREME_EXCLUDE = {
     "saint",  # ultra-positive on alignment axes
+    "virtue_aligned_ai",  # ditto (added 2026-09-28 beside the instrumental conception)
     "criminal",  # ultra-negative on alignment
     "smuggler", "pirate", "rogue",  # ditto, milder
     "vegan",  # strong on ecocentric/spiritual-ish
@@ -110,6 +111,8 @@ SINGLE_AXIS_EXTREME_EXCLUDE = {
 # excluded from EVERY axis's candidate pool, not just their own.
 ROLE_POLE_EXCLUDE = {
     "aligned_artificial_intelligence", "paperclip_maximizer",
+    # renamed 2026-09-28; the old stem stays for data extracted before then
+    "instrumentally_aligned_ai",
     "angel", "demon",
     "guardian", "destroyer",
     "symbiont", "parasite",

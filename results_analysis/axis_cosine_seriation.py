@@ -269,6 +269,8 @@ CLEAN_COHORT_ONTOLOGY: dict[str, str] = {
     "truthful/deceitful": "Honesty",
     # Alignment & prosocial -- safety / helpfulness / beneficence
     "aligned_artificial_intelligence/paperclip_maximizer": "Alignment & prosocial",
+    # the same axis after the 2026-09-28 rename of its positive pole
+    "instrumentally_aligned_ai/paperclip_maximizer": "Alignment & prosocial",
     "harmless/harmful": "Alignment & prosocial",
     "curious/incurious": "Alignment & prosocial",
     "helpful/unhelpful": "Alignment & prosocial",

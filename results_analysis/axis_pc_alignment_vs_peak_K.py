@@ -91,6 +91,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.stats import spearmanr
 
+from assistant_axis.entity_id import corpus_display_name
 from assistant_axis import (
     cohort_from_pairs,
     display_form_name,
@@ -583,7 +584,7 @@ def _draw_top_panel(
                            zorder=3 if alpha > 0.5 else 2)
             if label:
                 ax.annotate(
-                    display_form_name(row["name"]),
+                    corpus_display_name(row["name"]),
                     (xs[0], y), fontsize=7,
                     xytext=(6, 0), textcoords="offset points",
                     va="center", color="black", alpha=alpha,
@@ -678,7 +679,7 @@ def _draw_pc_cosine_panel(
         for row, color, alpha, y_data, y_lbl in zip(
                 all_rows, all_colors, all_alphas, ys_at_x, ys_label):
             ax.annotate(
-                display_form_name(row["name"]),
+                corpus_display_name(row["name"]),
                 xy=(x_pos, y_data),
                 xytext=(x_pos + dx, y_lbl),
                 fontsize=6.5, ha=ha, va="center",

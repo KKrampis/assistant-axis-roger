@@ -50,7 +50,7 @@ from __future__ import annotations
 import numpy as np
 import matplotlib.pyplot as plt
 
-from .entity_id import display_label, kind_long
+from .entity_id import corpus_display_name, display_label, kind_long
 
 
 # Group memberships, derived from the May 2026 cluster analyses.
@@ -211,4 +211,5 @@ __all__ = (
     "kind_text_color",
     "kind_text_style",
     "display_label",
+    "corpus_display_name",
 )

@@ -122,7 +122,7 @@ done
 # ---------------------------------------------------------------
 run_orch phase4_sonnet_descinstr \
     --pair_list "$PAIR_ALL" \
-    --provider sonnet --judge_model claude-sonnet-4-20250514 \
+    --provider sonnet --judge_model claude-sonnet-4-6 \
     --output_root "$ROOT" \
     --score_descriptions --score_instructions
 
@@ -191,7 +191,7 @@ run_orch phase6_haiku_roles_b10_q9 \
 # ---------------------------------------------------------------
 run_orch phase7_sonnet_traits_b10_q9 \
     --pair_list "$PAIR_B" \
-    --provider sonnet --judge_model claude-sonnet-4-20250514 \
+    --provider sonnet --judge_model claude-sonnet-4-6 \
     --output_root "$ROOT" \
     --subdir sonnet_responses_traits_b10_q9 \
     --score_responses \
@@ -203,7 +203,7 @@ run_orch phase7_sonnet_traits_b10_q9 \
 
 run_orch phase7_sonnet_roles_b10_q9 \
     --pair_list "$PAIR_B" \
-    --provider sonnet --judge_model claude-sonnet-4-20250514 \
+    --provider sonnet --judge_model claude-sonnet-4-6 \
     --output_root "$ROOT" \
     --subdir sonnet_responses_roles_b10_q9 \
     --score_responses \
