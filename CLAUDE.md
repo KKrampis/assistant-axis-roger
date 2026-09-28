@@ -93,6 +93,9 @@ only other locations outside this repository an agent should ever touch:
   under `~/.claude/plans/`, and user-level settings, rules and skills.
 - The per-session scratchpad Claude Code assigns under
   `/private/tmp/claude-<uid>/<project>/<session-id>/scratchpad/`.
+- `/tmp` (and `/private/tmp`) generally, for temporary files (Roger,
+  2026-09-25; prefer the scratchpad, since `/tmp` is cleared on reboot).
+  Note that `/tmp` is only for scratch: nothing there is a deliverable.
 
 Everything else on this machine stays off-limits.  **That includes
 "just checking what is installed"**: `~/.cache` (Hugging Face, pip, uv,
@@ -112,9 +115,6 @@ project instructions alone did not stop it.  (Temp files made by
 the project's own tooling — `atomic_io` staging under `$TMPDIR`,
 pytest's `tmp_path` — are process behaviour, not agent file access.)
 
----
-
-## Hotlink every file you mention to Roger (HARD RULE)
 **Enforced in Claude Code since 2026-09-24** by the PreToolUse hook
 [`.claude/hooks/boundary_check.py`](.claude/hooks/boundary_check.py),
 registered in [`.claude/settings.json`](.claude/settings.json) for
@@ -136,6 +136,9 @@ the call and let the prompt do the asking.  Cursor's agent is not covered
 (it does not run Claude Code hooks), so the written rule and the
 subagent-prompt restatement remain the primary protection there.
 
+---
+
+## Hotlink every file you mention to Roger (HARD RULE)
 
 **Every time you reference a file (plot, JSON, source, log, config,
 notebook, etc.) in a chat reply to Roger, format it as a markdown
@@ -262,15 +265,27 @@ us a precise, auditable, retrieve-anytime cost record.
 **Existing call sites still on the to-do list (2026-05-24):**
 
 - [`data_analysis/classify_goals.py`](./data_analysis/classify_goals.py)
-- [`data_analysis/regenerate_role_instructions.py`](./data_analysis/regenerate_role_instructions.py)
-- [`data_analysis/regenerate_trait_instructions.py`](./data_analysis/regenerate_trait_instructions.py)
 - [`data_analysis/score_combinations.py`](./data_analysis/score_combinations.py)
 - [`data_analysis/sample_trait_responses.py`](./data_analysis/sample_trait_responses.py)
-- [`data_analysis/generate_antonyms.py`](./data_analysis/generate_antonyms.py)
 - [`results_analysis/standardize_axis_spec.py`](./results_analysis/standardize_axis_spec.py)
 - [`results_analysis/infer_axis_description.py`](./results_analysis/infer_axis_description.py)
 
-Retrofit when next touched (or sooner if scheduled for a heavy
+Retrofitted 2026-09-11 (before the 61-file voice-repair regeneration):
+[`data_analysis/regenerate_role_instructions.py`](./data_analysis/regenerate_role_instructions.py),
+[`data_analysis/regenerate_trait_instructions.py`](./data_analysis/regenerate_trait_instructions.py)
+and [`data_analysis/generate_antonyms.py`](./data_analysis/generate_antonyms.py).
+These have no output directory (they write into the corpus), so the
+record lives one level *above* `instructions/` where nothing that globs
+`instructions/*.json` can pick it up: `data/roles/regeneration_usage.json`,
+`data/traits/regeneration_usage.json` and
+`data/traits/antonym_check_usage.json`, all **cumulative** (each run
+merges into the file and also logs its own `[usage]` line to stderr;
+`--usage-json PATH` redirects).  Every response received is charged,
+including ones whose JSON fails to parse and is retried.  Guide figure
+from that batch: a Sonnet 4.6 combined call (5 instructions, 40
+questions, eval prompt) is ~$0.02 for a role and ~$0.03 for a trait.
+
+Retrofit the rest when next touched (or sooner if scheduled for a heavy
 run).  Diagnostic one-offs (e.g.
 [`tools/diagnose_unparseable.py`](./tools/diagnose_unparseable.py))
 are exempt unless they grow into batch tools.
@@ -407,6 +422,8 @@ This is the **8-slot** rebuild that supersedes `runpod_workspace/qwen/qwen-3-32b
 
 When invoking analysis scripts that take `--data_dir`, prefer the 8slot path. The `results_analysis/run_axis_experiment_batch.py` default (`runpod_workspace/qwen/qwen-3-32b Roger`) is stale; pass `--data_dir 'runpod_workspace/qwen/qwen-3-32b Roger 8slot'` explicitly until that default is updated. The README examples likewise still reference the older directory.
 
+**Pair lists come in two generations since 2026-09-28 (Roger).** In `roger/axis_judge_experiments/`, `pair_list_clean.json`, `pair_list_di.json` and `pair_list_goalnongoal.json` describe the corpus **as it is now** and are for new work, that is, for the next extraction: they name the renamed pole `instrumentally_aligned_ai` and no longer carry `constructivist` / `essentialist` (dissolved into a tetrahedron) or `compassionate` / `callous` (a triangle edge, not a pair; di only). Their byte-exact predecessors are `pair_list_clean_v1.json`, `pair_list_di_v1.json` and `pair_list_goalnongoal_v1.json`, the record of what was judged. **With the 8slot data dir and the existing judge caches, pass `--pairs pair_list_<cohort>_v1.json`**: the current lists name a pole that has no vector and no judged directory yet, so a script run with its default list stops at that axis. `pair_list_responses.json` needed no change and has no `_v1`. The `_v1` here has nothing to do with rubric v1 (`*__rubric_v1.*`). The cohort token follows the file name, so a `_v1` run writes `..._clean_v1_...` outputs, while the `..._clean_...`, `..._di_...` and `..._goalnongoal_...` outputs already on disk came from what are now the `_v1` lists. Old stems in a `_v1` list still find their descriptions: `axis_judge_correlation.py` reads a renamed pole's text through the corpus file's `renamed_from` (`assistant_axis.entity_id.resolve_renamed_stem`) and logs a warning. Vectors and judge caches are never remapped. Before editing any other pair list that records judged work, copy it to `_v1` first; `/roger` is git-ignored, so a new pair list needs `git add -f`.
+
 ### Mid-Session Patterns
 - If unsure about working style: "Should I implement this directly or discuss options first?"
 - If scope is unclear: "This affects X, Y, and Z - should I handle all of them?"
@@ -472,4 +489,5 @@ These sections exist only in `AGENT_NOTES.md`; open them there when the topic co
 - Recommended Starting Pattern
 - Clean pair validation results (April 2026)
 - TODO: regenerate activation/vector data after April–May 2026 trait edits
+- TODO: code housekeeping (Sep 2026)
 - TODO: variant-specific K grids in the PC round-trip experiment (May 2026)

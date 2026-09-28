@@ -250,6 +250,9 @@ only other locations outside this repository an agent should ever touch:
   under `~/.claude/plans/`, and user-level settings, rules and skills.
 - The per-session scratchpad Claude Code assigns under
   `/private/tmp/claude-<uid>/<project>/<session-id>/scratchpad/`.
+- `/tmp` (and `/private/tmp`) generally, for temporary files (Roger,
+  2026-09-25; prefer the scratchpad, since `/tmp` is cleared on reboot).
+  Note that `/tmp` is only for scratch: nothing there is a deliverable.
 
 Everything else on this machine stays off-limits.  **That includes
 "just checking what is installed"**: `~/.cache` (Hugging Face, pip, uv,
@@ -269,9 +272,6 @@ project instructions alone did not stop it.  (Temp files made by
 the project's own tooling — `atomic_io` staging under `$TMPDIR`,
 pytest's `tmp_path` — are process behaviour, not agent file access.)
 
----
-
-## Hotlink every file you mention to Roger (HARD RULE)
 **Enforced in Claude Code since 2026-09-24** by the PreToolUse hook
 [`.claude/hooks/boundary_check.py`](.claude/hooks/boundary_check.py),
 registered in [`.claude/settings.json`](.claude/settings.json) for
@@ -293,6 +293,9 @@ the call and let the prompt do the asking.  Cursor's agent is not covered
 (it does not run Claude Code hooks), so the written rule and the
 subagent-prompt restatement remain the primary protection there.
 
+---
+
+## Hotlink every file you mention to Roger (HARD RULE)
 <!-- claude: always -->
 
 **Every time you reference a file (plot, JSON, source, log, config,
@@ -421,15 +424,27 @@ us a precise, auditable, retrieve-anytime cost record.
 **Existing call sites still on the to-do list (2026-05-24):**
 
 - [`data_analysis/classify_goals.py`](./data_analysis/classify_goals.py)
-- [`data_analysis/regenerate_role_instructions.py`](./data_analysis/regenerate_role_instructions.py)
-- [`data_analysis/regenerate_trait_instructions.py`](./data_analysis/regenerate_trait_instructions.py)
 - [`data_analysis/score_combinations.py`](./data_analysis/score_combinations.py)
 - [`data_analysis/sample_trait_responses.py`](./data_analysis/sample_trait_responses.py)
-- [`data_analysis/generate_antonyms.py`](./data_analysis/generate_antonyms.py)
 - [`results_analysis/standardize_axis_spec.py`](./results_analysis/standardize_axis_spec.py)
 - [`results_analysis/infer_axis_description.py`](./results_analysis/infer_axis_description.py)
 
-Retrofit when next touched (or sooner if scheduled for a heavy
+Retrofitted 2026-09-11 (before the 61-file voice-repair regeneration):
+[`data_analysis/regenerate_role_instructions.py`](./data_analysis/regenerate_role_instructions.py),
+[`data_analysis/regenerate_trait_instructions.py`](./data_analysis/regenerate_trait_instructions.py)
+and [`data_analysis/generate_antonyms.py`](./data_analysis/generate_antonyms.py).
+These have no output directory (they write into the corpus), so the
+record lives one level *above* `instructions/` where nothing that globs
+`instructions/*.json` can pick it up: `data/roles/regeneration_usage.json`,
+`data/traits/regeneration_usage.json` and
+`data/traits/antonym_check_usage.json`, all **cumulative** (each run
+merges into the file and also logs its own `[usage]` line to stderr;
+`--usage-json PATH` redirects).  Every response received is charged,
+including ones whose JSON fails to parse and is retried.  Guide figure
+from that batch: a Sonnet 4.6 combined call (5 instructions, 40
+questions, eval prompt) is ~$0.02 for a role and ~$0.03 for a trait.
+
+Retrofit the rest when next touched (or sooner if scheduled for a heavy
 run).  Diagnostic one-offs (e.g.
 [`tools/diagnose_unparseable.py`](./tools/diagnose_unparseable.py))
 are exempt unless they grow into batch tools.
@@ -819,6 +834,37 @@ the flag to accept the rejudge).  Off by default because long-running
 judging sweeps shouldn't abort mid-flight on a rubric bump; use when
 you want a run to halt rather than spend money rejudging entries you
 weren't planning to.
+
+**Judge-model drift on resume (Sep 2026)**.  Judge caches are keyed
+by judge *family* (`sonnet/`, `gpt/`, `haiku_responses_traits_b7_t3/`),
+not by model id, and the resume path never compared models -- so when
+`claude-sonnet-4-20250514` was retired (Sep 2026) and the Anthropic
+default moved to `claude-sonnet-4-6`, a plain resume would have appended
+4.6 scores into cohorts that were, per their own provenance, mostly
+`claude-sonnet-4-5` (52 of 56 recorded Sonnet caches; 90 more recorded
+no model at all).  [`_check_judge_model_on_resume`](results_analysis/axis_judge_correlation.py)
+now runs right after the rubric-version check in both
+`score_static_mode` and `score_responses_mode`:
+
+* recorded `judge_model` == current: keep;
+* recorded and different: **drop the whole file** (rejudged as a
+  single-model cohort) with a WARNING naming both models;
+  `--strict_judge_model` aborts instead, and the message shows the
+  `--judge_model <old>` invocation that would extend the old cohort;
+* unrecorded (legacy envelope): keep with a WARNING by default, since
+  100+ GPT and Haiku legacy caches exist and those judges did not
+  change; `--drop_unrecorded_judge_model` rejudges them whole (use it
+  for the Sonnet migration), and combined with strict it aborts.
+
+Cost of the Sonnet migration: ~1,160 static calls per axis (61 axes on
+disk), roughly $4-6 per axis at Sonnet 4.6 rates, incurred lazily the
+first time each axis is touched.  Each such run still goes through the
+expensive-operations confirmation.  The refusal allowlist
+(`data/judge_refusal_allowlist.json`) is keyed by exact model id and
+currently lists only `claude-sonnet-4-5`; the first 4.6 run over an axis
+with `virus|R` will report it as an *unexpected* gap if the refusal
+recurs -- add a `claude-sonnet-4-6` entry then, not pre-emptively.
+Tests: `test_axis_judge_correlation_phase4.py::TestCheckJudgeModelOnResume`.
 
 **Consumer side**.  Callers reading caches can audit drift without
 the producer's drop-or-abort policy via
@@ -3838,6 +3884,99 @@ goes into the LLM's mouth.  Every rubric / prompt builder MUST
 apply `display_form_name(...)` to entity names before injecting
 them into the prompt body, examples list, or axis-name header.
 
+**Two display helpers, chosen by audience (Sep 2026).**
+
+| helper | transform | use at | never |
+| --- | --- | --- | --- |
+| `display_form_name(stem)` | mechanical `_` → space, no lookup | **LLM rubric / prompt bodies** (`axis_judge_correlation.build_static_prompt`, `build_response_batch_prompt`, `score_combinations.build_user_message`) | change its output: it is spliced into judged prompts, so any change is a rubric change (bump `RUBRIC_VERSION`, per-entity drift check) |
+| `corpus_display_name(stem_or_id, kind=None)` | lookup: trait `positive_label`, role `ROLE_DISPLAY_OVERRIDES` (`devils_advocate` → `devil's advocate`), else mechanical | **human-facing text**: plot dot labels, pole labels, legends, console output | dict keys, cache keys, ρ intersection operands, prompt text |
+
+Decision (Roger, 2026-09-07): the split stays as-is.  Prompts keep
+the mechanical form (so static rubrics still read "systems thinker"
+rather than "systems-thinker"); the effect on judging is small and
+extending the lookup to prompts would be a rubric bump for no gain.
+Revisited 2026-09-09: to be folded into the next full rejudge, see
+§ "TODO: code housekeeping (Sep 2026)" item 4.
+
+`corpus_display_name` accepts a bare stem or a `name|R` / `name|T`
+id (the id supplies the kind); with no kind it consults both tables
+and falls back to the mechanical form if a collision name ever
+displayed differently per kind (today all nine display identically).
+Tables are read once per data dir from `data/{traits,roles}/instructions/`
+(`$ASSISTANT_AXIS_DATA_DIR` overrides the location; call
+`clear_corpus_display_cache()` after editing corpus JSONs in a
+long-lived process).  The guaranteed direction is
+`normalize_to_file_name(corpus_display_name(stem)) == stem` for every
+corpus entity (tested over the whole corpus in
+`assistant_axis/tests/test_entity_id.py::TestCorpusDisplayName`).
+Switched to it 2026-09-07: `pair_slice_plots.add_label` (dots and
+poles), `canonical_angles/ca1_plane.py` annotations,
+`axis_pc_alignment_vs_peak_K.py` annotations.  Leave
+`rubric_v1_v2_compare.py`'s 4-character abbreviations and
+`infer_axis_description._display_label` (an LLM prompt site that
+already reads `positive_label`) alone.
+
+**Spelling: US English in corpus text and file names (decided 2026-09-07).**
+Labels, stems, descriptions and instructions use US spelling (`honor`,
+`laborer`, `color`), because the corpus is LLM input and the generators
+write US English; a UK-spelt stem would sit beside US-spelt generated text
+and would not match the generator's own antonym suggestions.  Roger writes
+UK English in notes and chat; convert when seeding a file.
+
+**Standard-derived trait labels: `<pole> (<Standard>)` (Sep 2026; parentheses adopted 2026-09-09).**
+When a trait or axis is imported from a named, well-known instrument
+(Inglehart–Welzel cultural map, Big Five, HEXACO, Hofstede, Moral
+Foundations, ...), the standard's name goes into the label as a
+parenthesised, capitalised suffix and into the file name lowercased with
+the parentheses dropped:
+
+| `positive_label` (display, stored in JSON) | file stem (`normalize_to_file_name`) |
+| --- | --- |
+| `traditional (Inglehart-Welzel)` | `traditional_inglehart_welzel` |
+| `secular-rational (Inglehart-Welzel)` | `secular_rational_inglehart_welzel` |
+| `survival (Inglehart-Welzel)` | `survival_inglehart_welzel` |
+| `self-expression (Inglehart-Welzel)` | `self_expression_inglehart_welzel` |
+| `openness (Big Five)` | `openness_big_five` |
+
+Rules:
+
+1. **Pole first, standard second**, using the standard's own pole
+   names and its own written form (`Big Five`, not `Big-5`; acronyms
+   in caps, `HEXACO`).  Capitalisation is what marks the suffix as a
+   proper name; there is precedent for capitals and spaces in labels
+   (`Kantian`, `cultural relativist` as negative labels).
+2. **`positive_label` is the canonical display form**; the stem is
+   derived from it by `normalize_to_file_name` (lowercase, apostrophes
+   dropped, hyphens and spaces → `_`, parentheses dropped, diacritics
+   folded to ASCII so `Gemeinschaft (Tönnies)` → `gemeinschaft_tonnies`;
+   stems stay ASCII
+   because macOS and Linux normalise accented file names differently).
+   The reverse is lossy in four new ways (capitals, diacritics, the
+   hyphen inside a double-barrelled name, the pole/standard boundary), which is why plot text must go through
+   `corpus_display_name`, never `stem.replace("_", " ")`.
+3. **`negative_label` uses the full partner label**
+   (`secular-rational (Inglehart-Welzel)`), so the antonym clause in the
+   generation prompt and the clean-pair check both see the same string.
+4. **Descriptions do not name the source.**  Paraphrase the canonical
+   one-to-two-sentence definition (recognisable to anyone who knows the
+   instrument; do not quote it verbatim).  Record provenance in an
+   optional `"source"` field on the trait JSON instead, e.g.
+   `"source": "Inglehart & Welzel, World Values Survey cultural map, traditional vs secular-rational values axis"`.
+   Both regenerate scripts carry unknown fields forward.
+5. **Import a standard's version only when its canonical definition
+   differs materially from an existing ad-hoc trait, or when the
+   comparison is the experiment.**  `conscientious`, `extroverted`,
+   `introverted`, `agreeable`, `neurotic` already exist; a
+   `conscientious (Big Five)` beside `conscientious` is deliberate
+   duplication, not an oversight, and should say so in `source`.
+6. Watch the generated instructions: the label is injected as the
+   trait name and antonym clause, so the generator can leak the
+   standard's name into a persona system prompt ("in the
+   Inglehart-Welzel sense").  The description carries the substance;
+   eyeball the pos/neg pairs and regenerate if it leaks.  If it
+   recurs, add a per-trait generation-label override rather than
+   changing the naming.
+
 Multi-word entity census (qwen-3-32b Roger 8slot corpus): 12 of 303
 traits + 4 of 281 roles = 16 of ~584.  Examples: `systems_thinker`,
 `kind_to_animals`, `stream_of_consciousness` (traits);
@@ -4417,6 +4556,8 @@ This is the **8-slot** rebuild that supersedes `runpod_workspace/qwen/qwen-3-32b
 
 When invoking analysis scripts that take `--data_dir`, prefer the 8slot path. The `results_analysis/run_axis_experiment_batch.py` default (`runpod_workspace/qwen/qwen-3-32b Roger`) is stale; pass `--data_dir 'runpod_workspace/qwen/qwen-3-32b Roger 8slot'` explicitly until that default is updated. The README examples likewise still reference the older directory.
 
+**Pair lists come in two generations since 2026-09-28 (Roger).** In `roger/axis_judge_experiments/`, `pair_list_clean.json`, `pair_list_di.json` and `pair_list_goalnongoal.json` describe the corpus **as it is now** and are for new work, that is, for the next extraction: they name the renamed pole `instrumentally_aligned_ai` and no longer carry `constructivist` / `essentialist` (dissolved into a tetrahedron) or `compassionate` / `callous` (a triangle edge, not a pair; di only). Their byte-exact predecessors are `pair_list_clean_v1.json`, `pair_list_di_v1.json` and `pair_list_goalnongoal_v1.json`, the record of what was judged. **With the 8slot data dir and the existing judge caches, pass `--pairs pair_list_<cohort>_v1.json`**: the current lists name a pole that has no vector and no judged directory yet, so a script run with its default list stops at that axis. `pair_list_responses.json` needed no change and has no `_v1`. The `_v1` here has nothing to do with rubric v1 (`*__rubric_v1.*`). The cohort token follows the file name, so a `_v1` run writes `..._clean_v1_...` outputs, while the `..._clean_...`, `..._di_...` and `..._goalnongoal_...` outputs already on disk came from what are now the `_v1` lists. Old stems in a `_v1` list still find their descriptions: `axis_judge_correlation.py` reads a renamed pole's text through the corpus file's `renamed_from` (`assistant_axis.entity_id.resolve_renamed_stem`) and logs a warning. Vectors and judge caches are never remapped. Before editing any other pair list that records judged work, copy it to `_v1` first; `/roger` is git-ignored, so a new pair list needs `git add -f`.
+
 ### Mid-Session Patterns
 - If unsure about working style: "Should I implement this directly or discuss options first?"
 - If scope is unclear: "This affects X, Y, and Z - should I handle all of them?"
@@ -4456,7 +4597,7 @@ When adding a new trait B that is the antonym of an existing trait A (e.g., addi
 
 ### Process
 
-1. **Create seed file** in `data/traits/instructions/B.json` with `positive_label`, `description`, and `negative_label` set to `non-B` (NOT to A yet).
+1. **Create seed file** in `data/traits/instructions/B.json` with `positive_label`, `description`, and `negative_label` set to `non-B` (NOT to A yet).  If B comes from a named standard, label it `<pole> (<Standard>)` (e.g. `traditional (Inglehart-Welzel)`, stem `traditional_inglehart_welzel`), keep the source out of the description, and add an optional `"source"` field -- see § "Standard-derived trait labels" under the file-name vs display-name convention.
 
 2. **Generate instructions** for B:
    ```bash
@@ -4470,7 +4611,7 @@ When adding a new trait B that is the antonym of an existing trait A (e.g., addi
    (`--traits` scopes to specific traits; omit for all.)
    This should independently discover A as B's antonym. If A's antonym generation also returns B, we have a **clean pair**: A↔B confirmed bidirectionally.
 
-4. **Update negative_labels**: Set B's `negative_label` to A and A's to B in their instruction files.
+4. **Update negative_labels**: Set B's `negative_label` to A and A's to B in their instruction files, and record `"arrangement": {"kind": "pair", "members": [A, B]}` (sorted stems) on both; `uv run python data_analysis/check_arrangements.py` must pass (see § "The `arrangement` field").
 
 5. **Regenerate instructions** for B with the proper antonym (the Roger prompt style injects the antonym into the neg instruction clause):
    ```bash
@@ -4478,13 +4619,430 @@ When adding a new trait B that is the antonym of an existing trait A (e.g., addi
    ```
    A should NOT need regeneration since it already has B as its negative_label.
 
-6. **Add to `data/traits/trait_list.json`** with description.
+6. **Regenerate the derived lists**: `uv run python tools/sync_entity_lists.py`.  `data/traits/trait_list.json` and `data/roles/role_list.json` are generated from the instruction files' `description` fields (since 2026-09-07; never hand-edit them).  `--check` exits 1 while they lag, and `tools/tests/test_sync_entity_lists.py` fails.
 
 7. **Run goal classification** if the trait needs goal scoring (for `data/goal_roles_and_traits.json`).
+
+### The pairing loop when the check does not name the original (Roger, 2026-09-17)
+
+Set out during the September 2026 pairing review, after the agent had
+been reporting one-directional checks as decisions instead of working
+them.  **This is not a strict algorithm.**  The steps below are the moves
+available; the work is judgement and some creativity at each one: is
+this a well-formed clean pair with matched scopes, which word or which
+clause would make it one, is the original's answer telling us the pair
+is wrong or only that the label is, and, when nothing lines up after a
+round or two, being willing to give up (a singleton, a one-way pointer,
+or a deleted file is a fine outcome).  Bring the evidence, not just the
+verdict, to Roger for the calls that change existing files.  Starting
+from an existing file whose `negative_label` names a trait with no file:
+
+1. **Seed the recorded name** with `non-X`, generate, run the check on
+   the new file.  If it names the original, pair.
+2. **If not, adjust the new description** so the scopes line up with the
+   original's (same domain, same breadth; add the clause the original
+   has and the new one lacks), regenerate, re-check.  One or two rounds.
+3. **If it still does not, run the check on the original** and read what
+   it offers besides the recorded label (its neg instructions were
+   written with that label injected, so the recorded word usually
+   appears; the *other* words are the information).  State that bias
+   with the result.  Where the original's answer is the deciding
+   evidence, regenerate the original under `non-X` for an unbiased
+   answer (as done for `diplomatic` on 2026-09-17); that costs the
+   original's extraction, so do it deliberately, not by default
+   (confirmed by Roger 2026-09-17).  Seed the best of the offered words,
+   generate, check both sides, pair if they name each other.
+4. **If nothing pairs**, something else is needed: rename the original
+   to the check's word (RO, `seed_entities.py rename`), make the original
+   a singleton with `non-X`, or drop the new file if it duplicates an
+   existing trait.  These are Roger's calls, brought to him with the
+   evidence from steps 1-3.
+
+Pairing by decision (P) is the last resort, used when one side names
+the other and the other side's answer describes the same content under a
+different word.  Worked examples of every branch, including the
+give-ups, are in `reports/seeding_log_2026-09.md` (the 2026-09-16/17
+pairing review: 22 cases, 34 pairs, 12 singletons, 7 deletions).
 
 ### Why non-X first?
 
 Starting with `non-B` instead of `A` ensures the antonym generator discovers `A` independently from the neg instructions, rather than being primed by us providing it. This validates that the pos/neg instruction pairs genuinely capture the A↔B opposition.
+
+**The same procedure applies when an existing pair member's description
+is rewritten** (done for five traits in the 2026-09-11 voice repair):
+set its `negative_label` to `non-X`, regenerate in full, run the check,
+restore the label, regenerate `--instructions-only` so the neg clause
+names the real partner again.  Rerolling instructions under an unchanged
+description does not need the recheck.  Read the check's answer against
+the decision table in § "Corpus expansion policy": `conciliatory|conflict-averse`
+confirms conciliatory; `non-materialistic|idealistic` does not confirm
+spiritual (that one needed a description revision before it returned
+`spiritual|idealistic`).
+
+### Role pairs (procedure to design, 2026-09-11)
+
+Roles have no `negative_label` and no neg instructions, so steps 1, 3
+and 5 above do not apply; role pairs exist only in the `arrangement`
+field.  Roger (2026-09-11) wants a role-pair check that keeps the rest of
+the procedure: seed one side, generate its instructions, ask a generator
+given the description and pos instructions to name the *opposite role*
+and rate the opposition, run it from both sides, and record the pair only
+when the two sides name each other.  Needs a role mode for
+`generate_antonyms.py`.  First candidate: provincial ↔ cosmopolitan (both
+roles, both currently `singleton`); details and the existing unchecked
+role pairs in `data/roles/instructions/ROLES_TO_ADD.md` § "Role pairs to
+record".
+
+### Description-writing rules for new seeds (Sep 2026)
+
+What the voice / softening audit (2026-09-09), the role rubric V2 pilot
+(2026-09-11..12) and the Qwen response checks (2026-09-11, 2026-09-16)
+taught about writing the `description` of a new trait or role.  The
+description is the only hand-written text; everything else is generated
+from it and echoes it, so a hedge or an outsider's word here reaches the
+instructions, the eval prompt and (for roles) the responses.  Apply these
+to every seed, by hand or by a writing agent; Roger reviews before
+`seed_entities.py write`.
+
+1. **Form.**  Traits: "This means ..." (274 of 302 files; normalised
+   2026-09-07), one or two sentences, 18-32 words (p10-p90; median 24),
+   US English.  Roles: "A <role> is someone who ..." / "An <role> is a
+   ... that ..." for the recent files (older ones use "This refers to"),
+   23-43 words (median 28).  **Do not open by repeating the label**
+   ("This means being grateful: ...").  Roger, 2026-09-27: every prompt
+   that uses a description supplies the label right beside it
+   (`**{positive_label}**. {description}` in the generator, the eval
+   prompt and the pipeline judge; `**{name}**: {content}` in static
+   judging; the axis name and examples in the axis rubric header, where
+   the description is the pole text), so "X: This means being X: ..." is
+   pure repetition.  Go straight to the behaviour ("This means noticing
+   every kindness, ...") or open with a short gloss that paraphrases the
+   trait and then expand it ("This means being drained by company and
+   restored by solitude: keeping to oneself, ...").  Keep a label in the
+   opening only when it carries a qualifier that picks the sense
+   ("aristocratic about rank", "tough on people", "from the Eastern
+   Hemisphere", "having a calm temperament").  An earlier version of this
+   rule prescribed the label anchor, and 344 of the 390 descriptions
+   written in September 2026 had it (2 of the 258 older ones); see
+   `reports/seeding_log_2026-09.md` for the clean-up.
+2. **The vice is a vice.**  No "appropriately", "when appropriate",
+   "overly", "excessive", "too", "sometimes", "may", "can", "tends to",
+   "healthy", "in a balanced way"; no virtue-framing of an edgy trait
+   (irreverent is not "questions pretension", it jokes about the sacred and
+   does not care) and no villain-laundering of a bad role (a destroyer
+   destroys; a smuggler moves contraband for money).  A softened
+   description samples the inoffensive centre of the concept and the
+   pole then sits on top of an existing milder trait.
+3. **Inside voice.**  Write in words the persona would use of itself:
+   no case-worker, policy, clinical or anthropologist's vocabulary
+   ("marginalised", "engages in", "exhibits", "demonstrates", "navigates",
+   "individuals who"); name the particulars of the role's world (the
+   tools, the customers, the hours, the enemy) rather than its category.
+   For roles this matters most: the register of the description was found
+   to propagate through the instructions into Qwen's responses.  For
+   traits the instruction register does not propagate, but self-labelling
+   does, so avoid handing the generator a paragraph it can quote back.
+4. **Scope by a test, not by a list of synonyms.**  State what separates
+   this pole from its nearest neighbours, ideally as one question the
+   judge can ask ("would the persona do this if the setting were real?",
+   "does the persona argue for continuing, or simply never ask?").  Check
+   the nearest existing traits and roles before writing (nine names exist
+   on both sides; `ls data/{traits,roles}/instructions`), and if the new
+   entity is a deliberate near-duplicate of an existing one (a standard's
+   version of a plain trait), say so in `source`, never in the
+   description.
+5. **Pairs are written together.**  Both poles get the same scope, the
+   same trigger and the same length; the neg pole is an opposite, not an
+   absence ("course-correcting", not "non-tunnel-visioned"), and where no
+   opposite exists the seed keeps `non-X` and the antonym check decides.
+   Name the mechanism that keeps two neighbouring pairs apart (motivated
+   vs unmotivated; a frame believed not to count vs stakes believed high).
+   **Do not name the partner in the description** (no "This means being
+   X, never Y: ..."; no "The opposite of Y." tail).  Roger, 2026-09-25:
+   naming the partner is a thumb on the clean-pair scale (the check is
+   supposed to find the partner from the behaviour, and the label is
+   already injected into the neg instructions) and probably pulls the two
+   poles' description embeddings together.  It is a last resort for a
+   pair that cannot be had any other way, recorded as such.  The
+   committed corpus's "... rather than <opposite behaviour>" clause
+   (86 of 306 files) is tolerated but should be used only where the word
+   is polysemous and the contrast picks the sense ("temperate" about
+   beliefs, not drink); prefer letting the body after the colon do the
+   work.  The 2026-09-25 chunk-3 packets prescribed "never X"; 81 seeded
+   files and the 3D drafts were stripped and rechecked on 2026-09-26 (see
+   `reports/seeding_log_2026-09.md`).
+6. **Standards.**  For a named instrument, paraphrase the canonical
+   definition in the corpus form, keep the instrument's name out of the
+   description, put the provenance in `source`, and label
+   `<pole> (<Standard>)` (§ "Standard-derived trait labels").
+7. **Things that are not the description's job.**  Questions and eval
+   prompts are generated; do not steer them from the description.  The
+   only exception is a scope sentence the questions must respect (for
+   the frame pair: every question inside a stated frame), which goes in
+   the queue entry's `description_notes` for the reviewer, not in the
+   description.
+8. **Sensitive entities** (the part-4 sensitive batch, the physical
+   track, demographic memberships): the same rules; the description
+   states the membership or attribute plainly and stops.  No disclaimers,
+   no "respectfully".  The generator's refusals are handled at generation
+   time, not by hedging the seed.
+
+**Trait generator V2: leaning toward it (Roger, 2026-09-28).**  The rules
+above govern descriptions; several problems found in the September
+review are in the instruction generator instead (chatbot framing copied
+from the template's own "the user" example, traits rendered as what the
+persona urges on others, softened neg poles, states for tendencies).
+Roger ruled out a small template tweak on 2026-09-16 and on 2026-09-28
+said he is leaning toward a thorough V2 with a corpus-wide regeneration.
+He deferred the decision until after the chunk-3 check-in.
+The issue list, evidence, cost and timing are in
+`data/traits/instructions/TRAITS_TO_ADD.md` § "Trait generator V2".  Until
+he decides, do not edit `_ROGER_TEMPLATE`, and treat every trait
+regeneration as provisional.
+
+Writing-agent recipe (used from chunk 1 onward): give the agent this
+section, the queue entries for one sub-chunk (label, partner, the
+`description_notes` and `decision` fields, and any `description_draft`),
+the nearest-existing table if one exists, and five recent corpus
+descriptions of the same entity type as examples; ask for the description
+plus one line naming the nearest existing entity and why it is different;
+put the result in the entry's `description` field with status `ready`
+only after Roger has read it.
+
+### Seeding tooling (chunk 0, Sep 2026)
+
+`data/seed_queue.json` is the inventory of every candidate in
+`TRAITS_TO_ADD.md` and `ROLES_TO_ADD.md` (built 2026-09-16 from the two
+files by five extraction passes, then merged and checked against the
+corpus; the markdown files stay the record of the reasoning, the queue
+is the record of state).  One entry per entity with `stem`, `label`,
+`entity_type`, `chunk`, `sub_chunk`, `pairing`, `partner`,
+`arrangement_members`, `description_draft` / `description_notes` (from
+the files) and `description` (final), `source`, `tags`, `status`,
+`decision`, `alternatives`, `section` / `lines` (where in the files),
+and, once run, `check_result`.  Status lifecycle
+`candidate -> ready -> seeded -> generated -> checked -> paired | done`;
+parked: `tbd`, `backlog`, `not_adopted`, `superseded`, `exists`.
+
+[`data_analysis/seed_entities.py`](./data_analysis/seed_entities.py)
+drives it: `status`, `write` (seed JSONs for `ready` entries: traits get
+`negative_label = non-<label>` unless `pair_by_construction`, roles get
+`arrangement: singleton`; refuses to overwrite; runs
+`sync_entity_lists.py`), `generate` (calls the two regenerate scripts;
+prints the $0.03-per-entity estimate and refuses over $20 without
+`--confirm-expensive`), `check` (runs `generate_antonyms.py`, classifies
+each answer as nice / mismatch / nearly_nice / nasty / open against the
+registry of existing *and queued* stems per the decision table below,
+stores it in `check_result`), `rename --old X --new LABEL --partner Y`
+(Roger's RO action: rename the existing trait to the word the check
+returned, if free, regenerate it, re-check both sides; the file moves with
+`git mv` and gets a `renamed_from` field), `pair --a X --b Y` (reciprocal labels,
+`arrangement` pair on both, `--instructions-only` regeneration of the new
+side, `check_arrangements.py`, `sync_entity_lists.py`) and `report`.
+Every subcommand has `--dry-run`.  Tests:
+`data_analysis/tests/test_seed_entities.py`.
+
+The chunk-3 runs (2026-09-25/26) were driven by small scripts in the
+session scratchpad, not in the repo: packet builders that assemble the
+rules section above plus four post-strip example pairs and each entry's
+queue notes for the writer agents; `run_pairs.py` (fold descriptions and
+reviewer verdicts into the queue, `write` / `generate` / `check`, `pair`
+the ones whose checks name each other, print the misses); `run_singles.py`
+(the same for `non-X` singletons, recording the check answers for later
+pairing); and the one-off strip / rename / edit rounds.  Their outputs
+and every decision are in `reports/seeding_log_2026-09.md`; if the
+pattern is needed again, rebuild from that log rather than hunting for
+the scripts.  Two lessons worth keeping: a reviewer rename puts the entry
+under two stems in a stem-keyed dict (deduplicate before `write`), and
+the `check` answer is what the *checked* file's own description elicits,
+so editing a pole changes only that pole's answer.
+
+**Regenerate in a staging copy when Roger is editing (2026-09-28).**  The
+regenerate scripts read a file, spend 20-60 seconds on the API call, and
+write the whole file back, so an edit Roger saves in between is lost.
+When he is reviewing files while a batch runs, copy the files to a
+scratch directory, point `regenerate_trait_instructions.TRAITS_DIR` at it
+(import the module and set the attribute; the usage record keeps its
+repo path), run the check on the staged files with
+`generate_antonyms.classify_one`, and merge `instruction`, `questions`,
+`eval_prompt` and `generator` back only where the repo file's description
+and label still match what was staged.  Skipped files are his edits:
+rerun them.  The check is also noisier than a single run suggests: on
+the 2026-09-28 recheck of 184 pairs whose content had not changed, 22
+gained a one-way miss on a synonym, and a second regeneration brought 14
+of the 22 back.  A single miss on a previously clean pair is weak
+evidence: resample once before acting, and treat a miss that repeats
+with the same words as real.
+
+**Keep every sample (Roger, 2026-09-28).**  Record the antonym candidates
+of every check, not only the latest, together with a copy of the
+instruction set that check read: the candidates are more candidate
+labels, and they are a measure of that particular generation.  The
+record is `data/traits/antonym_check_history.jsonl`, one JSON object per
+check, append-only, beside `instructions/` so nothing that globs the
+corpus reads it: `stem`, `checked_at`, `phase`, the label the file had
+when checked (normally `non-X`), `description`, `intended`, `returned`,
+`candidates`, `known`, `category`, `intended_hit`, `score`, `reasoning`,
+`instructions` (the pos / neg pairs read) and `generator`.
+`seed_entities.py check` and `rename` append to it
+(`append_check_history`, `check_history_record`) and add each answer to
+the queue entry's `check_answers` list; `check_result` still holds the
+latest.  Any ad-hoc runner must do the same, and must write the record
+*before* the labelled `--instructions-only` regeneration overwrites the
+instructions the check read.  The 385 records from 2026-09-27/28 before
+this rule were backfilled with their candidates but without
+instructions (not kept at the time).
+
+Review order (Roger, 2026-09-17): writer agents draft, a review agent
+checks, then seed and generate *before* Roger reads the descriptions, so
+the antonym-check results accompany them; generation is cheap and a
+regeneration after his edit costs three cents, while a round trip of
+coordination costs more.  Only edits to existing files (labels, renames,
+rewrites) wait for him.
+
+### Corpus expansion policy and the clean-pair decision procedure (Sep 2026)
+
+Roger's stated trade-offs for adding traits and roles (2026-09-09), written
+down so the seeding rounds apply them consistently.  Correct here if wrong.
+
+**Three competing criteria, roughly in priority order:**
+
+1. **Gap filling.**  The goal is good coverage of the whole roles + traits
+   set across a multi-dimensional persona space, without distorting its
+   shape by oversampling one region (skewness matters), *except* that the
+   goal-related and alignment / misalignment regions are deliberately
+   sampled more heavily because they are what we most want to study.
+2. **Pair creation.**  Clean pairs are currently more useful for judging
+   and steering than triangles, simplices or sets (steering a triangle as
+   three-or-more pairs and checking the resulting geometry is planned but
+   harder), so a clean pair is worth somewhat more than two unpaired
+   points.  The premium shrinks once the number of clean pairs is well
+   above the effective dimensionality of the space (16-64 on current
+   analysis; ~21 effective dimensions in the 60-axis cohort at
+   2026-05-13), after which extra pairs mostly add redundancy.
+3. **Rewriting an existing description** for better pairing or coverage
+   (scope, emphasis, phrasing) is allowed but costs activation
+   regeneration and rejudging, so avoid it unless the improvement is
+   clear.
+
+Outside the official external arrangements, be open to discovering that a
+conceived pair is really a triangle or a larger arrangement; record what
+the generator finds rather than forcing a pair.
+
+**Where the neg instructions are actually used (verified 2026-09-09).**
+Response generation (`assistant_axis/generation.py`) builds system prompts
+from `instruction[i]["pos"]` only, so activations, vectors, axes, static
+judging (descriptions + pos instructions), steering and the refusal
+fallback never see a neg string.  The neg instructions are read by exactly
+three things: `data_analysis/generate_antonyms.py` (the clean-pair
+identification step), `data_analysis/classify_goals.py` (goal
+classification of the neg polarity, which feeds the hand-built
+`goal_roles_and_traits.json`), and `data_analysis/sample_trait_responses.py`
+(a diagnostic sampler).  Consequence: a softened *neg* pole cannot distort
+an existing vector; it can only mislead the antonym check and the goal
+tiers.  Softening in a *pos* pole or a description is what reaches the
+data.  Judge the audit flags accordingly.
+
+**Official external arrangements are held to a looser pair standard.**  For
+axes imported from a named instrument (Big Five, HEXACO, Inglehart-Welzel,
+...), the pairing is fixed by the standard: set the two `negative_label`s
+to each other by construction, so the checker sees a clean pair, and treat
+the antonym check as *informational*.  Still run it: a failed check on a
+summarised (non-canonical) description is a hint to adjust the wording.
+
+**The antonym check needs a registry of existing *and proposed* names.**
+`generate_antonyms.py` sees only the trait's own definition and
+instructions and returns one or more candidate antonyms (`a|b`).  Interpret
+its answer against the union of existing stems and the seed queue:
+
+| generator returns | case | action |
+|---|---|---|
+| one word, and it is the intended partner (existing or queued) | the nice case | pair; point the labels at each other |
+| one word, an existing or queued trait that is *not* the intended partner | mismatch | decide: relabel to the found partner, seed the intended one anyway as a sibling (triangle), or keep `non-X` |
+| several words, exactly one of them existing or queued | nearly nice | usually pair with that one; note the alternatives |
+| several words, more than one existing or queued (with or without the intended one) | the nasty case | judgement call; often a triangle or set; record the options in the queue entry, do not force a pair |
+| no existing or queued word at all | open | seed the best new word as a completion, or keep `non-X` |
+
+Having the full proposed list before seeding removes the sequencing
+problem where a partner the generator names is one we planned to add
+later.  Recorded decisions go in the seed queue entry (`decision`,
+`alternatives`), not only in chat.
+
+### The `arrangement` field (Sep 2026)
+
+Every role and trait instruction JSON may carry an `arrangement` field
+recording which set of same-type entities it belongs to and the shape of
+that set.  Decided 2026-09-08; loader and validator in
+[`assistant_axis/arrangements.py`](./assistant_axis/arrangements.py),
+CLI check in [`data_analysis/check_arrangements.py`](./data_analysis/check_arrangements.py),
+one-off backfill in [`data_analysis/backfill_arrangements.py`](./data_analysis/backfill_arrangements.py).
+
+```json
+"arrangement": {"kind": "pair", "members": ["callous", "compassionate"]}
+```
+
+or a list of such objects when the entity is in several sets (`malicious`
+is one pole of benign ↔ malicious *and* one corner of the
+compassionate / malicious / callous triangle).
+
+| kind | members | meaning |
+| --- | --- | --- |
+| `singleton` | none | belongs to no set (explicit) |
+| `pair` | 2 | one clean pair |
+| `triangle`, `tetrahedron`, `N-simplex` (N ≥ 4) | 3, 4, N+1 | mutually opposed corners |
+| `square` | 4 | two axes; the 2-cube / 2-orthoplex distinction is deliberately not kept (split into `square` / `diamond` later if it matters) |
+| `cube`, `N-cube` (N ≥ 4) | 8, 2^N | every combination of N binary axes (MBTI's 16 types are a 4-cube) |
+| `octahedron`, `N-orthoplex` (N ≥ 4) | 6, 2N | the poles of N clean pairs (HEXACO is a 6-orthoplex) |
+| `ring` | ≥ 3, ordered | circumplex: neighbours close, opposites opposite |
+| `tree` | ≥ 2, with `parent` / `children` | hierarchy (domains over aspects over facets) |
+| `map` | ≥ 2 | unordered, expected to have low-dimensional metric structure (nationalities, ethnicities) |
+| `sequence` | ≥ 2, ordered | roughly an axis with interesting deviations (the moral-circle group) |
+| `set` | ≥ 2 | unstructured |
+
+Numeric aliases are accepted and canonicalised (`2-simplex` → `triangle`,
+`3-orthoplex` → `octahedron`, `2-cube` → `square`, ...).
+
+Rules:
+
+1. **Members are file stems, never labels**, include the entity itself,
+   and are sorted, except for `sequence` and `ring` whose order is the
+   content.  Every member records the identical arrangement.
+2. **A missing field means not yet classified**; `singleton` is written
+   explicitly, and **only for a trait whose `negative_label` is a `non-X`
+   placeholder** (roles have no label).  A trait whose real-word label
+   has no file, or points one way at a trait paired elsewhere
+   (`inspirational` → discouraging, `subversive` → orthodox), stays
+   unclassified: the label is a pairing still to be decided, and the
+   checker rejects a singleton there (rule added 2026-09-17 after the
+   agent had written two such singletons).  As of the 2026-09-08 backfill the not-yet-classified traits
+   are the 142 with a real-word `negative_label` that has no file or is a
+   one-way pointer (see TRAITS_TO_ADD § "TODO: antonym gap-filling pass");
+   cleaning them up (pairs, triangles, sets, ...) is that TODO.
+3. **The pair convention is unchanged**: a clean trait pair is still two
+   files whose `negative_label` fields point at each other.  The field is
+   authoritative for *shape*; the labels stay the prompt-facing antonyms;
+   the checker refuses to let them disagree (every `pair` must be
+   reciprocal by label, every reciprocal pair must be recorded in some
+   arrangement of a classified trait, octahedra / orthoplexes must
+   partition into clean pairs).  Roles have no `negative_label`, so role
+   pairs (angel / demon, predator / prey, ...) exist only here.
+4. **Optional keys**: `axes` (the clean pairs forming the axes of a
+   square / cube / orthoplex), `parent` and `children` (tree only),
+   `source` (provenance of an imported structure), `note` (free text).
+   Unknown keys are preserved.
+5. **Check after every edit**:
+   `uv run python data_analysis/check_arrangements.py` (exit 1 on any
+   inconsistency; `--list-unclassified` prints the backlog).
+   `assistant_axis/tests/test_arrangements.py::test_real_corpus_is_consistent`
+   fails while the checked-in corpus is inconsistent.
+6. **Research task, once embeddings exist**: confirm each declared shape
+   is approximately descriptive of the embedding geometry (pairs as line
+   segments that roughly intersect at a common centre for orthoplexes;
+   the four off-pair segments of a square falling into two roughly equal,
+   parallel, mutually orthogonal sets; sequences projecting monotonically
+   onto their first principal direction).  Where it fails, reclassify,
+   except that structures imported from an external system (HEXACO, MBTI)
+   may keep their declared shape regardless.
 
 ### `data/goal_roles_and_traits.json` structure
 
@@ -4546,6 +5104,337 @@ After regenerating activations + vectors for these 8, downstream artefacts that 
 
 - `compassionate`: only `negative_label` changed (`callous` → `non-compassionate`), the description and instruction[] are unchanged. The negative_label is used only in the RP-filtering scoring step and forms a very small part of that prompt; the change is unlikely to materially shift filtering decisions.
 - `callous`, `pragmatic`, `idealistic`, `conservative`, `progressive`, `decisive`, `contrarian`: byte-identical to git HEAD after this session's cleanup; existing activations remain valid.
+
+**Sep 2026 batch (2026-09-07) -- descriptions normalised for 20 traits; instructions regenerated for 5, pending decision:**
+
+19 descriptions were normalised to the "This means ..." form and
+`analytical`'s negative_label was fixed to display form.  All 20 were
+regenerated with `claude-sonnet-4-6` (the original generator
+`claude-sonnet-4-20250514` is retired), with three untouched controls
+(`calm`, `patient`, `blunt`) run alongside: the controls drifted as much
+as the edited traits, i.e. the description edits were inert and the
+churn was the model change.  Decision (Roger, 2026-09-07): where the
+description edit was a single clean change of grammatical form, keep
+the *original* Sonnet-4 instructions and questions.
+
+- **Reverted to original instructions/questions (NOT stale, no
+  regeneration needed):** `absolutist`, `ascetic`, `assertive`,
+  `constructivist`, `cosmopolitan`, `extroverted`, `formalist`,
+  `introverted`, `materialist`, `pacifist`, `rationalist`,
+  `reductionist`, `relativist`, `universalist`, `analytical`.  Their
+  files carry the edited description + rebuilt eval_prompt over the
+  HEAD instruction/question banks.
+- **Regenerated with Sonnet 4.6 and KEPT (decision 2026-09-07; compound
+  edits: sentence merge / "This means" prefix / LLM-framing removal):**
+  `closure_seeking`, `qualitative`, `compassionate`, `conservative`,
+  `pragmatic`.  These five are STALE and need, in order:
+  1. activations + vectors regenerated on RunPod (pipeline steps 1-5 for
+     the five traits; `compassionate`, `conservative` and `pragmatic` are
+     poles of clean pairs, so the axis files for
+     `compassionate_vs_callous`, `progressive_vs_conservative`,
+     `idealistic_vs_pragmatic`, `quantitative_vs_qualitative` refresh
+     with them; `closure_seeking` has no judged axis yet);
+  2. static desc/inst rejudge -- automatic via fingerprint on the next
+     `axis_judge_correlation.py` run over those four axes;
+  3. response-mode rejudge for the four axes above (needs the new
+     responses from step 1 first);
+  4. re-pick the steering question lists whose `_meta.source_breakdown`
+     indexes into a regenerated 40-question bank -- those indices are
+     stale as of 2026-09-07: `navigator_progressive_v1.json`
+     (conservative), `podcaster_idealistic_v1.json` (pragmatic),
+     `saboteur_quantitative_v1.json` (qualitative), all in
+     `data/steering/questions/`.  The question *text* in those files is
+     unchanged, so the existing sweep results stay valid; the re-pick is
+     the manual selection step (rule=steering-questions), to do once the
+     revised activations/vectors from step 1 exist and before step 5;
+  5. steering re-sweeps for configs whose axis vector changed:
+     `journalist_callous_v1` (+ the four `smoke_test_*` configs, which
+     also use compassionate/callous -- not worth re-running),
+     `bartender_progressive_v1`, `curator_progressive_v1`,
+     `navigator_progressive_v1`, `navigator_progressive_v1_prefill`,
+     `podcaster_idealistic_v1`, `saboteur_quantitative_v1`.
+  Their pre-regeneration instructions/questions are git HEAD, so nothing
+  needs snapshotting.  Not high priority.  Roger, 2026-09-07: no RunPod is
+  set up at the moment, so steps 1-5 wait for the next RunPod round.
+- **`cosmopolitan`: label-only change (2026-09-07).**  `negative_label`
+  `provincial` (a role name, never a trait) -> `non-cosmopolitan`, per
+  Roger: the moral-circle-size spectrum is not a clean pair (probably an
+  elongated N-simplex; see TRAITS_TO_ADD.md "Moral circle").  Description,
+  instructions and questions are unchanged, so as with `compassionate`
+  above nothing is regenerated.
+- **The 15 reverted traits need only a descriptions-mode static rejudge**
+  (their description text changed; instructions, questions, responses and
+  vectors are unchanged).  That happens automatically via the description
+  fingerprint on the next `axis_judge_correlation.py` run; no RunPod work,
+  no response-mode or steering re-runs.
+
+**Sep 2026 voice-repair batch (2026-09-11) -- 61 files regenerated after
+the softening / outsider-voice audit** (report and per-file outcomes:
+`reports/voice_audit_2026-09-09.md`; decisions Roger's, 2026-09-09..11).
+47 roles and 14 traits were regenerated with `claude-sonnet-4-6` and the
+unchanged generator prompts; descriptions were rewritten for 44 roles and
+11 traits, `fixer` and three traits (`flippant`, `guileless`,
+`unforgiving`) had instructions rerolled under their old descriptions, and
+`predator` / `saboteur` had only their 40 questions replaced.  Pre-repair
+text is git HEAD for all of them (the uncommitted working-tree change
+before this batch was the `arrangement` field only).  Consequences, in
+the same order as the list above:
+
+- **STALE activations / vectors / static judge entries: every role
+  (280 files, all but `default.json`) plus the 14 regenerated traits.**
+  The voice-repair batch alone left 72 entities stale; on 2026-09-12
+  Roger adopted the V2 role rubric (`--style RogerV2`, V2.5, template
+  hash `34cfa72295f6`, recorded in each file's `generator` field) and had
+  every role regenerated under it: the 45 repaired roles and the eight
+  severity-1 voice roles (`collector`, `cosmopolitan`, `dispatcher`,
+  `parent`, `saint`, `stoic`, `veteran`, `virtuoso`) plus `doctor`,
+  `empath`, `parasite`, `survivor`, `writer` first (with V2.2, then V2.5),
+  then the remaining 222 roles in one batch ($6.63), including `predator`
+  and `saboteur`, which the questions-only decision of 2026-09-11 had left
+  on their V1 instructions.  Rollback copies: the V2.2 files of the 58 in
+  `reports/rubric_v2_pilot/roles_v2_2_adopted_snapshot/`, the V1-rubric
+  versions of the 45 repaired roles in
+  `reports/rubric_v2_pilot/roles_v1_repaired/`, and git HEAD for the 222
+  (names in `reports/rubric_v2_pilot/roles_v1_remaining.txt`; their
+  descriptions are unchanged, only instructions and questions moved).
+  Roger reserved the rollback decision until embeddings have been
+  extracted under both rubrics and compared.  The voice-flagged roles
+  grouped by treatment (instructions only vs description too vs
+  untouched), by severity, for that comparison:
+  `reports/rubric_v2_pilot/voice_flagged_roles_by_treatment.json`; pilot
+  evidence and the corpus-wide pass in
+  `reports/rubric_v2_pilot/comparison_2026-09-11.md`.  Pipeline steps
+  1-5 on the next RunPod round; the static desc/inst rejudge follows
+  automatically via the fingerprint (the `corpus_instructions`
+  multi-input is already stale, see "TODO: code housekeeping" item 3).
+- **Renamed or rewritten existing traits (2026-09-16, pairing review,
+  `reports/seeding_log_2026-09.md`)**: renames `slothful` → `lazy`,
+  `factual` → `calibrated`, `risk_taking` → `risk_seeking`, `nonchalant`
+  → `apathetic` (each file carries a `renamed_from` field and was
+  regenerated); description rewrites with regeneration for `inspirational` and
+  `supportive` (chatbot phrasing removed), `artistic` (redefined as making
+  art; its old appreciation sense became the new `aesthete`) and
+  `diplomatic` (regenerated under non-X for an unbiased check) and
+  `educational` (instructions regenerated under non-X on 2026-09-17 after
+  its pointer at superficial was reset), and, on 2026-09-17 by Roger's
+  decision, the 20 existing files whose `negative_label` had been changed
+  without regeneration, so their neg clauses match their labels:
+  `ascetic`, `conceptual`, `cosmopolitan`, `creative`, `deterministic`,
+  `eclectic`, `flirty`, `goofy`, `hedonistic`, `libertarian`,
+  `meticulous`, `misanthropic`, `moderate`, `nurturing`, `paradoxical`,
+  `passive_aggressive`, `radical`, `selfish`, `speculative`, `stoic`
+  (`--instructions-only`, question banks kept), and five more relabelled
+  and regenerated the same way during the item-7 decisions: `avoidant`,
+  `interdisciplinary`, `obsessive`, `fatalistic`, `environmental`, and any
+  existing partner the seeding run relabelled on pairing (the `pair`
+  command regenerates it; through sub-batch 1E: `erudite`, `mischievous`;
+  on 2026-09-23/25: `savage`, `sassy`, `problem_solving`, `grandiose`,
+  `utilitarian`, `generalist`, and the renames `regulatory` → `rule_abiding`,
+  `chill` → `easygoing`, `specialized` → `specialist`, the last also renamed
+  in `data/goal_roles_and_traits.json`; and on 2026-09-25 the 25 files
+  relabelled under call 4 of the pairing review: exploratory, iconoclastic,
+  wry, melodramatic, paranoid, mystical, perfectionist, enigmatic,
+  stream_of_consciousness, intuitive, whimsical, neurotic, effusive,
+  dramatic, acerbic, ironic, provocative, flippant, bitter,
+  deconstructionist, nihilistic, nostalgic, chaotic, emotional, manic, plus
+  kind_to_animals if paired); and on 2026-09-26 (the post-strip decisions)
+  the renames `assertive` → `opinionated` and `militant` → `aggressive`
+  (light description updates, regenerated in full, `militant` also renamed
+  in `data/goal_roles_and_traits.json`), `sarcastic` relabelled
+  `non-sarcastic` and regenerated `--instructions-only` (its pair with the
+  new `sincere` was dropped and `sincere` deleted as a near-duplicate of
+  `earnest`), and `bombastic` left pointing one way at `unpretentious`.
+  On 2026-09-27 (Roger's review of the paired traits, A to E) thirteen
+  more existing traits had their descriptions edited and were regenerated
+  in full: `experiential`, `hedonistic`, `benevolent`, `malevolent`,
+  `cautious`, `sycophantic`, `challenging`, `condescending`,
+  `conservative`, `independent`, `extroverted`, `calm` (rewritten as a
+  tendency) and `evil` (rewritten as what one does).
+  On 2026-09-28 more existing traits were rewritten and regenerated:
+  `accommodating`, `adaptable`, `educational`, `exploratory`, `inquisitive`,
+  `socratic` (chatbot sense removed), `adventurous` (about the persona, not
+  about urging others), `extroverted` (mirrors introverted), `manic`
+  (a tendency, not an episode), `anxious`, `melancholic` and `pensive`
+  (Roger's "habitual" edits), and `sycophantic` again.  `experiential` and
+  `data_driven` lost their pairs but not their text.  Later that day the
+  `constructivist` ↔ `essentialist` pair was dissolved into a tetrahedron
+  with `existentialist` and `nihilistic` (Roger): the two former members
+  were relabelled `non-X` and regenerated `--instructions-only`; the pair
+  is still a judged axis in `pair_list_clean.json`.  Also that day, on
+  Roger's rulings: `ritualistic` (`non-ritualistic`, singleton),
+  `calculating` (paired by decision with the new `uncalculating`) and
+  `pensive` (one-way pointer at `unreflective`) were relabelled and
+  regenerated `--instructions-only`; `ironic` was paired with a new,
+  narrower `sincere` without regeneration.  The role
+  `aligned_artificial_intelligence` was renamed
+  `instrumentally_aligned_ai` with its text unchanged (its RunPod data
+  and judge-cache entries stay under the old stem as orphans) and the
+  role `virtue_aligned_ai` was added beside it.
+  All are stale for extraction and static judging; the renamed four also leave RunPod data
+  and judge-cache entries under their old stems as orphans.
+  Old-stem data: `traits/{responses,scores,vectors,vectors_4slot}/{slothful,factual,risk_taking,nonchalant}.*`;
+  extract the new stems in the next round and delete or archive the old
+  files with it; judge caches keyed by the old `name|T` are orphans and
+  the new names get judged as new entities.
+- **Judged axes whose pole changed (axis refresh + response-mode rejudge
+  after step 1)**: the nine from the voice repair --
+  `conciliatory_vs_confrontational`, `forgiving_vs_unforgiving`,
+  `guardian_vs_destroyer`, `guileless_vs_scheming`,
+  `introverted_vs_extroverted`, `irreverent_vs_reverent`,
+  `materialistic_vs_spiritual`, `symbiont_vs_parasite`,
+  `trustworthy_vs_untrustworthy` -- and, since the corpus-wide role
+  regeneration, every axis with a role pole (in the pair lists:
+  `aligned_artificial_intelligence_vs_paperclip_maximizer`, `angel_vs_demon`, `guardian_vs_destroyer`, `predator_vs_prey`, `symbiont_vs_parasite`).
+  The first of these has a **renamed pole** since 2026-09-28
+  (`aligned_artificial_intelligence` → `instrumentally_aligned_ai`, the
+  first rename of a judged pole).  The current `pair_list_clean.json`,
+  `pair_list_di.json` and `pair_list_goalnongoal.json` carry the new
+  stem; at the refresh the axis is judged into a new
+  `instrumentally_aligned_ai_vs_paperclip_maximizer` directory.  The
+  `_v1` copies of those lists, the dated
+  `pair_list_resp_4role_pairs_2026-05-22.json` and the old directory are
+  the record of what was judged.  `constructivist_vs_essentialist` is no
+  longer a corpus pair (dissolved into a tetrahedron, same day) and was
+  removed from the current clean and di lists; its judged data stays on
+  disk and in the `_v1` lists.  `compassionate_vs_callous`, an edge of
+  the warmth triangle, was removed from the current di list for the
+  same reason (housekeeping item 6).  See § "Current canonical local data dir"
+  for which list to pass when.
+- **Steering configs whose base persona or axis vector changes (re-sweep
+  after step 1): all of them**, since every base persona is a role and
+  every role's instructions changed on 2026-09-12 (before that the list
+  was 18: `advocate_blunt_v1`, `anarchist_introverted_v1`,
+  `archaeologist_forgiving_v1`, `archaeologist_symbiont_v1`,
+  `bartender_progressive_v1`, `blogger_guardian_v1`,
+  `bohemian_conciliatory_v1`, `competitor_irreverent_v1`,
+  `fixer_egalitarian_v1`, `generalist_trustworthy_v1`,
+  `lawyer_guileless_v1`, `merchant_guileless_v1`,
+  `provincial_materialistic_v1`, `publisher_guileless_v1` (+ `_prefill`),
+  `reviewer_individualistic_v1`, `traditionalist_detached_v1`,
+  `traditionalist_precise_v1`).  Existing sweep results stay valid as
+  records of the old personas / vectors.
+- **Steering question lists whose `_meta.source_breakdown` indexes into a
+  regenerated 40-question bank (re-pick, as step 4 above): every list
+  that draws on a role bank** (all role question banks were replaced on
+  2026-09-12) plus the 13 that draw on a regenerated trait bank:
+  `advocate_blunt_v1`, `anarchist_introverted_v1`,
+  `archaeologist_forgiving_v1`, `archaeologist_symbiont_v1`,
+  `blogger_guardian_v1`, `bohemian_conciliatory_v1`,
+  `competitor_irreverent_v1`, `generalist_trustworthy_v1`,
+  `provincial_materialistic_v1`, `publisher_guileless_v1`,
+  `researcher_predator_v1`, `traditionalist_detached_v1`,
+  `traditionalist_precise_v1`.  Question text in the files is unchanged,
+  so only the provenance indices are stale.
+- **Goal lists**: every role in `data/goal_roles_and_traits.json` now has
+  regenerated instructions (2026-09-12), and so do the regenerated traits
+  in it (`introverted`, `pensive`, `regionalist`, `solemn`, `untrustworthy`).  Re-run
+  `classify_goals.py` (Opus; ~$100 for the full corpus, `--roles-only`
+  for the roles) and check tiers before the next Roger-mode pipeline
+  run.
+
+Judge side (decided 2026-09-07): the retired `claude-sonnet-4-20250514`
+default was replaced by `claude-sonnet-4-6` in
+`results_analysis/axis_judge_correlation.py`, `standardize_axis_spec.py`,
+`pc_round_trip/launch_judge_runs.py` and
+`scripts/rejudge_after_trait_edits.sh`, guarded by the judge-model
+resume check described under "Judge prompts" (rule=judging).  The
+rejudges listed above will therefore rebuild each touched Sonnet cohort
+whole; `claude-haiku-4-5-20251001` and `gpt-4.1-mini` are unchanged.
+
+### TODO: code housekeeping (Sep 2026)
+<!-- claude: archive -->
+
+Small, non-urgent code items with no better home: there is no repo-wide
+TODO file, `TRAITS_TO_ADD.md` / `ROLES_TO_ADD.md` hold corpus items, and
+the sections above hold data-regeneration items.  Tick off in place.
+
+1. **Four pre-existing test failures at git HEAD** (verified 2026-09-07 by
+   stashing the working tree; they predate the Sep 2026 edits).  Fix the
+   tests -- the code is the intended behaviour:
+   - ~~`data_analysis/tests/test_regenerate_role_instructions.py::TestBuildEvalPrompt::test_uses_0_to_3_scale`
+     expects the phrase "0 and 3", which the reason-before-score eval
+     template dropped.~~  Fixed 2026-09-11: the test now asserts the
+     reason-first ending (`SCORE: <integer from 0 to 3>`, "briefly
+     reason") and that "just the number" is absent.  No `--style` option
+     reproduces the old ending; the May 2026 change rewrote all three
+     copies, including the one inside Christina's template.
+   - `results_analysis/tests/test_infer_axis_description.py` --
+     `TestCallOpusStreaming::test_streaming_call_concatenates_text_blocks_skips_thinking`,
+     `TestCallOpusStreaming::test_streaming_with_thinking_disabled_uses_temperature_zero`
+     and `TestSummarizeAxisE2E::test_full_pipeline_with_mock`: the streaming
+     helper now returns `(text, usage)` (token-usage logging), and the tests
+     still expect, and in the E2E case mock, the bare string.
+   Roger, 2026-09-07: "needs fixing, but not this instant".  Also noted in
+   `data_analysis/README.md`.
+2. **Verify `gpt-4.1-mini` still resolves** before the next GPT rejudge.
+   There is no OpenAI key in `.env`, so it could not be checked on
+   2026-09-07 when the Anthropic models were (`claude-sonnet-4-20250514`
+   gone, `claude-haiku-4-5-20251001` fine).  A `client.models.list()` with
+   the key that runs judging settles it; if the model has been retired, the
+   GPT cohort needs the same treatment as Sonnet (new default, judge-model
+   resume guard drops and rebuilds each touched cache).
+3. **Content-based fingerprint for the `corpus_instructions` input.**
+   Judge caches record every instruction JSON as one `multi` input
+   fingerprinted by (mtime, size), so *any* edit to any of the 583 files
+   marks every cache stale, metadata-only edits included (the 2026-09-07
+   description edits already did this; the `arrangement` backfill does
+   it again, and the Sep 2026 `generator` provenance field and question
+   regenerations do it a third time).  Fix (sharpened 2026-09-12, Roger):
+   make each consumer's dependency **specific to the JSON properties
+   that actually plug into its rubric or prompt**, content-hashed per
+   entity: the static description judge depends on `description` only;
+   the static instruction judge and response generation (hence
+   activations, vectors and response-mode judging) on `description` +
+   `instruction[*].pos`; the antonym check on `instruction[*].neg` too;
+   the pipeline eval prompt on `eval_prompt`; nothing downstream on
+   `questions` except the steering question pools, whose
+   `_meta.source_breakdown` indices are the only thing a question
+   regeneration invalidates; and nothing on `arrangement`, `tags`,
+   `source` or `generator`.  Implement as the "Phase 6 content hashes"
+   note in `assistant_axis/provenance.py`, with an equivalence path so
+   existing v1 envelopes are not all invalidated at once.
+4. **Judge-facing entity names: switch prompts from the mechanical form to
+   the corpus label at the next full rejudge** (Roger, 2026-09-09).  Today
+   `display_form_name` renders `the_fool_tarot` as `the fool tarot` and
+   `honest_humble_hexaco` as `honest humble hexaco`: capitals, hyphens and
+   the pole / standard boundary are lost, and a small judge model may not
+   recognise a lowercased `hexaco` or `tarot` as a source name.  Static-mode
+   prompts also carry the description, so the risk there is small;
+   response-mode and steering prompts carry pole names only, which is
+   where it matters.  Plan: render prompt names through
+   `corpus_display_name` (the `positive_label`, capitals and hyphens
+   intact) and bump `RUBRIC_VERSION`; for the existing corpus the two
+   helpers differ only on hyphenated or apostrophe stems
+   (`systems_thinker`, `kind_to_animals`, `closure_seeking`,
+   `devils_advocate`, ...), so declare per-entity rubric equivalence for
+   everything else (the v2 -> v3 precedent) and the rejudge cost is
+   confined to those few plus any suffixed entities seeded by then.
+   Fold it into the next full rejudge rather than running it alone.
+   Decided 2026-09-09: the label convention parenthesises the standard,
+   `open (Big Five)`, `the fool (Tarot)`, so the structure is explicit in
+   prompts and plots once prompts use the label; `normalize_to_file_name`
+   drops parentheses (stem `open_big_five`).
+5. **Renamed entities: two known limits of the `renamed_from` lookup**
+   (2026-09-28).  (a) `steering/run_sweep.py` and `steering/post_judge.py`
+   still open `<kind>/instructions/<name>.json` by the stem in the
+   steering config, so a config that names a renamed entity
+   (`mechanic_aligned_artificial_intelligence_v1`) fails until it uses
+   `assistant_axis.entity_id.resolve_renamed_stem` or is rewritten.
+   Roger: acceptable, no more steering is expected before the embeddings
+   are regenerated; fix it then, with the re-sweep.  (b)
+   `seed_entities.py rename` overwrites `renamed_from`, so an entity
+   renamed twice loses its first stem; make it append to a list (the
+   resolver already reads a list) before the next double rename.  No
+   extracted or judged entity is affected today: the one double rename,
+   `motivated_reasoning_avoidant` → `_resistant` → `_immune`, was of a
+   trait created this month.
+6. **Triangles in the judged cohorts** (Roger, 2026-09-28).  An edge of a
+   triangle is not a pair: `compassionate` / `callous` was dropped from
+   the current `pair_list_di.json` (it stays in `pair_list_di_v1.json`
+   and `pair_list_13_new.json`, the records).  How to judge and steer a
+   triangle (three pairs and a check of the resulting geometry, or
+   something else) is undecided; until it is, pair lists for new work
+   carry clean pairs and role pairs only.
 
 ### TODO: variant-specific K grids in the PC round-trip experiment (May 2026)
 <!-- claude: archive -->

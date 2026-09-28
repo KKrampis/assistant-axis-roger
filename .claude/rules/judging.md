@@ -168,6 +168,37 @@ judging sweeps shouldn't abort mid-flight on a rubric bump; use when
 you want a run to halt rather than spend money rejudging entries you
 weren't planning to.
 
+**Judge-model drift on resume (Sep 2026)**.  Judge caches are keyed
+by judge *family* (`sonnet/`, `gpt/`, `haiku_responses_traits_b7_t3/`),
+not by model id, and the resume path never compared models -- so when
+`claude-sonnet-4-20250514` was retired (Sep 2026) and the Anthropic
+default moved to `claude-sonnet-4-6`, a plain resume would have appended
+4.6 scores into cohorts that were, per their own provenance, mostly
+`claude-sonnet-4-5` (52 of 56 recorded Sonnet caches; 90 more recorded
+no model at all).  [`_check_judge_model_on_resume`](results_analysis/axis_judge_correlation.py)
+now runs right after the rubric-version check in both
+`score_static_mode` and `score_responses_mode`:
+
+* recorded `judge_model` == current: keep;
+* recorded and different: **drop the whole file** (rejudged as a
+  single-model cohort) with a WARNING naming both models;
+  `--strict_judge_model` aborts instead, and the message shows the
+  `--judge_model <old>` invocation that would extend the old cohort;
+* unrecorded (legacy envelope): keep with a WARNING by default, since
+  100+ GPT and Haiku legacy caches exist and those judges did not
+  change; `--drop_unrecorded_judge_model` rejudges them whole (use it
+  for the Sonnet migration), and combined with strict it aborts.
+
+Cost of the Sonnet migration: ~1,160 static calls per axis (61 axes on
+disk), roughly $4-6 per axis at Sonnet 4.6 rates, incurred lazily the
+first time each axis is touched.  Each such run still goes through the
+expensive-operations confirmation.  The refusal allowlist
+(`data/judge_refusal_allowlist.json`) is keyed by exact model id and
+currently lists only `claude-sonnet-4-5`; the first 4.6 run over an axis
+with `virus|R` will report it as an *unexpected* gap if the refusal
+recurs -- add a `claude-sonnet-4-6` entry then, not pre-emptively.
+Tests: `test_axis_judge_correlation_phase4.py::TestCheckJudgeModelOnResume`.
+
 **Consumer side**.  Callers reading caches can audit drift without
 the producer's drop-or-abort policy via
 [`assistant_axis.judge_loaders.rubric_version_report`](assistant_axis/judge_loaders.py),

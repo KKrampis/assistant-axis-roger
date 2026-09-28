@@ -78,6 +78,99 @@ goes into the LLM's mouth.  Every rubric / prompt builder MUST
 apply `display_form_name(...)` to entity names before injecting
 them into the prompt body, examples list, or axis-name header.
 
+**Two display helpers, chosen by audience (Sep 2026).**
+
+| helper | transform | use at | never |
+| --- | --- | --- | --- |
+| `display_form_name(stem)` | mechanical `_` → space, no lookup | **LLM rubric / prompt bodies** (`axis_judge_correlation.build_static_prompt`, `build_response_batch_prompt`, `score_combinations.build_user_message`) | change its output: it is spliced into judged prompts, so any change is a rubric change (bump `RUBRIC_VERSION`, per-entity drift check) |
+| `corpus_display_name(stem_or_id, kind=None)` | lookup: trait `positive_label`, role `ROLE_DISPLAY_OVERRIDES` (`devils_advocate` → `devil's advocate`), else mechanical | **human-facing text**: plot dot labels, pole labels, legends, console output | dict keys, cache keys, ρ intersection operands, prompt text |
+
+Decision (Roger, 2026-09-07): the split stays as-is.  Prompts keep
+the mechanical form (so static rubrics still read "systems thinker"
+rather than "systems-thinker"); the effect on judging is small and
+extending the lookup to prompts would be a rubric bump for no gain.
+Revisited 2026-09-09: to be folded into the next full rejudge, see
+§ "TODO: code housekeeping (Sep 2026)" item 4.
+
+`corpus_display_name` accepts a bare stem or a `name|R` / `name|T`
+id (the id supplies the kind); with no kind it consults both tables
+and falls back to the mechanical form if a collision name ever
+displayed differently per kind (today all nine display identically).
+Tables are read once per data dir from `data/{traits,roles}/instructions/`
+(`$ASSISTANT_AXIS_DATA_DIR` overrides the location; call
+`clear_corpus_display_cache()` after editing corpus JSONs in a
+long-lived process).  The guaranteed direction is
+`normalize_to_file_name(corpus_display_name(stem)) == stem` for every
+corpus entity (tested over the whole corpus in
+`assistant_axis/tests/test_entity_id.py::TestCorpusDisplayName`).
+Switched to it 2026-09-07: `pair_slice_plots.add_label` (dots and
+poles), `canonical_angles/ca1_plane.py` annotations,
+`axis_pc_alignment_vs_peak_K.py` annotations.  Leave
+`rubric_v1_v2_compare.py`'s 4-character abbreviations and
+`infer_axis_description._display_label` (an LLM prompt site that
+already reads `positive_label`) alone.
+
+**Spelling: US English in corpus text and file names (decided 2026-09-07).**
+Labels, stems, descriptions and instructions use US spelling (`honor`,
+`laborer`, `color`), because the corpus is LLM input and the generators
+write US English; a UK-spelt stem would sit beside US-spelt generated text
+and would not match the generator's own antonym suggestions.  Roger writes
+UK English in notes and chat; convert when seeding a file.
+
+**Standard-derived trait labels: `<pole> (<Standard>)` (Sep 2026; parentheses adopted 2026-09-09).**
+When a trait or axis is imported from a named, well-known instrument
+(Inglehart–Welzel cultural map, Big Five, HEXACO, Hofstede, Moral
+Foundations, ...), the standard's name goes into the label as a
+parenthesised, capitalised suffix and into the file name lowercased with
+the parentheses dropped:
+
+| `positive_label` (display, stored in JSON) | file stem (`normalize_to_file_name`) |
+| --- | --- |
+| `traditional (Inglehart-Welzel)` | `traditional_inglehart_welzel` |
+| `secular-rational (Inglehart-Welzel)` | `secular_rational_inglehart_welzel` |
+| `survival (Inglehart-Welzel)` | `survival_inglehart_welzel` |
+| `self-expression (Inglehart-Welzel)` | `self_expression_inglehart_welzel` |
+| `openness (Big Five)` | `openness_big_five` |
+
+Rules:
+
+1. **Pole first, standard second**, using the standard's own pole
+   names and its own written form (`Big Five`, not `Big-5`; acronyms
+   in caps, `HEXACO`).  Capitalisation is what marks the suffix as a
+   proper name; there is precedent for capitals and spaces in labels
+   (`Kantian`, `cultural relativist` as negative labels).
+2. **`positive_label` is the canonical display form**; the stem is
+   derived from it by `normalize_to_file_name` (lowercase, apostrophes
+   dropped, hyphens and spaces → `_`, parentheses dropped, diacritics
+   folded to ASCII so `Gemeinschaft (Tönnies)` → `gemeinschaft_tonnies`;
+   stems stay ASCII
+   because macOS and Linux normalise accented file names differently).
+   The reverse is lossy in four new ways (capitals, diacritics, the
+   hyphen inside a double-barrelled name, the pole/standard boundary), which is why plot text must go through
+   `corpus_display_name`, never `stem.replace("_", " ")`.
+3. **`negative_label` uses the full partner label**
+   (`secular-rational (Inglehart-Welzel)`), so the antonym clause in the
+   generation prompt and the clean-pair check both see the same string.
+4. **Descriptions do not name the source.**  Paraphrase the canonical
+   one-to-two-sentence definition (recognisable to anyone who knows the
+   instrument; do not quote it verbatim).  Record provenance in an
+   optional `"source"` field on the trait JSON instead, e.g.
+   `"source": "Inglehart & Welzel, World Values Survey cultural map, traditional vs secular-rational values axis"`.
+   Both regenerate scripts carry unknown fields forward.
+5. **Import a standard's version only when its canonical definition
+   differs materially from an existing ad-hoc trait, or when the
+   comparison is the experiment.**  `conscientious`, `extroverted`,
+   `introverted`, `agreeable`, `neurotic` already exist; a
+   `conscientious (Big Five)` beside `conscientious` is deliberate
+   duplication, not an oversight, and should say so in `source`.
+6. Watch the generated instructions: the label is injected as the
+   trait name and antonym clause, so the generator can leak the
+   standard's name into a persona system prompt ("in the
+   Inglehart-Welzel sense").  The description carries the substance;
+   eyeball the pos/neg pairs and regenerate if it leaks.  If it
+   recurs, add a per-trait generation-label override rather than
+   changing the naming.
+
 Multi-word entity census (qwen-3-32b Roger 8slot corpus): 12 of 303
 traits + 4 of 281 roles = 16 of ~584.  Examples: `systems_thinker`,
 `kind_to_animals`, `stream_of_consciousness` (traits);
