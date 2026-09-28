@@ -1,5 +1,9 @@
 # Rubric V2 pilot on the 45 repaired roles (2026-09-11)
 
+*Note added 2026-09-28: wherever this report says "git HEAD" it means the
+role files as committed before the September 2026 corpus check-in, that
+is commit `93a8554`.*
+
 **Question (Roger):** for the roles whose instructions were rewritten this
 week, regenerate them under the V2 rubric, compare, and say whether V2 does
 what we wanted (voice, softening, semantic content, and the questions),

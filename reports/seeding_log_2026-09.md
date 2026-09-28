@@ -2163,3 +2163,26 @@ moral-circle sequence, 80 singletons, 34 unclassified; 338 role files.
 The queue holds no chunk 0 to 3 entry in an open state.  Validator clean,
 entity lists in sync, 1205 tests pass.  Next: Roger's commit (base
 93a8554), then chunk 4.
+
+## Check-in (2026-09-28)
+
+Roger had the whole of the September work checked in, except
+`reports/trait_gap_generation/` (a separate line of work).  Branch
+`anthropic-vllm-uv`, on top of `93a8554`, which is therefore the corpus as
+it stood before: wherever the notes of this month say "git HEAD" for a
+pre-change text, read `93a8554`.
+
+| commit | what |
+|---|---|
+| `3f6de81` | the corpus: instruction files, lists, goal list, queue, usage and check records, TRAITS_TO_ADD, ROLES_TO_ADD |
+| `d83ad01` | instruction generators and the antonym check: V2.5 role rubric, usage records, `generator` field |
+| `25ce633` | entity names: `corpus_display_name`, ASCII stems, `resolve_renamed_stem`; plot labels |
+| `fd14778` | the `arrangement` field: loader, validator, backfill |
+| `5b61820` | `tools/sync_entity_lists.py` |
+| `0ff43e8` | `data_analysis/seed_entities.py` |
+| `fc2b8e7` | axis judging: judge-model guard on resume, Sonnet 4.6, renamed poles |
+| `820d07f` | pair lists: `_v1` records and working lists |
+| `74364d1` | AGENT_NOTES, CLAUDE.md, `.claude/rules/` |
+| `f5a5cd3` | reports: this log, the voice audit, the rubric V2 pilot |
+
+A last commit carries this entry and the doc references to `93a8554`.

@@ -54,8 +54,8 @@ Christina's for roles, kept for rollback and comparison.  Roger adopted V2
 for roles on 2026-09-12 after the pilot in `reports/rubric_v2_pilot/`
 (every role file except `default.json` carries it since the corpus-wide
 regeneration later that day; subject to rollback once embeddings have
-been extracted, for which the V1-rubric files are kept there and at git
-HEAD).  The trait
+been extracted, for which the V1-rubric files are kept there and at commit
+`93a8554`, the last before the corpus check-in of 2026-09-28).  The trait
 script has no V2 yet.  Every
 regenerated role or trait file now carries a `generator` field (script,
 style, a short hash of the template text, model, temperature, thinking

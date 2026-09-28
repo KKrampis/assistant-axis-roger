@@ -3001,8 +3001,15 @@ Corpus: 659 trait files, 262 pairs, 1 tetrahedron, 2 triangles, the
 real-word one-way pointers for the tangle pass, and `malevolent`); 338
 role files (337 roles and `default.json`).  Queue: chunks 0 to 3 hold only
 final states and 16 backlog entries (optional or fallback names, and
-`wasteful`); chunk 4 (127 candidates) is next after Roger's commit.
-Every decision is in `reports/seeding_log_2026-09.md`.
+`wasteful`).  Every decision is in `reports/seeding_log_2026-09.md`.
+
+Checked in on 2026-09-28 on branch `anthropic-vllm-uv`, as ten commits
+from `3f6de81` ("Expand and rework the trait and role corpus") to
+`f5a5cd3`, plus the one that carries this note; the corpus as it stood
+before is commit `93a8554`.  `reports/trait_gap_generation/` is a separate
+line of work and was left out.  Next, in order: Roger's decision on the
+trait generator V2 (deferred until this check-in), then chunk 4 (127
+candidates).
 
 ## Trait generator V2: leaning toward doing it (Roger, 2026-09-28)
 

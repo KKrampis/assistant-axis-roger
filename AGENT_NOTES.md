@@ -4764,9 +4764,9 @@ to every seed, by hand or by a writing agent; Roger reviews before
    already injected into the neg instructions) and probably pulls the two
    poles' description embeddings together.  It is a last resort for a
    pair that cannot be had any other way, recorded as such.  The
-   committed corpus's "... rather than <opposite behaviour>" clause
-   (86 of 306 files) is tolerated but should be used only where the word
-   is polysemous and the contrast picks the sense ("temperate" about
+   pre-September corpus's "... rather than <opposite behaviour>" clause
+   (86 of the 306 files at commit `93a8554`) is tolerated but should be
+   used only where the word is polysemous and the contrast picks the sense ("temperate" about
    beliefs, not drink); prefer letting the body after the colon do the
    work.  The 2026-09-25 chunk-3 packets prescribed "never X"; 81 seeded
    files and the 3D drafts were stripped and rechecked on 2026-09-26 (see
@@ -4794,7 +4794,9 @@ from the template's own "the user" example, traits rendered as what the
 persona urges on others, softened neg poles, states for tendencies).
 Roger ruled out a small template tweak on 2026-09-16 and on 2026-09-28
 said he is leaning toward a thorough V2 with a corpus-wide regeneration.
-He deferred the decision until after the chunk-3 check-in.
+He deferred the decision until after the chunk-3 check-in, which was
+made on 2026-09-28, so the decision is now open and comes before chunk 4
+is generated.
 The issue list, evidence, cost and timing are in
 `data/traits/instructions/TRAITS_TO_ADD.md` § "Trait generator V2".  Until
 he decides, do not edit `_ROGER_TEMPLATE`, and treat every trait
@@ -5153,7 +5155,8 @@ the *original* Sonnet-4 instructions and questions.
      `bartender_progressive_v1`, `curator_progressive_v1`,
      `navigator_progressive_v1`, `navigator_progressive_v1_prefill`,
      `podcaster_idealistic_v1`, `saboteur_quantitative_v1`.
-  Their pre-regeneration instructions/questions are git HEAD, so nothing
+  Their pre-regeneration instructions/questions are in git at commit
+  `93a8554` (git HEAD until the corpus check-in of 2026-09-28), so nothing
   needs snapshotting.  Not high priority.  Roger, 2026-09-07: no RunPod is
   set up at the moment, so steps 1-5 wait for the next RunPod round.
 - **`cosmopolitan`: label-only change (2026-09-07).**  `negative_label`
@@ -5176,8 +5179,9 @@ unchanged generator prompts; descriptions were rewritten for 44 roles and
 11 traits, `fixer` and three traits (`flippant`, `guileless`,
 `unforgiving`) had instructions rerolled under their old descriptions, and
 `predator` / `saboteur` had only their 40 questions replaced.  Pre-repair
-text is git HEAD for all of them (the uncommitted working-tree change
-before this batch was the `arrangement` field only).  Consequences, in
+text is commit `93a8554` for all of them (git HEAD until the corpus
+check-in of 2026-09-28; the only working-tree change before this batch
+was the `arrangement` field).  Consequences, in
 the same order as the list above:
 
 - **STALE activations / vectors / static judge entries: every role
@@ -5194,7 +5198,8 @@ the same order as the list above:
   on their V1 instructions.  Rollback copies: the V2.2 files of the 58 in
   `reports/rubric_v2_pilot/roles_v2_2_adopted_snapshot/`, the V1-rubric
   versions of the 45 repaired roles in
-  `reports/rubric_v2_pilot/roles_v1_repaired/`, and git HEAD for the 222
+  `reports/rubric_v2_pilot/roles_v1_repaired/`, and commit `93a8554` (the
+  last before the corpus check-in of 2026-09-28) for the 222
   (names in `reports/rubric_v2_pilot/roles_v1_remaining.txt`; their
   descriptions are unchanged, only instructions and questions moved).
   Roger reserved the rollback decision until embeddings have been

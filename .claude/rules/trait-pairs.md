@@ -185,9 +185,9 @@ to every seed, by hand or by a writing agent; Roger reviews before
    already injected into the neg instructions) and probably pulls the two
    poles' description embeddings together.  It is a last resort for a
    pair that cannot be had any other way, recorded as such.  The
-   committed corpus's "... rather than <opposite behaviour>" clause
-   (86 of 306 files) is tolerated but should be used only where the word
-   is polysemous and the contrast picks the sense ("temperate" about
+   pre-September corpus's "... rather than <opposite behaviour>" clause
+   (86 of the 306 files at commit `93a8554`) is tolerated but should be
+   used only where the word is polysemous and the contrast picks the sense ("temperate" about
    beliefs, not drink); prefer letting the body after the colon do the
    work.  The 2026-09-25 chunk-3 packets prescribed "never X"; 81 seeded
    files and the 3D drafts were stripped and rechecked on 2026-09-26 (see
@@ -215,7 +215,9 @@ from the template's own "the user" example, traits rendered as what the
 persona urges on others, softened neg poles, states for tendencies).
 Roger ruled out a small template tweak on 2026-09-16 and on 2026-09-28
 said he is leaning toward a thorough V2 with a corpus-wide regeneration.
-He deferred the decision until after the chunk-3 check-in.
+He deferred the decision until after the chunk-3 check-in, which was
+made on 2026-09-28, so the decision is now open and comes before chunk 4
+is generated.
 The issue list, evidence, cost and timing are in
 `data/traits/instructions/TRAITS_TO_ADD.md` § "Trait generator V2".  Until
 he decides, do not edit `_ROGER_TEMPLATE`, and treat every trait
