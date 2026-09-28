@@ -1600,3 +1600,145 @@ class TestRubricsRenderDisplayForm:
         bumping ``RUBRIC_VERSION`` so caches written under v3 are
         identifiable in provenance."""
         assert ajc.RUBRIC_VERSION == "v3"
+
+
+# ---------------------------------------------------------------------------
+# _check_judge_model_on_resume (Sep 2026): caches are keyed by judge family,
+# so a model change must not append into an old-model cohort.
+# ---------------------------------------------------------------------------
+
+def _envelope_with_judge_model(payload, judge_model):
+    """Producer-shaped envelope with ``judge_model`` in the producer_script
+    extras (``None`` = legacy envelope that never recorded a model)."""
+    env = _make_v2_envelope_with_rubric(payload, ajc.RUBRIC_VERSION)
+    for inp in env["_provenance"]["inputs"]:
+        if inp.get("dep_key") == "producer_script":
+            inp.setdefault("extras", {})
+            if judge_model is None:
+                inp["extras"].pop("judge_model", None)
+            else:
+                inp["extras"]["judge_model"] = judge_model
+    return env
+
+
+class TestCheckJudgeModelOnResume:
+
+    def test_matching_model_keeps_cache(self, tmp_path):
+        p = tmp_path / "scores_descriptions.json"
+        p.write_text(json.dumps(_envelope_with_judge_model({"a|T": 1}, "claude-sonnet-4-6")))
+        cache = {"a|T": 1, "b|R": -2}
+        assert ajc._check_judge_model_on_resume(
+            p, cache, mode="descriptions", current_model="claude-sonnet-4-6") == cache
+
+    def test_recorded_mismatch_drops_everything_with_warning(self, tmp_path, caplog):
+        p = tmp_path / "scores_descriptions.json"
+        p.write_text(json.dumps(_envelope_with_judge_model({"a|T": 1}, "claude-sonnet-4-5")))
+        with caplog.at_level("WARNING"):
+            kept = ajc._check_judge_model_on_resume(
+                p, {"a|T": 1, "b|R": 2}, mode="descriptions", current_model="claude-sonnet-4-6")
+        assert kept == {}
+        assert "claude-sonnet-4-5" in caplog.text and "claude-sonnet-4-6" in caplog.text
+
+    def test_recorded_mismatch_strict_aborts(self, tmp_path):
+        p = tmp_path / "scores_instructions.json"
+        p.write_text(json.dumps(_envelope_with_judge_model({"a|T": 1}, "claude-sonnet-4-5")))
+        with pytest.raises(SystemExit) as ei:
+            ajc._check_judge_model_on_resume(
+                p, {"a|T": 1}, mode="instructions", current_model="claude-sonnet-4-6", strict=True)
+        assert "claude-sonnet-4-5" in str(ei.value)
+
+    def test_unrecorded_kept_by_default_with_warning(self, tmp_path, caplog):
+        p = tmp_path / "scores_descriptions.json"
+        p.write_text(json.dumps(_envelope_with_judge_model({"a|T": 1}, None)))
+        cache = {"a|T": 1}
+        with caplog.at_level("WARNING"):
+            kept = ajc._check_judge_model_on_resume(
+                p, cache, mode="descriptions", current_model="claude-sonnet-4-6")
+        assert kept == cache
+        assert "no judge_model" in caplog.text
+
+    def test_unrecorded_dropped_when_flag_set(self, tmp_path):
+        p = tmp_path / "scores_descriptions.json"
+        p.write_text(json.dumps(_envelope_with_judge_model({"a|T": 1}, None)))
+        kept = ajc._check_judge_model_on_resume(
+            p, {"a|T": 1}, mode="descriptions", current_model="claude-sonnet-4-6",
+            drop_unrecorded=True)
+        assert kept == {}
+
+    def test_unrecorded_drop_plus_strict_aborts(self, tmp_path):
+        p = tmp_path / "scores_descriptions.json"
+        p.write_text(json.dumps(_envelope_with_judge_model({"a|T": 1}, None)))
+        with pytest.raises(SystemExit):
+            ajc._check_judge_model_on_resume(
+                p, {"a|T": 1}, mode="descriptions", current_model="claude-sonnet-4-6",
+                strict=True, drop_unrecorded=True)
+
+    def test_bare_legacy_cache_without_envelope_is_unrecorded(self, tmp_path):
+        p = tmp_path / "scores_descriptions.json"
+        p.write_text(json.dumps({"a|T": 1}))  # no envelope at all
+        assert ajc._peek_judge_model(p) is None
+        assert ajc._check_judge_model_on_resume(
+            p, {"a|T": 1}, mode="descriptions", current_model="x") == {"a|T": 1}
+
+    def test_empty_cache_passes_through(self, tmp_path):
+        p = tmp_path / "scores_descriptions.json"
+        assert ajc._check_judge_model_on_resume(
+            p, {}, mode="descriptions", current_model="x") == {}
+
+    def test_default_anthropic_judge_is_sonnet_4_6(self):
+        assert ajc._default_model_for_provider("anthropic") == "claude-sonnet-4-6"
+        assert ajc._judge_family("anthropic", None) == "sonnet"
+
+
+# ---------------------------------------------------------------------------
+# Pole descriptions for poles renamed since the pair list was written
+# ---------------------------------------------------------------------------
+
+from assistant_axis.entity_id import clear_corpus_display_cache  # noqa: E402
+
+
+class TestPoleInstructionPath:
+    """``pair_list_*_v1.json`` names poles by the stems they were judged
+    under.  The description lookup follows ``renamed_from``; vectors and
+    judge caches are never remapped."""
+
+    @staticmethod
+    def _corpus(root: Path) -> Path:
+        d = root / "roles" / "instructions"; d.mkdir(parents=True)
+        (root / "traits" / "instructions").mkdir(parents=True)
+        (d / "instrumentally_aligned_ai.json").write_text(json.dumps({
+            "description": "An aligned artificial intelligence is an intelligent agentic tool.",
+            "renamed_from": {"stem": "aligned_artificial_intelligence", "date": "2026-09-28"}}))
+        (d / "paperclip_maximizer.json").write_text(json.dumps({"description": "A paperclip maximizer ..."}))
+        return root
+
+    def test_current_stem_is_used_as_is(self, tmp_path: Path, caplog):
+        root = self._corpus(tmp_path)
+        try:
+            with caplog.at_level("WARNING", logger="axis_judge"):
+                p = ajc._pole_instruction_path(root, "roles", "paperclip_maximizer")
+            assert p == root / "roles" / "instructions" / "paperclip_maximizer.json"
+            assert caplog.records == []
+        finally:
+            clear_corpus_display_cache()
+
+    def test_renamed_pole_reads_the_renamed_file_and_warns(self, tmp_path: Path, caplog):
+        root = self._corpus(tmp_path)
+        try:
+            with caplog.at_level("WARNING", logger="axis_judge"):
+                p = ajc._pole_instruction_path(root, "roles", "aligned_artificial_intelligence")
+            assert p == root / "roles" / "instructions" / "instrumentally_aligned_ai.json"
+            assert json.loads(p.read_text())["description"].startswith("An aligned artificial intelligence")
+            assert any("renamed" in r.getMessage() and "instrumentally_aligned_ai" in r.getMessage()
+                       for r in caplog.records)
+        finally:
+            clear_corpus_display_cache()
+
+    def test_unknown_pole_keeps_its_own_path_so_the_open_fails_loudly(self, tmp_path: Path):
+        root = self._corpus(tmp_path)
+        try:
+            p = ajc._pole_instruction_path(root, "roles", "no_such_role")
+            assert p == root / "roles" / "instructions" / "no_such_role.json"
+            assert not p.exists()
+        finally:
+            clear_corpus_display_cache()

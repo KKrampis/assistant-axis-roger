@@ -93,7 +93,7 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 
-DEFAULT_MODEL = "claude-sonnet-4-20250514"
+DEFAULT_MODEL = "claude-sonnet-4-6"
 DEFAULT_MAX_TOKENS = 1500
 
 
@@ -279,7 +279,7 @@ def standardize_axis_spec(
         :mod:`infer_axis_description`. Must contain ``pos_pole`` and
         ``neg_pole`` keys; other fields are passed through.
     model : str, optional
-        Anthropic model name. Default ``claude-sonnet-4-20250514``.
+        Anthropic model name. Default ``claude-sonnet-4-6``.
     max_tokens : int, optional
         Output token budget. Default ``1500`` (covers two rephrased poles
         plus tag scaffolding).
