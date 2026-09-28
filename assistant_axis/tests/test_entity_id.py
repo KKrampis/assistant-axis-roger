@@ -459,3 +459,254 @@ class TestDisplayFormName:
 
     def test_empty_string(self):
         assert display_form_name("") == ""
+
+
+# ---------------------------------------------------------------------------
+# corpus_display_name(): corpus-backed display form for plots / console
+# ---------------------------------------------------------------------------
+
+import json
+from pathlib import Path
+
+from assistant_axis.entity_id import (
+    ROLE_DISPLAY_OVERRIDES,
+    clear_corpus_display_cache,
+    corpus_display_name,
+    default_data_dir,
+)
+
+
+class TestCorpusDisplayName:
+    """Lookup-backed display names (Sep 2026).  ``display_form_name``
+    stays mechanical because it feeds judge rubrics; this helper is
+    for human-facing text and reads the stored ``positive_label`` /
+    role overrides from ``data/``.  See AGENT_NOTES "File-name vs
+    display-name convention"."""
+
+    def test_trait_positive_label_wins(self):
+        assert corpus_display_name("systems_thinker") == "systems-thinker"
+        assert corpus_display_name("systems_thinker", "traits") == "systems-thinker"
+        assert corpus_display_name("big_picture") == "big-picture"
+        assert corpus_display_name("kind_to_animals") == "kind-to-animals"
+
+    def test_entity_id_input_supplies_kind(self):
+        assert corpus_display_name("systems_thinker|T") == "systems-thinker"
+        assert corpus_display_name("devils_advocate|R") == "devil's advocate"
+        assert corpus_display_name("patient|R") == "patient"
+
+    def test_role_override_and_mechanical_fallback(self):
+        assert corpus_display_name("devils_advocate") == "devil's advocate"
+        assert corpus_display_name("devils_advocate", "role") == "devil's advocate"
+        assert corpus_display_name("aligned_artificial_intelligence") \
+            == "aligned artificial intelligence"
+
+    def test_unknown_name_falls_back_to_display_form_name(self):
+        assert corpus_display_name("obama_administration_health_team") \
+            == "obama administration health team"
+        assert corpus_display_name("") == ""
+
+    def test_collision_names_unchanged(self):
+        for name in COLLISION_NAMES:
+            assert corpus_display_name(name) == name
+            assert corpus_display_name(name, "traits") == name
+            assert corpus_display_name(name, "roles") == name
+
+    def test_never_used_as_key_round_trips_whole_corpus(self):
+        """``normalize_to_file_name(corpus_display_name(stem, kind)) == stem``
+        for every trait and role file on disk -- the one direction the
+        convention guarantees (stem -> display is lossy, display ->
+        stem is not)."""
+        data = default_data_dir()
+        for kind, sub in (("traits", "traits"), ("roles", "roles")):
+            stems = [p.stem for p in (data / sub / "instructions").glob("*.json")]
+            assert len(stems) > 100, f"corpus not found under {data}"
+            bad = [s for s in stems
+                   if normalize_to_file_name(corpus_display_name(s, kind)) != s]
+            assert bad == [], bad
+
+    def test_standard_suffixed_label_round_trips(self, tmp_path: Path):
+        """The Sep-2026 naming convention for traits imported from a
+        named standard: label ``<pole> <Standard>`` with capitals and
+        an internal hyphen, stem = ``normalize_to_file_name(label)``.
+        The lookup must return the label verbatim and the round trip
+        must hold, using an isolated data dir so the cache for the
+        real corpus is untouched."""
+        tdir = tmp_path / "traits" / "instructions"; tdir.mkdir(parents=True)
+        (tmp_path / "roles" / "instructions").mkdir(parents=True)
+        label = "traditional (Inglehart-Welzel)"
+        stem = normalize_to_file_name(label)
+        assert stem == "traditional_inglehart_welzel"
+        (tdir / f"{stem}.json").write_text(json.dumps({
+            "positive_label": label, "negative_label": "secular-rational Inglehart-Welzel",
+            "description": "x", "instruction": [], "questions": [], "eval_prompt": "x",
+        }))
+        try:
+            assert corpus_display_name(stem, data_dir=tmp_path) == label
+            assert corpus_display_name(f"{stem}|T", data_dir=tmp_path) == label
+            assert normalize_to_file_name(corpus_display_name(stem, data_dir=tmp_path)) == stem
+            # mechanical helper stays lossy on purpose (prompt-stable)
+            assert display_form_name(stem) == "traditional inglehart welzel"
+        finally:
+            clear_corpus_display_cache()
+
+    def test_missing_data_dir_degrades_to_mechanical(self, tmp_path: Path):
+        try:
+            assert corpus_display_name("systems_thinker", data_dir=tmp_path / "nope") \
+                == "systems thinker"
+        finally:
+            clear_corpus_display_cache()
+
+    def test_overrides_in_sync_with_data_analysis(self):
+        from data_analysis.regenerate_role_instructions import _ROLE_NAME_OVERRIDES
+        assert ROLE_DISPLAY_OVERRIDES == _ROLE_NAME_OVERRIDES
+
+    def test_display_form_name_unchanged_by_lookup(self):
+        """Regression guard: the prompt-stable helper must NOT start
+        consulting the corpus (that would be a silent rubric change)."""
+        assert display_form_name("systems_thinker") == "systems thinker"
+        assert display_form_name("devils_advocate") == "devils advocate"
+
+
+# ---------------------------------------------------------------------------
+# normalize_to_file_name(): ASCII folding (Sep 2026)
+# ---------------------------------------------------------------------------
+
+
+class TestNormalizeToFileNameAsciiFold:
+    """Diacritics fold to ASCII so stems stay ASCII on every filesystem;
+    the label keeps them (``Gemeinschaft Tönnies`` -> ``gemeinschaft_tonnies``).
+    See AGENT_NOTES "Standard-derived trait labels", rule 2."""
+
+    def test_umlaut_in_standard_suffix(self):
+        assert normalize_to_file_name("Gemeinschaft (Tönnies)") == "gemeinschaft_tonnies"
+        assert normalize_to_file_name("Gesellschaft (Tönnies)") == "gesellschaft_tonnies"
+        # Idempotent on the folded result.
+        assert normalize_to_file_name("gemeinschaft_tonnies") == "gemeinschaft_tonnies"
+
+    def test_accents_ligatures_and_special_letters(self):
+        assert normalize_to_file_name("Bahá'í") == "bahai"
+        assert normalize_to_file_name("naïve") == "naive"
+        assert normalize_to_file_name("Straße") == "strasse"
+        assert normalize_to_file_name("Ærø") == "aero"
+        assert normalize_to_file_name("Łódź") == "lodz"
+
+    def test_nfc_and_nfd_input_fold_identically(self):
+        import unicodedata
+        nfc = "Tönnies"
+        nfd = unicodedata.normalize("NFD", nfc)
+        assert nfc != nfd
+        assert normalize_to_file_name(nfc) == normalize_to_file_name(nfd) == "tonnies"
+
+    def test_en_and_em_dashes_become_underscores(self):
+        assert normalize_to_file_name("Inglehart\u2013Welzel") == "inglehart_welzel"
+        assert normalize_to_file_name("self\u2014expression") == "self_expression"
+
+    def test_ascii_input_unchanged(self):
+        for name in ["patient", "systems_thinker", "traditional_inglehart_welzel"]:
+            assert normalize_to_file_name(name) == name
+
+
+class TestNormalizeToFileNameParentheses:
+    """Sep 2026 label convention: the standard is a parenthesised suffix in
+    the label (``open (Big Five)``) and absent from the stem."""
+
+    def test_parenthesised_standard(self):
+        assert normalize_to_file_name("open (Big Five)") == "open_big_five"
+        assert normalize_to_file_name("honest-humble (HEXACO)") == "honest_humble_hexaco"
+        assert normalize_to_file_name("secular-rational (Inglehart-Welzel)") == "secular_rational_inglehart_welzel"
+        assert normalize_to_file_name("the fool (Tarot)") == "the_fool_tarot"
+
+    def test_no_stray_underscores(self):
+        assert normalize_to_file_name("open ( Big Five )") == "open_big_five"
+        assert normalize_to_file_name("(Big Five) open") == "big_five_open"
+        assert normalize_to_file_name("blood type [A]") == "blood_type_a"
+
+    def test_old_unparenthesised_form_gives_same_stem(self):
+        assert normalize_to_file_name("open Big Five") == normalize_to_file_name("open (Big Five)")
+
+
+# ---------------------------------------------------------------------------
+# resolve_renamed_stem: old stem -> the stem the corpus uses now (Sep 2026)
+# ---------------------------------------------------------------------------
+
+from assistant_axis.entity_id import resolve_renamed_stem  # noqa: E402
+
+
+class TestResolveRenamedStem:
+    """An older pair list or steering config names an entity by the stem it
+    had when that file was written; the corpus file records the old stem in
+    ``renamed_from``.  Isolated data dirs, so the real corpus's cache is
+    untouched."""
+
+    @staticmethod
+    def _corpus(root: Path, kind: str, files: dict) -> Path:
+        d = root / kind / "instructions"; d.mkdir(parents=True, exist_ok=True)
+        for stem, doc in files.items():
+            (d / f"{stem}.json").write_text(json.dumps({"description": "x", **doc}))
+        return root
+
+    def test_renamed_role_resolves_and_kind_aliases_work(self, tmp_path: Path):
+        self._corpus(tmp_path, "roles", {
+            "instrumentally_aligned_ai": {"renamed_from": {"stem": "aligned_artificial_intelligence", "date": "2026-09-28"}},
+            "paperclip_maximizer": {},
+        })
+        try:
+            for kind in ("roles", "role", "R"):
+                assert resolve_renamed_stem("aligned_artificial_intelligence", kind, data_dir=tmp_path) \
+                    == "instrumentally_aligned_ai"
+            assert resolve_renamed_stem("paperclip_maximizer", "roles", data_dir=tmp_path) == "paperclip_maximizer"
+        finally:
+            clear_corpus_display_cache()
+
+    def test_existing_file_wins_over_a_recorded_rename(self, tmp_path: Path):
+        """A stem that was freed by a rename and later reused keeps its own file."""
+        self._corpus(tmp_path, "traits", {"kind": {}, "generous": {"renamed_from": "kind"}})
+        try:
+            assert resolve_renamed_stem("kind", "traits", data_dir=tmp_path) == "kind"
+        finally:
+            clear_corpus_display_cache()
+
+    def test_dict_bare_string_and_list_forms(self, tmp_path: Path):
+        """The three shapes ``renamed_from`` takes.  An entity renamed more
+        than once needs the list form to keep its earlier stems: the record
+        lives on the current file, so a stem left out of it is lost."""
+        self._corpus(tmp_path, "traits", {
+            "immune": {"renamed_from": {"stem": "resistant", "date": "2026-09-26"}},
+            "lazy": {"renamed_from": "slothful"},
+            "easygoing": {"renamed_from": [{"stem": "chill"}, "mellow"]},
+        })
+        try:
+            assert resolve_renamed_stem("resistant", "traits", data_dir=tmp_path) == "immune"
+            assert resolve_renamed_stem("slothful", "traits", data_dir=tmp_path) == "lazy"
+            assert resolve_renamed_stem("chill", "traits", data_dir=tmp_path) == "easygoing"
+            assert resolve_renamed_stem("mellow", "traits", data_dir=tmp_path) == "easygoing"
+            assert resolve_renamed_stem("avoidant", "traits", data_dir=tmp_path) == "avoidant"
+        finally:
+            clear_corpus_display_cache()
+
+    def test_unknown_stem_and_missing_dir_are_returned_unchanged(self, tmp_path: Path):
+        self._corpus(tmp_path, "traits", {"calm": {}})
+        try:
+            assert resolve_renamed_stem("never_existed", "traits", data_dir=tmp_path) == "never_existed"
+            assert resolve_renamed_stem("calm", "roles", data_dir=tmp_path) == "calm"
+            assert resolve_renamed_stem("calm", "traits", data_dir=tmp_path / "nope") == "calm"
+        finally:
+            clear_corpus_display_cache()
+
+    def test_kinds_do_not_leak_into_each_other(self, tmp_path: Path):
+        self._corpus(tmp_path, "traits", {"aggressive": {"renamed_from": {"stem": "militant"}}})
+        self._corpus(tmp_path, "roles", {"soldier": {}})
+        try:
+            assert resolve_renamed_stem("militant", "traits", data_dir=tmp_path) == "aggressive"
+            assert resolve_renamed_stem("militant", "roles", data_dir=tmp_path) == "militant"
+        finally:
+            clear_corpus_display_cache()
+
+    def test_real_corpus_renamed_pole(self):
+        """The one judged pole renamed so far (2026-09-28)."""
+        assert resolve_renamed_stem("aligned_artificial_intelligence", "roles") == "instrumentally_aligned_ai"
+        assert resolve_renamed_stem("paperclip_maximizer", "roles") == "paperclip_maximizer"
+
+    def test_unknown_kind_raises(self, tmp_path: Path):
+        with pytest.raises(ValueError):
+            resolve_renamed_stem("calm", "axes", data_dir=tmp_path)

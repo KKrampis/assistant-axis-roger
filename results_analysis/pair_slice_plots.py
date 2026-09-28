@@ -75,6 +75,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
+from assistant_axis.entity_id import corpus_display_name
 from assistant_axis import (
     kind_color,
     kind_marker,
@@ -219,6 +220,9 @@ SEMANTIC_BONUS: dict[str, float] = {
     "angel": 70, "saint": 70, "bodhisattva": 70, "demon": 60,
     "villain": 45, "hero": 45,
     "paperclip_maximizer": 80, "aligned_artificial_intelligence": 80,
+    # aligned_artificial_intelligence was renamed 2026-09-28; both stems
+    # are listed so plots of older extractions keep their priority
+    "instrumentally_aligned_ai": 80, "virtue_aligned_ai": 80,
     "scientist": 40, "philosopher": 40, "engineer": 30, "scholar": 30,
     "priest": 30, "judge": 25,
     "soldier": 20, "warrior": 20, "rogue": 20, "trickster": 20,
@@ -406,16 +410,16 @@ def plot_pair(pos_name: str, neg_name: str,
     def add_label(kind: str, name: str, x: float, y: float, side: str,
                   is_pole: bool = False):
         offset, ha = _side_offset(side)
-        if is_pole:
-            return ax.annotate(name, (x, y), fontsize=11, fontweight="bold",
-                               xytext=(7, 5), textcoords="offset points")
         # Project-wide kind→{color,fontstyle} convention from
-        # assistant_axis.plot_palette; roles also display with
-        # underscores stripped for legibility (single-word
-        # role-card filenames typically use _ as a word separator).
+        # assistant_axis.plot_palette.  Labels use the corpus display
+        # form (trait ``positive_label`` / role override) via
+        # ``corpus_display_name``; never the file-form stem.
         kind_long_name = "roles" if kind == "role" else "traits"
+        disp = corpus_display_name(name, kind_long_name)
+        if is_pole:
+            return ax.annotate(disp, (x, y), fontsize=11, fontweight="bold",
+                               xytext=(7, 5), textcoords="offset points")
         style = kind_text_style(kind_long_name)
-        disp = name.replace("_", " ") if kind == "role" else name
         return ax.annotate(disp, (x, y), fontsize=8, xytext=offset,
                            textcoords="offset points", ha=ha, **style)
 

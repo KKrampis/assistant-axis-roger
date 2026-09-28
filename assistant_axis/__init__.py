@@ -76,6 +76,7 @@ from .entity_id import (
     kind_long,
     normalize_to_file_name,
     display_form_name,
+    corpus_display_name,
 )
 from .pair_list_cohort import cohort_from_pairs, pair_type_of
 from .judge_batch import RESPONSE_BATCH_SIZE, response_subdir
@@ -137,6 +138,7 @@ __all__ = [
     "kind_long",
     "normalize_to_file_name",
     "display_form_name",
+    "corpus_display_name",
     "cohort_from_pairs",
     "pair_type_of",
     # Response-judging batch-size convention
