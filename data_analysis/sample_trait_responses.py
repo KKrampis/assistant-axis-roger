@@ -8,7 +8,7 @@ Usage:
     uv run python data_analysis/sample_trait_responses.py techno_hierophantic
     uv run python data_analysis/sample_trait_responses.py techno_hierophantic --n-questions 3
     uv run python data_analysis/sample_trait_responses.py techno_hierophantic --pairs 0 2 4
-    uv run python data_analysis/sample_trait_responses.py techno_hierophantic --model claude-sonnet-4-20250514
+    uv run python data_analysis/sample_trait_responses.py techno_hierophantic --model claude-sonnet-4-6
 """
 
 import argparse
@@ -110,7 +110,7 @@ def main():
     parser.add_argument("trait", help="Trait file stem (e.g. techno_hierophantic)")
     parser.add_argument("--n-questions", type=int, default=3, help="Number of questions to sample (default: 3)")
     parser.add_argument("--pairs", type=int, nargs="+", help="Instruction pair indices to use (default: all)")
-    parser.add_argument("--model", default="claude-sonnet-4-20250514", help="Model to use")
+    parser.add_argument("--model", default="claude-sonnet-4-6", help="Model to use")
     parser.add_argument("--max-tokens", type=int, default=512, help="Max tokens per response")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for question sampling")
     args = parser.parse_args()
