@@ -103,3 +103,43 @@ Verified directly (not inferred from commit messages):
 Re-running `judge_tier_cost_eval.py` / `judge_tier_cost_plot.py` today,
 unchanged, reproduces exactly the same 12 points (2 axes × 6 tiers) already
 committed — there is nothing new to add without one of the two steps above.
+
+## Clarification: patching the script for resume/dedup does NOT unlock the 996-entity corpus
+
+A natural next question is "what if we patch `judge_tier_cost_eval.py` to skip
+entities it's already scored (avoid re-paying for the 561 repeats), and just
+run it against the full 996-entity corpus?" This doesn't work, because there
+are two independent blockers and the resume patch only addresses one:
+
+| Blocker | What it is | Fixed by patching `judge_tier_cost_eval.py`? |
+|---|---|---|
+| No resume/dedup logic | The script re-scores every entity on every run, even ones already scored — wastes money on repeats | **Yes** |
+| No geometric projection for the 435 new entities | The script derives its entity list *directly from `projections.json`* (`entity_names = sorted(any_slot.keys())`) — it can only ever process entities that already have a GPU-computed projection | **No** — a judging-loop patch cannot invent a projection that was never computed; that needs the GPU pipeline (activations → vectors → projections), a different step entirely |
+
+So today, even with a resume patch applied, pointing the script at "the
+complete 996" changes nothing: `angel_vs_demon/gpt/projections.json` still
+only has 571 keys, and the 435 new entities remain invisible to the script
+no matter how its judging loop is patched.
+
+**If** the geometric blocker were separately resolved (someone ran the GPU
+pipeline for the 435 new entities and `projections.json` grew to cover all
+996), here is what would concretely change in the plots:
+
+- Same shape: still 2 axes × 6 tiers = 12 points, same `$/axis` vs
+  `1/(1-rho)` chart.
+- `n` goes from 571 → 996 for every point's correlation.
+- The rho values would likely shift (up or down) — not because anything got
+  "more accurate," but because it becomes a different, larger, differently
+  composed sample. It is a new measurement, not a refined version of the old
+  one.
+- Cost **with** a resume patch: only judge the net-new 435 per tier —
+  roughly $6.2–6.4/axis (6 tiers), ~$12.5–12.8 both axes.
+- Cost **without** the patch: re-judge all 996, including the 561 already
+  scored — roughly $14.3–14.7/axis, ~$28.6–29.3 both axes, of which ~$16.6
+  is pure duplicate spend on data already held.
+
+The resume patch is worth doing eventually (it's the difference between
+~$12.5 and ~$28.6 for the same end result), but it is not what stands
+between us and a 996-entity plot today — the missing GPU/projections data
+for the 435 new entities is the actual blocker, and no script patch touches
+that.
