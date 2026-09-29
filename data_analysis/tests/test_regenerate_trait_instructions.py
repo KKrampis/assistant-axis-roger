@@ -624,3 +624,74 @@ class TestAtomicWriteJson:
         p = tmp_path / "out.json"
         atomic_write_json(p, {"a": 1})
         assert p.read_text().endswith("\n")
+
+
+class TestUsageTracking:
+    """Every API response ticks the MultiModelUsage tracker (AGENT_NOTES
+    "Token usage logging is mandatory on batched LLM call sites")."""
+
+    def test_regenerate_one_charges_tracker(self, trait_file):
+        from assistant_axis.judge_pricing import MultiModelUsage
+
+        resp = _make_response(json.dumps(FAKE_ROGER_RESPONSE))
+        resp.usage = MagicMock(input_tokens=1200, output_tokens=3400)
+        client = AsyncMock()
+        client.messages.create = AsyncMock(return_value=resp)
+        tracker = MultiModelUsage()
+        result = asyncio.run(
+            regenerate_one(
+                client, trait_file, n_variants=5, n_questions=40,
+                instructions_only=False, model="claude-sonnet-4-6",
+                semaphore=asyncio.Semaphore(10), temperature=1.0,
+                force=True, dry_run=False, usage=tracker,
+            )
+        )
+        assert result.startswith("OK")
+        assert tracker.n_calls == 1
+        assert tracker.total_prompt_tokens == 1200
+        assert tracker.total_completion_tokens == 3400
+        assert list(tracker.per_model) == ["claude-sonnet-4-6"]
+        assert tracker.total_cost_usd > 0
+
+    def test_persist_usage_merges_into_existing_file(self, tmp_path):
+        from assistant_axis.judge_pricing import MultiModelUsage
+
+        path = tmp_path / "regeneration_usage.json"
+        first = MultiModelUsage(); first.charge("claude-sonnet-4-6", 100, 200)
+        module.persist_usage(first, path)
+        second = MultiModelUsage(); second.charge("claude-sonnet-4-6", 10, 20)
+        module.persist_usage(second, path)
+        total = MultiModelUsage.load_or_create(path)
+        assert total.n_calls == 2
+        assert total.total_prompt_tokens == 110
+        assert total.total_completion_tokens == 220
+
+    def test_dry_run_and_default_do_not_need_a_tracker(self, trait_file, mock_client):
+        # usage=None (the default) must remain a no-op for existing callers
+        result = asyncio.run(
+            regenerate_one(
+                mock_client, trait_file, n_variants=5, n_questions=40,
+                instructions_only=False, model="test-model",
+                semaphore=asyncio.Semaphore(10), temperature=1.0,
+                force=True, dry_run=False,
+            )
+        )
+        assert result.startswith("OK")
+
+
+class TestGeneratorProvenance:
+    def test_generator_field_written(self, trait_file, mock_client, monkeypatch):
+        monkeypatch.setattr(module, "PROMPT_STYLE", "Roger")
+        monkeypatch.setattr(module, "USE_ANTONYM", True)
+        asyncio.run(regenerate_one(
+            mock_client, trait_file, n_variants=5, n_questions=40, instructions_only=False,
+            model="test-model", semaphore=asyncio.Semaphore(10), temperature=1.0,
+            force=True, dry_run=False,
+        ))
+        g = json.loads(trait_file.read_text())["generator"]
+        assert g["style"] == "Roger" and g["model"] == "test-model" and g["use_antonym"] is True
+        assert g["template_sha256"] == module.template_sha256("Roger") and len(g["template_sha256"]) == 12
+        assert g["script"] == "regenerate_trait_instructions.py"
+
+    def test_jacob_style_has_no_template_hash(self):
+        assert module.template_sha256("Jacob") is None

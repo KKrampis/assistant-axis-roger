@@ -463,7 +463,8 @@ So per batch: `input ≈ 320 + B × 438`, `output ≈ 80`.
 
 **Pricing** (gpt-4.1-mini, 2026 rates): input **$0.40 / 1M tokens**,
 output **$1.60 / 1M tokens**. Anthropic's `claude-haiku-4-5-20251001`
-costs $1.00 / $5.00 per 1M; `claude-sonnet-4-20250514` is $3.00 /
+costs $1.00 / $5.00 per 1M; `claude-sonnet-4-6` (and the retired
+`claude-sonnet-4-20250514` / `claude-sonnet-4-5` it replaced) is $3.00 /
 $15.00 per 1M.
 
 **Items per axis**: with the project's standard scoring corpus the
@@ -1597,6 +1598,23 @@ filenames stay stable because they encode definition, not count.  Add
 new pairs by running the judge pipeline and editing/creating a new pair
 list JSON.
 
+**Two generations since 2026-09-28.**  `pair_list_clean.json`,
+`pair_list_di.json` and `pair_list_goalnongoal.json` follow the corpus as
+it is now and are for the next extraction.  `pair_list_clean_v1.json`,
+`pair_list_di_v1.json` and `pair_list_goalnongoal_v1.json` are byte-exact
+copies of the lists as judged: **pass these with the data and judge
+caches that exist today** (`--pairs pair_list_di_v1.json`), because the
+current lists name a renamed pole (`instrumentally_aligned_ai`) that has
+no vector or judged directory yet, and omit `constructivist` /
+`essentialist`, which is no longer a clean pair, and (di only)
+`compassionate` / `callous`, an edge of a triangle.  The cohort token is
+taken from the file name, so such a run writes `..._di_v1_...` outputs;
+the `..._di_...` and `..._clean_...` outputs already on disk were produced
+from what are now the `_v1` lists.  A `_v1` list's old pole stems still
+resolve to their descriptions through the corpus files' `renamed_from`
+(`assistant_axis.entity_id.resolve_renamed_stem`); vectors and caches
+are looked up under the stem in the list, unchanged.
+
 #### `whitening_k_sweep.py`
 
 For each axis pair and source ∈ {`desc_inst`, `responses`}, fit a
@@ -2631,10 +2649,16 @@ low c² coincides with high m_cos²).
 
 ### Judge defaults
 
-Judge model defaults: `claude-sonnet-4-20250514` with `--provider anthropic`
-(the default), `gpt-4.1-mini` with `--provider openai`. Results cache under
-`<output_dir>/scores_*.json` and resume on rerun; pass `--no_cache` to
-rescore from scratch.
+Judge model defaults: `claude-sonnet-4-6` with `--provider anthropic`
+(the default since 2026-09-07; Sonnet 4 is retired and the on-disk Sonnet
+cohort was mostly judged by `claude-sonnet-4-5`), `gpt-4.1-mini` with
+`--provider openai`. Results cache under `<output_dir>/scores_*.json` and
+resume on rerun; pass `--no_cache` to rescore from scratch.  Caches are keyed
+by judge *family*, so on resume the producer compares the cache's recorded
+`judge_model` with the current one and rejudges the whole file on a mismatch
+(`--strict_judge_model` aborts instead; `--drop_unrecorded_judge_model` also
+rejudges legacy caches that recorded no model).  See AGENT_NOTES "Judge-model
+drift on resume".
 
 ### Judge model pricing (updated 2026-09)
 

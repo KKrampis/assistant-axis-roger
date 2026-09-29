@@ -1,0 +1,28 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run python tools/sync_agent_notes.py --quiet",
+            "statusMessage": "Syncing AGENT_NOTES.md into CLAUDE.md and .claude/rules"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Read|Edit|Write|NotebookEdit|Glob|Grep",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/boundary_check.py\"",
+            "timeout": 10,
+            "statusMessage": "Checking the file-access boundary"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -17,6 +17,8 @@ Usage:
 
 import argparse
 import asyncio
+import datetime
+import hashlib
 import json
 import os
 import re
@@ -30,7 +32,16 @@ load_dotenv()
 
 import anthropic
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from assistant_axis.judge_pricing import MultiModelUsage, extract_usage_anthropic  # noqa: E402
+
 TRAITS_DIR = Path(__file__).resolve().parent.parent / "data" / "traits" / "instructions"
+
+# Cumulative token-usage record for this script (AGENT_NOTES "Token usage
+# logging is mandatory on batched LLM call sites").  Kept one level above
+# the instruction files so nothing that globs ``instructions/*.json`` sees it;
+# each run merges into it and also logs its own per-run line.
+DEFAULT_USAGE_JSON = TRAITS_DIR.parent / "regeneration_usage.json"
 
 DEFAULT_PROMPT_STYLE = "Roger"
 DEFAULT_USE_ANTONYM = True
@@ -40,7 +51,7 @@ PROMPT_STYLE = DEFAULT_PROMPT_STYLE
 USE_ANTONYM = DEFAULT_USE_ANTONYM
 USE_ORIGINAL_STEP_ONE = DEFAULT_USE_ORIGINAL_STEP_ONE
 
-DEFAULT_MODEL = "claude-sonnet-4-20250514"
+DEFAULT_MODEL = "claude-sonnet-4-6"
 DEFAULT_TEMPERATURE = 1.0
 DEFAULT_THINKING_BUDGET = 0
 DEFAULT_N_VARIANTS = 5
@@ -527,6 +538,7 @@ async def generate_instructions(
     semaphore: asyncio.Semaphore,
     temperature: float = 1.0,
     thinking_budget: int = 0,
+    usage: MultiModelUsage | None = None,
 ) -> list[dict]:
     """Call Claude to generate pos/neg instruction pairs. Retries up to 5 times."""
     prompt = build_instruction_prompt(
@@ -541,6 +553,7 @@ async def generate_instructions(
         async with semaphore:
             try:
                 response = await _call_api(client, create_kwargs)
+                _charge(usage, model, response)
                 raw = strip_markdown_fences(_extract_text(response))
                 pairs = json.loads(raw)
                 for pair in pairs:
@@ -567,6 +580,7 @@ async def generate_questions(
     semaphore: asyncio.Semaphore,
     temperature: float = 1.0,
     thinking_budget: int = 0,
+    usage: MultiModelUsage | None = None,
 ) -> list[str]:
     """Call Claude to generate diverse test questions. Retries up to 5 times."""
     prompt = build_questions_prompt(positive_label, negative_label, n_questions)
@@ -579,6 +593,7 @@ async def generate_questions(
         async with semaphore:
             try:
                 response = await _call_api(client, create_kwargs)
+                _charge(usage, model, response)
                 raw = strip_markdown_fences(_extract_text(response))
                 questions = json.loads(raw)
                 if not isinstance(questions, list) or not all(
@@ -670,6 +685,7 @@ async def generate_combined(
     semaphore: asyncio.Semaphore,
     temperature: float = 0.7,
     thinking_budget: int = 0,
+    usage: MultiModelUsage | None = None,
 ) -> dict:
     """Call Claude with a combined prompt. Retries up to 5 times.
 
@@ -694,6 +710,7 @@ async def generate_combined(
         async with semaphore:
             try:
                 response = await _call_api(client, create_kwargs)
+                _charge(usage, model, response)
                 raw_text = _extract_text(response)
                 raw = strip_markdown_fences(raw_text)
                 data = _parse_json_with_repair(raw, positive_label)
@@ -753,6 +770,49 @@ def atomic_write_json(path: Path, data: dict) -> None:
         raise
 
 
+_TEMPLATES = {"Christina": _CHRISTINA_TEMPLATE, "Roger": _ROGER_TEMPLATE}
+
+
+def template_sha256(style: str) -> str | None:
+    """Short content hash of the combined template behind ``style`` (None for
+    the two-call Jacob style, which has no single template)."""
+    t = _TEMPLATES.get(style)
+    return hashlib.sha256(t.encode("utf-8")).hexdigest()[:12] if t else None
+
+
+def generator_provenance(style: str, model: str, temperature: float,
+                         thinking_budget: int) -> dict:
+    """The ``generator`` field written into every regenerated trait JSON.
+    The two Roger-style switches are recorded because they change the prompt."""
+    return {
+        "script": "regenerate_trait_instructions.py",
+        "style": style,
+        "template_sha256": template_sha256(style),
+        "use_antonym": USE_ANTONYM if style == "Roger" else None,
+        "use_original_step_one": USE_ORIGINAL_STEP_ONE if style == "Roger" else None,
+        "model": model,
+        "temperature": temperature,
+        "thinking_budget": thinking_budget,
+        "generated_at": datetime.date.today().isoformat(),
+    }
+
+
+def _charge(usage: MultiModelUsage | None, model: str, response) -> None:
+    """Tick the usage tracker for one API response (every response received
+    is charged, including ones whose JSON later fails to parse)."""
+    if usage is not None:
+        usage.charge(model, *extract_usage_anthropic(response))
+
+
+def persist_usage(usage: MultiModelUsage, path: Path) -> None:
+    """Log this run's usage line and merge it into the cumulative file."""
+    print(usage.log_line("[usage]"), file=sys.stderr)
+    total = MultiModelUsage.load_or_create(path)
+    total.merge_from(usage)
+    total.write_json(path)
+    print(f"[usage] cumulative record: {path} (total ${total.total_cost_usd:.3f} over {total.n_calls} calls)", file=sys.stderr)
+
+
 async def regenerate_one(
     client: anthropic.AsyncAnthropic,
     trait_path: Path,
@@ -766,6 +826,7 @@ async def regenerate_one(
     thinking_budget: int = 0,
     force: bool,
     dry_run: bool,
+    usage: MultiModelUsage | None = None,
 ) -> str:
     """Regenerate a single trait file. Returns a status line."""
     with open(trait_path, encoding="utf-8") as f:
@@ -808,20 +869,20 @@ async def regenerate_one(
         combined = await generate_combined(
             client, positive_label, negative_label, description,
             n_variants, n_questions, model, semaphore, temperature,
-            thinking_budget,
+            thinking_budget, usage,
         )
         new_instructions = combined["instruction"]
         new_questions = None if instructions_only else combined["questions"]
     else:
         new_instructions = await generate_instructions(
             client, positive_label, negative_label, description,
-            n_variants, model, semaphore, temperature, thinking_budget,
+            n_variants, model, semaphore, temperature, thinking_budget, usage,
         )
         new_questions = None
         if not instructions_only:
             new_questions = await generate_questions(
                 client, positive_label, negative_label, n_questions, model,
-                semaphore, temperature, thinking_budget,
+                semaphore, temperature, thinking_budget, usage,
             )
 
     # Build output preserving key order
@@ -838,6 +899,7 @@ async def regenerate_one(
         output["eval_prompt"] = build_eval_prompt(positive_label, description)
     elif data.get("eval_prompt"):
         output["eval_prompt"] = data["eval_prompt"]
+    output["generator"] = generator_provenance(PROMPT_STYLE, model, temperature, thinking_budget)
 
     # Carry forward any extra fields we don't know about
     for key in data:
@@ -918,6 +980,7 @@ async def main_async(args: argparse.Namespace) -> None:
 
     client = anthropic.AsyncAnthropic()
     semaphore = asyncio.Semaphore(args.concurrency)
+    usage = MultiModelUsage()
 
     tasks = [
         asyncio.create_task(
@@ -933,6 +996,7 @@ async def main_async(args: argparse.Namespace) -> None:
                 thinking_budget=args.thinking_budget,
                 force=args.force,
                 dry_run=args.dry_run,
+                usage=usage,
             )
         )
         for path in trait_paths
@@ -957,11 +1021,17 @@ async def main_async(args: argparse.Namespace) -> None:
     print(f"\nDone: {ok} processed, {skip} skipped, {err} errors", file=sys.stderr)
     if not args.dry_run:
         print(f"API calls made: ~{ok * calls_per}", file=sys.stderr)
+        persist_usage(usage, Path(args.usage_json))
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Regenerate trait instruction pairs and questions via Claude.",
+    )
+    parser.add_argument(
+        "--usage-json",
+        default=str(DEFAULT_USAGE_JSON),
+        help=f"Cumulative token-usage record, merged into on every non-dry run (default: {DEFAULT_USAGE_JSON})",
     )
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument(

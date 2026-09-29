@@ -132,7 +132,12 @@ class TestBuildEvalPrompt:
         assert "1 if" in result
         assert "2 if" in result
         assert "3 if" in result
-        assert "0 and 3" in result
+        # Reason-before-score ending (AGENT_NOTES "Judge prompts: reason BEFORE
+        # score"); the pre-May-2026 "number between 0 and 3 ... just the number"
+        # ending is the forbidden anti-pattern and must not come back.
+        assert "SCORE: <integer from 0 to 3>" in result
+        assert "briefly reason" in result
+        assert "just the number" not in result
 
     def test_roundtrip_with_extract(self):
         desc = "A financial professional who manages data."
@@ -427,3 +432,92 @@ class TestAtomicWriteJson:
         p = tmp_path / "out.json"
         atomic_write_json(p, {"a": 1})
         assert p.read_text().endswith("\n")
+
+
+class TestUsageTracking:
+    """Every API response ticks the MultiModelUsage tracker (AGENT_NOTES
+    "Token usage logging is mandatory on batched LLM call sites")."""
+
+    def test_regenerate_one_charges_tracker(self, role_file, roger_style):
+        from assistant_axis.judge_pricing import MultiModelUsage
+
+        resp = _make_response(json.dumps(FAKE_COMBINED_RESPONSE))
+        resp.usage = MagicMock(input_tokens=1100, output_tokens=3300)
+        client = AsyncMock()
+        client.messages.create = AsyncMock(return_value=resp)
+        tracker = MultiModelUsage()
+        result = asyncio.run(
+            regenerate_one(
+                client, role_file, n_variants=5, n_questions=40,
+                model="claude-sonnet-4-6", semaphore=asyncio.Semaphore(10),
+                temperature=1.0, force=True, dry_run=False, usage=tracker,
+            )
+        )
+        assert result.startswith("OK")
+        assert tracker.n_calls == 1
+        assert tracker.total_prompt_tokens == 1100
+        assert tracker.total_completion_tokens == 3300
+        assert list(tracker.per_model) == ["claude-sonnet-4-6"]
+
+    def test_persist_usage_merges_into_existing_file(self, tmp_path):
+        from assistant_axis.judge_pricing import MultiModelUsage
+
+        path = tmp_path / "regeneration_usage.json"
+        first = MultiModelUsage(); first.charge("claude-sonnet-4-6", 100, 200)
+        module.persist_usage(first, path)
+        second = MultiModelUsage(); second.charge("claude-sonnet-4-6", 10, 20)
+        module.persist_usage(second, path)
+        total = MultiModelUsage.load_or_create(path)
+        assert total.n_calls == 2 and total.total_prompt_tokens == 110
+
+
+class TestRogerV2StyleAndProvenance:
+    """The Sep 2026 RogerV2 template and the ``generator`` provenance field."""
+
+    def test_v2_prompt_substitutes_and_carries_the_rules(self):
+        p = module.build_roger_role_prompt_v2("smuggler", "A smuggler moves contraband.", 5, 40)
+        assert "<role>\nsmuggler\n</role>" in p and "A smuggler moves contraband." in p
+        for phrase in ("case-worker", "poisoner", "15 to 25", "self-justification", '"question 40"'):
+            assert phrase in p, phrase
+        assert "{n_variants}" not in p and "{n_questions}" not in p
+
+    def test_v2_examples_obey_the_register_rule(self):
+        p = module.build_roger_role_prompt_v2("x", "y", 5, 40)
+        block = p.split("<example_instructions>")[1].split("</example_instructions>")[0]
+        for marker in ("navigating", "individuals", "demonstrate", "appropriate", "engage with", "the challenges of", "in a healthy way"):
+            assert marker not in block, marker
+
+    def test_v2_json_format_has_single_braces(self):
+        p = module.build_roger_role_prompt_v2("x", "y", 5, 40)
+        assert '{\n  "instruction"' in p and "{{" not in p and "}}" not in p
+
+    def test_style_dispatch_sends_v2_prompt_and_writes_generator(self, role_file, mock_client, monkeypatch):
+        monkeypatch.setattr(module, "PROMPT_STYLE", "RogerV2")
+        result = asyncio.run(regenerate_one(
+            mock_client, role_file, n_variants=5, n_questions=40, model="test-model",
+            semaphore=asyncio.Semaphore(10), temperature=1.0, force=True, dry_run=False,
+        ))
+        assert result.startswith("OK")
+        sent = mock_client.messages.create.call_args.kwargs["messages"][0]["content"]
+        assert "case-worker" in sent and "<example_instructions>" in sent
+        g = json.loads(role_file.read_text())["generator"]
+        assert g["style"] == "RogerV2" and g["model"] == "test-model"
+        assert g["template_sha256"] == module.template_sha256("RogerV2") and len(g["template_sha256"]) == 12
+        assert g["temperature"] == 1.0 and g["thinking_budget"] == 0 and g["script"] == "regenerate_role_instructions.py"
+
+    def test_generator_written_for_v1_and_replaces_stale_value(self, role_file, mock_client, roger_style):
+        d = json.loads(role_file.read_text()); d["generator"] = {"style": "stale"}
+        role_file.write_text(json.dumps(d))
+        asyncio.run(regenerate_one(
+            mock_client, role_file, n_variants=5, n_questions=40, model="m",
+            semaphore=asyncio.Semaphore(10), temperature=1.0, force=True, dry_run=False,
+        ))
+        g = json.loads(role_file.read_text())["generator"]
+        assert g["style"] == "Roger" and g["template_sha256"] != module.template_sha256("RogerV2")
+
+    def test_template_hashes_are_distinct_per_style(self):
+        shas = {s: module.template_sha256(s) for s in ("Christina", "Roger", "RogerV2")}
+        assert shas["Roger"] != shas["RogerV2"]
+
+    def test_parse_args_accepts_v2(self):
+        assert module.parse_args(["--roles", "x", "--style", "RogerV2"]).style == "RogerV2"
