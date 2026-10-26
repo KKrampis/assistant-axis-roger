@@ -60,6 +60,7 @@ from results_analysis.axis_judge_correlation import (  # noqa: E402
 )
 from assistant_axis.judge import RateLimiter, call_judge_single_unified, provider_for_model  # noqa: E402
 from assistant_axis.judge_pricing import MultiModelUsage, price_for_model  # noqa: E402
+from assistant_axis.entity_id import parse_entity_id  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -94,6 +95,32 @@ def build_axis_spec(args: argparse.Namespace, instructions_dir: Path) -> AxisSpe
     )
 
 
+async def _score_one_entity(
+    etype: str,
+    name: str,
+    content: str,
+    judge_model: str,
+    axis_spec: AxisSpec,
+    rate_limiter: RateLimiter,
+    usage: MultiModelUsage,
+    openai_client,
+    anthropic_client,
+    max_tokens: int,
+) -> tuple:  # (name, score_or_None)
+    prompt = build_static_prompt(axis_spec, etype, name, content)
+    text = await call_judge_single_unified(
+        prompt=prompt,
+        model=judge_model,
+        max_tokens=max_tokens,
+        rate_limiter=rate_limiter,
+        openai_client=openai_client,
+        anthropic_client=anthropic_client,
+        usage=usage,
+    )
+    score = parse_signed_score(text) if text else None
+    return name, score
+
+
 async def score_one_judge(
     judge_model: str,
     axis_spec: AxisSpec,
@@ -104,19 +131,20 @@ async def score_one_judge(
     anthropic_client,
     max_tokens: int,
 ) -> Dict[str, int]:
-    scores: Dict[str, int] = {}
-    for etype, name, content in entities:
-        prompt = build_static_prompt(axis_spec, etype, name, content)
-        text = await call_judge_single_unified(
-            prompt=prompt,
-            model=judge_model,
-            max_tokens=max_tokens,
-            rate_limiter=rate_limiter,
-            openai_client=openai_client,
-            anthropic_client=anthropic_client,
-            usage=usage,
+    # Fire all entity calls concurrently. The RateLimiter inside
+    # call_judge_single_unified caps throughput at requests_per_second, so
+    # concurrency here just means we don't block on each response before
+    # issuing the next request — the rate limit is still respected.
+    tasks = [
+        _score_one_entity(
+            etype, name, content, judge_model, axis_spec,
+            rate_limiter, usage, openai_client, anthropic_client, max_tokens,
         )
-        score = parse_signed_score(text) if text else None
+        for etype, name, content in entities
+    ]
+    results = await asyncio.gather(*tasks)
+    scores: Dict[str, int] = {}
+    for name, score in results:
         if score is not None:
             scores[name] = score
         else:
@@ -151,8 +179,11 @@ async def main_async() -> None:
     proj_path = Path(args.projections_file)
     with open(proj_path) as f:
         proj_data = json.load(f)
-    projections_raw = proj_data["result"]  # {slot: {name: {raw, whitened}}}
-    projections = {int(s): v for s, v in projections_raw.items()}
+    # Two schema variants in the wild:
+    #   new (schema_v2+): {"result": {"6": {name: {raw, whitened}}}, "_provenance": ...}
+    #   old (pre-provenance): {"0": {name: {raw, whitened}}, "1": ...} — slots at top level
+    projections_raw = proj_data.get("result", proj_data)
+    projections = {int(s): v for s, v in projections_raw.items() if s.lstrip("-").isdigit()}
     if args.slots != "all":
         wanted = {int(s) for s in args.slots.split(",")}
         projections = {s: v for s, v in projections.items() if s in wanted}
@@ -177,14 +208,32 @@ async def main_async() -> None:
     entities = []
     missing = []
     for name in entity_names:
-        desc = load_entity_description(instructions_dir, "roles", name)
-        etype = "roles"
-        if desc is None:
-            desc = load_entity_description(instructions_dir, "traits", name)
-            etype = "traits"
-        if desc is None:
-            missing.append(name)
-            continue
+        # Projections may use disambiguated keys like "patient|R" or "patient|T".
+        # Strip the kind suffix to get the bare file stem; use the suffix to
+        # infer the kind directly when present, otherwise try both.
+        try:
+            eid = parse_entity_id(name)
+            bare = eid.name
+            kind_hint = eid.kind  # "roles" or "traits"
+        except Exception:
+            bare = name
+            kind_hint = None
+
+        if kind_hint is not None:
+            desc = load_entity_description(instructions_dir, kind_hint, bare)
+            etype = kind_hint
+            if desc is None:
+                missing.append(name)
+                continue
+        else:
+            desc = load_entity_description(instructions_dir, "roles", bare)
+            etype = "roles"
+            if desc is None:
+                desc = load_entity_description(instructions_dir, "traits", bare)
+                etype = "traits"
+            if desc is None:
+                missing.append(name)
+                continue
         entities.append((etype, name, desc))
     if missing:
         logger.warning(f"{len(missing)} entities from the cached projections no longer have an "
