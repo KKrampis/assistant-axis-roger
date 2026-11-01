@@ -76,6 +76,11 @@ MODEL_CAPABILITIES: Dict[str, Dict[str, Optional[bool]]] = {
     # OpenAI Flex processing
     "gpt-4.1-mini": {"flex": False},
     "gpt-5.6-luna": {"flex": True},
+    # Probed 2026-11-01 (judge_tier_cost_eval.py --transport auto: first request on Flex, answered)
+    "gpt-5.6-terra": {"flex": True},
+    "gpt-5.6-sol": {"flex": True},
+    "gpt-6-luna": {"flex": True},
+    "gpt-5.4-mini": {"flex": True},
 }
 
 _EFFORT_LOW = {"output_config": {"effort": "low"}}

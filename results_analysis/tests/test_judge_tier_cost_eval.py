@@ -245,7 +245,14 @@ def _openai(monkeypatch, **clients):
 # Transport choice
 # ---------------------------------------------------------------------------
 
-def test_transport_selection():
+@pytest.fixture
+def luna_untested(monkeypatch):
+    """GPT-6 Luna as a model whose Flex support is untested (the table has recorded
+    it as taking Flex since the 2026-11-01 probe), so the probe path keeps its tests."""
+    monkeypatch.delitem(tt.MODEL_CAPABILITIES, "gpt-6-luna")
+
+
+def test_transport_selection(luna_untested):
     c = tt.choose_transport("claude-haiku-4-5")
     assert (c.transport, c.probe) == ("batch", False)
     assert tt.choose_transport("claude-sonnet-5").transport == "batch"
@@ -253,9 +260,11 @@ def test_transport_selection():
     assert (c.transport, c.probe) == ("flex", False)
     c = tt.choose_transport("gpt-4.1-mini")                       # MODEL_CAPABILITIES: Flex refused
     assert (c.transport, c.probe) == ("batch", False)
-    for model in ("gpt-6-luna", "gpt-5.6-sol", "gpt-5.4-mini"):  # untested: probe
+    c = tt.choose_transport("gpt-6-luna")                         # untested (fixture): probe
+    assert (c.transport, c.probe) == ("flex", True)
+    for model in ("gpt-5.6-terra", "gpt-5.6-sol", "gpt-5.4-mini"):  # probed 2026-11-01: Flex taken
         c = tt.choose_transport(model)
-        assert (c.transport, c.probe) == ("flex", True)
+        assert (c.transport, c.probe) == ("flex", False)
     assert tt.choose_transport("claude-haiku-4-5", "realtime").transport == "realtime"
     assert tt.choose_transport("gpt-5.6-luna", "batch").transport == "batch"
     c = tt.choose_transport("gpt-6-luna", "flex")                 # forced: no probe, a refusal stops the model
@@ -501,7 +510,7 @@ def test_flex_falls_back_to_the_standard_tier(world, monkeypatch, capsys):
     assert "flex fallbacks 10" in capsys.readouterr().out
 
 
-def test_probe_switches_to_batch_without_losing_the_request(world, monkeypatch):
+def test_probe_switches_to_batch_without_losing_the_request(world, monkeypatch, luna_untested):
     flex = FakeOpenAI(flex_error=HTTPError(400, "Invalid service_tier argument", param="service_tier"))
     std = FakeOpenAI()
     _openai(monkeypatch, flex=flex, std=std)
@@ -518,7 +527,7 @@ def test_probe_switches_to_batch_without_losing_the_request(world, monkeypatch):
     assert set(usage["per_model"]) == {"gpt-6-luna:batch"}
 
 
-def test_probe_accepted_continues_on_flex(world, monkeypatch):
+def test_probe_accepted_continues_on_flex(world, monkeypatch, luna_untested):
     flex = FakeOpenAI()
     _openai(monkeypatch, flex=flex, std=FakeOpenAI())
     assert _run(world, "gpt-6-luna") == 0
@@ -668,7 +677,7 @@ def test_budget_stop(world, monkeypatch):
     assert not (world.exp / "hero_vs_villain_tier_eval").exists()
 
 
-def test_dry_run_writes_nothing_and_reports(world, capsys):
+def test_dry_run_writes_nothing_and_reports(world, capsys, luna_untested):
     before = sorted(p for p in world.exp.rglob("*"))
     assert _run(world, "gpt-4.1-mini", "gpt-6-luna", "claude-haiku-5-5", extra=["--dry_run"]) == 0
     assert sorted(p for p in world.exp.rglob("*")) == before
