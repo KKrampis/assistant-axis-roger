@@ -41,6 +41,19 @@ highest-ρ axes of an earlier 35-axis sweep judged by gpt-4.1-mini and Sonnet,
 so absolute ρ is higher here than on all 61, and the selection may favour
 those judges.
 
+**Update 2, 2026-11-01 (evening): every judge under the new method.**  The
+rubric tuning described in update 2 of
+[`pareto_pooled_61axes_notes.md`](./pareto_pooled_61axes_notes.md) was run on
+this set for all ten judges, Opus 5 (thinking off) and Sol (reasoning off)
+included: [`pareto_pooled_20axes_rubrics.png`](./pareto_pooled_20axes_rubrics.png)
+(old and new points joined), the 12-variant check in
+[`judge_tier_robustness_20axes_rubrics.png`](./judge_tier_robustness_20axes_rubrics.png)
+and [`judge_tier_robustness_20axes_rubrics.json`](./judge_tier_robustness_20axes_rubrics.json).
+The ten judges land within 0.04 of one another (0.745 to 0.786); Haiku 5.5,
+Terra and Opus 5 share the top within 0.002, so price decides, and Opus at 40
+times Haiku's price buys nothing measurable.  The table is in the 61-axis
+notes.
+
 **Reproduce** (from the repository root):
 
 ```bash

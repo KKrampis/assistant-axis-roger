@@ -2977,7 +2977,10 @@ judging with two shuffles averaged (`b10`, `--entities_per_call 10`, cells
 `<judge>@b10x2` from `scripts/judge_tier_average_cells.py`) lifts every judge
 by 0.11 to 0.23 ρ at 35% to 40% lower cost: gpt-5.6-luna 0.547 → 0.725,
 gpt-4.1-mini 0.605 → 0.720, claude-haiku-5-5 0.544 → 0.716, gpt-6-luna 0.478
-→ 0.708; the held-out 31 axes gain as much as the 30 tuning axes.  Plot:
+→ 0.708, and, run the same way later that evening, gpt-5.6-terra 0.550 →
+0.731, claude-sonnet-5 0.551 → 0.713, gpt-5.4-mini 0.514 → 0.699, claude-haiku-4-5
+0.561 → 0.696 (and on the 20-axis set Opus 5 0.693 → 0.784, Sol 0.644 → 0.779);
+the held-out 31 axes gain as much as the 30 tuning axes.  Plot:
 [`pareto_pooled_61axes_rubrics.png`](../roger/axis_judge_experiments/pareto_pooled_61axes_rubrics.png);
 account in update 2 of
 [`pareto_pooled_61axes_notes.md`](../roger/axis_judge_experiments/pareto_pooled_61axes_notes.md).

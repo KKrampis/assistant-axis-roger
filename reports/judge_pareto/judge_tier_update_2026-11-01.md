@@ -250,6 +250,16 @@ on the held-out axes, and the four now sit within 0.017 of one another:
 | claude-haiku-5-5, thinking off | 0.544 | **0.716** | $0.070 → $0.048 |
 | gpt-6-luna, reasoning off | 0.478 | **0.708** | $0.033 → $0.021 |
 
+The remaining judges were then run the same way (the Anthropic ones through
+a Batch API path added for batched judging): on 61 axes all eight land within
+0.035 of one another (Terra 0.731, Luna 0.725, gpt-4.1-mini 0.720, Haiku 5.5
+0.716, Sonnet 5 0.713, GPT-6 Luna 0.708, GPT-5.4 mini 0.699, Haiku 4.5 0.696),
+and on the 20-axis set the ten judges, Opus 5 and Sol included, within 0.04
+(Haiku 5.5 0.786 to GPT-5.4 mini 0.745).  Every judge gained 0.11 to 0.23 and
+cost 35% to 45% less.  Price decides: the 61-axis frontier is GPT-6 Luna,
+GPT-5.6 Luna and Terra; Opus 5 at 40 times Haiku 5.5's price buys nothing
+measurable.  Full tables in update 2 of the 61-axis notes.
+
 The plot with each judge's old and new points joined:
 [`pareto_pooled_61axes_rubrics.png`](../../roger/axis_judge_experiments/pareto_pooled_61axes_rubrics.png);
 the tuning record, every variant per judge:

@@ -212,6 +212,54 @@ new method's longer prompt and two calls per entity are already in it):
   0.005 behind Luna at nearly twice the price, so its retirement on
   2027-01-14 costs nothing.
 
+**All judges, same method** (later the same evening; Roger: "do everything but
+Opus and Sol to 61, and take those to 20, with the batching").  The remaining
+judges were run with the same method, two shuffles averaged, through the Batch
+API for the Anthropic judges (a batched path added for it, one request per
+group) and Flex for the OpenAI ones; every run parsed at or near 100% with no
+network failures, about $77 billed for the six.  The plot
+[`pareto_pooled_61axes_rubrics.png`](./pareto_pooled_61axes_rubrics.png) now
+joins every judge's old and new points; the 20-axis set adds Opus 5 and Sol:
+[`pareto_pooled_20axes_rubrics.png`](./pareto_pooled_20axes_rubrics.png),
+[`judge_tier_robustness_20axes_rubrics.png`](./judge_tier_robustness_20axes_rubrics.png).
+
+| judge, 61 axes | old rubric | new method | cost per axis, old → new | on the frontier, of 12 |
+|---|---|---|---|---|
+| gpt-5.6-terra, reasoning off | 0.550 | **0.731** | $0.72 → $0.44 | 11 |
+| gpt-5.6-luna, reasoning off | 0.547 | **0.725** | $0.073 → $0.047 | 12 |
+| gpt-4.1-mini, T=0 | 0.605 | **0.720** | $0.130 → $0.084 | 1 |
+| claude-haiku-5-5, thinking off | 0.544 | **0.716** | $0.070 → $0.048 | 0 |
+| claude-sonnet-5, effort low | 0.551 | **0.713** | $1.19 → $0.67 | 0 |
+| gpt-6-luna, reasoning off | 0.478 | **0.708** | $0.033 → $0.021 | 12 |
+| gpt-5.4-mini, reasoning off | 0.514 | **0.699** | $0.29 → $0.20 | 0 |
+| claude-haiku-4-5, T=0 | 0.561 | **0.696** | $0.52 → $0.31 | 0 |
+
+| judge, 20-axis set | old rubric | new method | cost per axis, old → new |
+|---|---|---|---|
+| claude-haiku-5-5 | 0.633 | **0.786** | $0.069 → $0.047 |
+| gpt-5.6-terra | 0.631 | **0.785** | $0.72 → $0.43 |
+| claude-opus-5, thinking off | 0.693 | **0.784** | $3.20 → $1.86 |
+| gpt-5.6-sol, reasoning off | 0.644 | **0.779** | $1.30 → $0.87 |
+| claude-sonnet-5 | 0.648 | **0.778** | $1.18 → $0.66 |
+| gpt-5.6-luna | 0.632 | **0.777** | $0.072 → $0.047 |
+| gpt-4.1-mini | 0.688 | **0.775** | $0.130 → $0.084 |
+| gpt-6-luna | 0.572 | **0.764** | $0.033 → $0.021 |
+| claude-haiku-4-5, T=0 | 0.655 | **0.751** | $0.52 → $0.31 |
+| gpt-5.4-mini | 0.611 | **0.745** | $0.29 → $0.19 |
+
+- **Every judge gains 0.11 to 0.23 in ρ and costs 35% to 45% less.**  The
+  eight judges on 61 axes span 0.696 to 0.731, a range of 0.035; the ten on
+  the 20-axis set span 0.745 to 0.786.  Under the old rubric the spread was
+  three to four times wider and in a different order.
+- **Price decides.**  On 61 axes the frontier is gpt-6-luna, gpt-5.6-luna and
+  gpt-5.6-terra (12, 12 and 11 of 12 variants); Terra's lead over Luna, 0.006
+  at ten times the price, holds in 96% of bootstrap draws at the default
+  variant but in only 13% at some others.  On the 20-axis set Haiku 5.5,
+  Terra and Opus 5 are within 0.002 of one another at the top; Opus with
+  thinking off gains 0.09 and costs 42% less, but is 40 times the price of
+  Haiku 5.5 for no measurable gain.  Kendall τ against the default variant:
+  0.883 to 1.000 on 61 axes, 0.874 to 1.000 on 20.
+
 **Rows and columns instead of two random shuffles** (Roger's suggestion,
 tried the same evening; `--batch_design rows` / `cols`): two independent
 shuffles put one of the same batch-mates back together for 13% of entities
