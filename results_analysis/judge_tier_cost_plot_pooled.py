@@ -314,6 +314,31 @@ def collect_legacy_data(
     return per_model
 
 
+def rho_from_robustness(per_model: Dict[str, List[dict]], robustness_json: Path,
+                        variant: str = "s6_l25_raw") -> Dict[str, List[dict]]:
+    """Replace every entry's rho and n with judge_tier_robustness.py's for ``variant``.
+
+    The robustness tool recomputes rho from the stored scores and drops the nine
+    trait/role collision names on bare-keyed (v1) axes, where the tier-eval cells
+    judged a collision name's role description against the trait's cached
+    projection; its s6_l25_raw values are therefore the corrected version of the
+    cells' correlations.json.  An entry the JSON lacks is dropped with a note."""
+    with open(robustness_json) as f:
+        d = json.load(f)
+    r = d.get("result", d)
+    rho, n = r["rho"], r.get("n", {})
+    out: Dict[str, List[dict]] = defaultdict(list)
+    for model, entries in per_model.items():
+        for e in entries:
+            value = (rho.get(model, {}).get(e["axis_name"]) or {}).get(variant)
+            if value is None:
+                print(f"  NOTE: {model} / {e['axis_name']}: not in {robustness_json} for {variant}; dropped",
+                      file=sys.stderr)
+                continue
+            out[model].append({**e, "rho": float(value), "n": int(n.get(model, {}).get(e["axis_name"], e["n"]))})
+    return out
+
+
 def aggregate(per_model: Dict[str, List[dict]]) -> Dict[str, dict]:
     """Collapse per-axis entries into mean rho and mean cost per model."""
     agg: Dict[str, dict] = {}
@@ -354,7 +379,8 @@ PRICE_BASIS_LABEL = {
 
 
 def plot(agg: Dict[str, dict], slot: int, n_total_axes: int, output_path: Path,
-         excluded: Optional[Dict[str, dict]] = None, price_basis: str = "list") -> None:
+         excluded: Optional[Dict[str, dict]] = None, price_basis: str = "list",
+         rho_note: str = "") -> None:
     fig, ax = plt.subplots(figsize=(11, 8))
 
     model_list = sorted(agg.items(), key=lambda kv: kv[1]["mean_cost"])
@@ -409,6 +435,8 @@ def plot(agg: Dict[str, dict], slot: int, n_total_axes: int, output_path: Path,
         f"[◆ = Pareto-optimal, ● = dominated]\n"
         f"Filled = measured cost (usage.json)  Hollow = estimated (legacy tiers)"
     )
+    if rho_note:
+        title += f"\n{rho_note}"
     if excluded:
         names = ", ".join(f"{m} ({d['n_axes']})"
                           for m, d in sorted(excluded.items(), key=lambda kv: -kv[1]["n_axes"]))
@@ -475,6 +503,14 @@ def main() -> None:
                              "judged it (batch and Flex cells are billed at half price, so their recorded "
                              "cost is not comparable with real-time cells); 'batch': the same at the "
                              "batch price; 'recorded': usage.json's total_cost_usd as billed.")
+    parser.add_argument("--robustness_json", type=str, default=None,
+                        help="judge_tier_robustness.json: take each cell's rho from it (variant "
+                             "--robustness_variant) instead of the cell's correlations.json.  Its rho is "
+                             "recomputed from the stored scores with the nine trait/role collision names "
+                             "dropped on bare-keyed axes, which the cells' correlations.json mismatch.")
+    parser.add_argument("--robustness_variant", type=str, default="s6_l25_raw",
+                        help="Variant key in --robustness_json (default s6_l25_raw: slot 6, layer 25, raw, "
+                             "the cells' own projection).")
     parser.add_argument("--output", type=str, required=True)
     args = parser.parse_args()
 
@@ -514,6 +550,12 @@ def main() -> None:
             for model, entries in legacy_data.items():
                 per_model[model].extend(entries)
 
+    if args.robustness_json:
+        if not args.robustness_variant.startswith(f"s{args.slot}_"):
+            print(f"WARNING: --robustness_variant {args.robustness_variant} is not slot {args.slot}",
+                  file=sys.stderr)
+        per_model = rho_from_robustness(per_model, Path(args.robustness_json), args.robustness_variant)
+
     if not per_model:
         print("ERROR: no data found at all.", file=sys.stderr)
         sys.exit(1)
@@ -537,7 +579,10 @@ def main() -> None:
     if not agg:
         print(f"ERROR: no model has {min_axes} axes; lower --min_axes.", file=sys.stderr)
         sys.exit(1)
-    plot(agg, args.slot, n_total, Path(args.output), excluded=excluded, price_basis=args.price_basis)
+    rho_note = (f"rho from {Path(args.robustness_json).name}, variant {args.robustness_variant} "
+                f"(collision names dropped on bare-keyed axes)") if args.robustness_json else ""
+    plot(agg, args.slot, n_total, Path(args.output), excluded=excluded, price_basis=args.price_basis,
+         rho_note=rho_note)
 
 
 if __name__ == "__main__":

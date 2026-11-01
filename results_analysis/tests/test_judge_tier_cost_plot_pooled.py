@@ -118,6 +118,20 @@ def test_cell_max_tokens_and_cap_summary(tmp_path: Path) -> None:
     assert "1024 for x (May)" in mixed and "1024 or unrecorded for y (May)" in mixed
 
 
+def test_rho_from_robustness_replaces_rho_and_n(tmp_path: Path, capsys) -> None:
+    from results_analysis.judge_tier_cost_plot_pooled import rho_from_robustness
+    rj = tmp_path / "judge_tier_robustness.json"
+    rj.write_text(json.dumps({"result": {
+        "rho": {"full": {"axis0": {"s6_l25_raw": 0.42, "s0_l25_raw": 0.1}}},
+        "n": {"full": {"axis0": 562}}}}))
+    per_model = {"full": [{"rho": 0.7, "n": 571, "cost": 1.0, "cost_is_measured": True, "axis_name": "axis0"},
+                          {"rho": 0.6, "n": 571, "cost": 1.0, "cost_is_measured": True, "axis_name": "axis1"}]}
+    out = rho_from_robustness(per_model, rj)
+    assert [(e["axis_name"], e["rho"], e["n"]) for e in out["full"]] == [("axis0", 0.42, 562)]
+    assert "axis1: not in" in capsys.readouterr().err
+    assert rho_from_robustness(per_model, rj, "s0_l25_raw")["full"][0]["rho"] == 0.1
+
+
 def test_cli_default_excludes_and_min_axes_restores(tmp_path: Path) -> None:
     _fixture(tmp_path)
     env = {"MPLBACKEND": "Agg", "PATH": "/usr/bin:/bin"}
