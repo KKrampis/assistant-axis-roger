@@ -2959,7 +2959,15 @@ with its own prompt builder and parser, recorded in every cell's provenance
   Judging each entity under two seeds measures the crosstalk between
   batch-mates (between-seed agreement about 0.85), and averaging the two
   beats single-entity judging at lower cost.  Raise `--max_tokens` (600 for
-  N=10): the 300 default cuts some ten-line replies.
+  N=10, 1,500 for Haiku 5.5, which writes about 60 tokens per entity): the 300
+  default cuts ten-line replies.  `--batch_design rows` / `cols` (Roger,
+  2026-11-01) replaces the second independent shuffle: the axis's entities
+  are cut into N x N squares of one seeded shuffle, one pass judges the rows
+  and the other the columns, so an entity's two batches share no other
+  member (two independent shuffles put one of the same batch-mates back
+  together for 13% of entities, two for 0.8%).  On the 30 development axes
+  the grid ties two random shuffles (within 0.004 of ρ for every judge); use it
+  for new runs as the cleaner design.
 
 **Result (2026-11-01, 61 axes, slot 6 layer 25 raw):** batched percentile
 judging with two shuffles averaged (`b10`, `--entities_per_call 10`, cells

@@ -364,7 +364,29 @@ CELL_LABEL = ""
 #: The rubric of this run (--rubric, judge_tier_rubrics.RUBRICS); v3 unless set.  Set in main_async.
 RUBRIC: "jr.RubricSpec" = jr.RUBRICS["v3"]
 #: Batched judging of this run (--entities_per_call, --shuffle_seed); set in main_async.
-BATCHING = {"n": 1, "seed": 0}
+BATCHING = {"n": 1, "seed": 0, "design": "shuffle"}
+
+
+def grid_batches(names: List[Any], n: int, design: str) -> List[List[Any]]:
+    """Batches of up to ``n`` entities.  ``"shuffle"``: consecutive groups of the
+    list as given.  ``"rows"`` / ``"cols"`` (Roger, 2026-11-01): the list is cut
+    into squares of n x n (the last one smaller, side ceil(sqrt(k))); one pass
+    judges the rows, the other the columns, so an entity's two batches share
+    no other member (two independent shuffles share one in about one case in
+    seven)."""
+    if design == "shuffle":
+        return [names[k:k + n] for k in range(0, len(names), n)]
+    out: List[List[Any]] = []
+    for start in range(0, len(names), n * n):
+        square = names[start:start + n * n]
+        side = n if len(square) == n * n else max(1, math.ceil(math.sqrt(len(square))))
+        if design == "rows":
+            out += [square[k:k + side] for k in range(0, len(square), side)]
+        elif design == "cols":
+            out += [square[c::side] for c in range(side) if square[c::side]]
+        else:
+            raise ValueError(f"unknown batch design {design!r}")
+    return out
 
 
 def build_prompt(job: "AxisJob", etype: str, name: str, desc: str) -> str:
@@ -473,6 +495,7 @@ class RunContext:
     batch_chunk_requests: int = DEFAULT_BATCH_CHUNK_REQUESTS
     entities_per_call: int = 1      # batched judging (--entities_per_call); live and Flex only
     shuffle_seed: int = 0
+    batch_design: str = "shuffle"   # "shuffle": consecutive groups of a seeded shuffle; "rows" / "cols": grid passes
     live_pending: int = 0           # live or Flex requests not yet finished, all models
     last_progress: float = field(default_factory=time.monotonic)
     stalled: bool = False
@@ -532,7 +555,8 @@ def write_cell(cell: Cell, mrun: ModelRun, max_tokens: int) -> None:
                   "transport": mrun.transport, "transport_reason": mrun.transport_reason,
                   "request_settings": mrun.settings, "max_tokens": max_tokens,
                   "cell_label": CELL_LABEL, "truncated": sorted(cell.truncated),
-                  "entities_per_call": BATCHING["n"], "shuffle_seed": BATCHING["seed"]}
+                  "entities_per_call": BATCHING["n"], "shuffle_seed": BATCHING["seed"],
+                  "batch_design": BATCHING["design"]}
     atomic_write_text(json.dumps({"result": scores, "_provenance": provenance}, indent=2),
                       d / "scores_descriptions.json", logger_obj=logger)
     correlations = compute_correlations(
@@ -814,13 +838,17 @@ async def run_live(ctx: RunContext, mrun: ModelRun, todo: List[AxisJob], *, tier
         # another --shuffle_seed gives every entity different ones
         groups: List[Tuple[int, List[Tuple[str, str, str]]]] = []
         for i in sorted({it[0] for it in items}):
-            ents = [it[1:] for it in items if it[0] == i]
-            random.Random(ctx.shuffle_seed * 1_000_003 + i).shuffle(ents)
-            groups += [(i, ents[k:k + n_per]) for k in range(0, len(ents), n_per)]
+            # the grid passes shuffle the axis's FULL entity list (so rows and cols of one seed agree)
+            # and then drop what is already scored; the shuffle design shuffles what is left
+            full = list(cells[i].job.entities) if ctx.batch_design != "shuffle" else [it[1:] for it in items if it[0] == i]
+            random.Random(ctx.shuffle_seed * 1_000_003 + i).shuffle(full)
+            todo_names = {it[2] for it in items if it[0] == i}
+            batches = grid_batches(full, n_per, ctx.batch_design)
+            groups += [(i, g) for g in ([[e for e in b if e[1] in todo_names] for b in batches]) if g]
         if mrun.resumed:
             logger.info(f"[{model}] {mrun.resumed} answers taken from the answer logs of earlier runs")
-        logger.info(f"[{model}] batched judging: {len(items)} entities in {len(groups)} calls of up to {n_per}, "
-                    f"shuffle seed {ctx.shuffle_seed}")
+        logger.info(f"[{model}] batched judging ({ctx.batch_design}): {len(items)} entities in {len(groups)} calls of "
+                    f"up to {n_per}, shuffle seed {ctx.shuffle_seed}")
         items = groups
     elif mrun.resumed:
         logger.info(f"[{model}] {mrun.resumed} answers taken from the answer logs of earlier runs; "
@@ -1995,6 +2023,11 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Batched judging: this many entities of one axis per call, in a seeded shuffle "
                              "(--shuffle_seed), with a rubric that has a batch form (b5).  Live and Flex "
                              "transports only.  Default 1: one entity per call.")
+    parser.add_argument("--batch_design", choices=("shuffle", "rows", "cols"), default="shuffle",
+                        help="How --entities_per_call groups an axis's entities: 'shuffle' (default), consecutive "
+                             "groups of a seeded shuffle; 'rows' / 'cols', the rows or the columns of N x N squares "
+                             "of the same seeded shuffle, so that the two passes share no batch-mate (judge both, "
+                             "under two labels, and average them).")
     parser.add_argument("--shuffle_seed", type=int, default=0,
                         help="Seed of the batch shuffle (--entities_per_call); another seed gives every entity "
                              "different batch-mates, which measures the crosstalk.")
@@ -2084,7 +2117,7 @@ async def main_async(argv: Optional[Sequence[str]] = None) -> int:
     global CELL_LABEL, RUBRIC
     CELL_LABEL = args.cell_label or ""
     RUBRIC = jr.get(args.rubric)
-    BATCHING["n"], BATCHING["seed"] = max(1, args.entities_per_call), args.shuffle_seed
+    BATCHING["n"], BATCHING["seed"], BATCHING["design"] = max(1, args.entities_per_call), args.shuffle_seed, args.batch_design
     if args.entities_per_call > 1:
         if RUBRIC.build_batch is None:
             parser.error(f"--entities_per_call needs a rubric with a batch form (b5, b10), not {args.rubric}")
@@ -2173,7 +2206,8 @@ async def main_async(argv: Optional[Sequence[str]] = None) -> int:
                      batch_fallback_max=args.batch_fallback_max, slots=args.slots, limit=args.limit,
                      max_in_flight=max(1, args.max_in_flight), stall_s=max(0.0, args.stall_minutes) * 60,
                      batch_chunk_requests=max(1, args.batch_chunk_requests),
-                     entities_per_call=max(1, args.entities_per_call), shuffle_seed=args.shuffle_seed)
+                     entities_per_call=max(1, args.entities_per_call), shuffle_seed=args.shuffle_seed,
+                     batch_design=args.batch_design)
     global STALL_RESTARTS
     STALL_RESTARTS = max(0, args.stall_restarts)
     if os.environ.get(RESTART_ENV):

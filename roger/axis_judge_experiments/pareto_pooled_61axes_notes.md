@@ -212,6 +212,18 @@ new method's longer prompt and two calls per entity are already in it):
   0.005 behind Luna at nearly twice the price, so its retirement on
   2027-01-14 costs nothing.
 
+**Rows and columns instead of two random shuffles** (Roger's suggestion,
+tried the same evening; `--batch_design rows` / `cols`): two independent
+shuffles put one of the same batch-mates back together for 13% of entities
+and two for 0.8%, while the rows and columns of 10 x 10 squares share no
+other member.  On the 30 development axes the grid ties the random shuffles:
+GPT-5.6 Luna +0.004 (consistently, bootstrap 1.00), GPT-6 Luna 0.000, Haiku
+5.5 +0.001, with the same between-pass agreement (0.85 to 0.86).  Cells
+`<judge>@b10gr`, `@b10gc` and the average `@b10g2`.  The grid is the cleaner
+design at no extra cost, so it is the one to use for new runs; the 61-axis
+plot above keeps the random-shuffle cells, since the difference is within
+noise.
+
 **Caveats.**  This is description judging only; instruction and response
 judging are the next cross-checks (Roger's strategy: tune on the cheapest,
 then confirm the pattern on the dearer modes).  The judges other than

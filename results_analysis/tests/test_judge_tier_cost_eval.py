@@ -1374,3 +1374,33 @@ def test_batched_answers_resume_with_the_batch_parser(world, monkeypatch):
     assert len(std2.calls) == 3                                  # the first batch's three entities were not re-asked
     scores, usage, d = _cell(world, "alpha_vs_beta", "gpt-4.1-mini@b5s1")
     assert scores["result"] == {e: SCORES[e] * 10 for e in ENTITIES}
+
+
+def test_grid_batches_rows_and_cols_share_no_other_member():
+    names = list(range(137))                       # one full 10x10 square and a 37-entity square (side 7)
+    rows, cols = ev.grid_batches(names, 10, "rows"), ev.grid_batches(names, 10, "cols")
+    assert sorted(sum(rows, [])) == names and sorted(sum(cols, [])) == names
+    assert max(len(b) for b in rows + cols) <= 10
+    for r in rows:
+        for c in cols:
+            assert len(set(r) & set(c)) <= 1     # a row and a column meet in at most one entity
+    assert ev.grid_batches(names, 10, "shuffle") == [names[k:k + 10] for k in range(0, 137, 10)]
+
+
+def test_grid_passes_judge_every_entity_in_disjoint_company(world, monkeypatch):
+    mates = {}
+    for design in ("rows", "cols"):
+        std = FakeOpenAI()
+        _openai(monkeypatch, std=std)
+        assert _run(world, "gpt-4.1-mini", extra=["--transport", "realtime", "--rubric", "b5", "--cell_label", f"@b5g{design[0]}",
+                                                 "--entities_per_call", "2", "--batch_design", design, "--shuffle_seed", "7"]) == 0
+        scores, usage, d = _cell(world, "alpha_vs_beta", f"gpt-4.1-mini@b5g{design[0]}")
+        assert scores["result"] == {e: SCORES[e] * 10 for e in ENTITIES} and scores["_provenance"]["batch_design"] == design
+        for c in std.calls:
+            text = c["messages"][0]["content"]
+            axis = text.split("The axis runs from ")[1].split(":")[0]       # mates are per axis
+            items = _BATCH_ITEM_RE.findall(text)
+            for _, shown in items:
+                mates.setdefault((design, axis, shown), set()).update(s for _, s in items if s != shown)
+    for _, axis, e in {k for k in mates if k[0] == "rows"}:
+        assert not (mates.get(("rows", axis, e), set()) & mates.get(("cols", axis, e), set()))
