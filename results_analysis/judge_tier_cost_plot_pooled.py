@@ -126,6 +126,54 @@ def load_measured_cost(usage_path: Path, price_basis: str = "list") -> Optional[
     return total
 
 
+#: The reply cap of judge_tier_cost_eval.py runs made before each cell recorded
+#: its own (the script's --max_tokens default; the 20- and 41-axis drivers never
+#: set it).  A reply cut at the cap usually loses its SCORE line and is unscored.
+TIER_EVAL_DEFAULT_MAX_TOKENS = 200
+
+
+def cell_max_tokens(cell_dir: Path, legacy: bool = False) -> Optional[int]:
+    """The judge's reply cap (max_tokens) for one cell.
+
+    A tier-eval cell: its ``scores_descriptions.json`` provenance
+    ``max_tokens``, else :data:`TIER_EVAL_DEFAULT_MAX_TOKENS`.  A legacy
+    (May 2026, axis_judge_correlation.py) cell: ``config.json``'s
+    ``args.max_tokens``, else None (not recorded)."""
+    try:
+        if legacy:
+            with open(cell_dir / "config.json") as f:
+                value = (json.load(f).get("args") or {}).get("max_tokens")
+            return int(value) if value is not None else None
+        with open(cell_dir / "scores_descriptions.json") as f:
+            prov = json.load(f).get("_provenance") or {}
+        value = prov.get("max_tokens")
+        return int(value) if value is not None else TIER_EVAL_DEFAULT_MAX_TOKENS
+    except (OSError, ValueError, TypeError, AttributeError):
+        return None if legacy else TIER_EVAL_DEFAULT_MAX_TOKENS
+
+
+def cap_summary(caps: Dict[str, set]) -> str:
+    """One title line naming the judges' reply caps, ``{model: {max_tokens, ...}}``,
+    grouped by cap: the largest group by count, the others by name."""
+    groups: Dict[str, List[str]] = defaultdict(list)
+    for model, values in caps.items():
+        known = sorted(v for v in values if v is not None)
+        key = "/".join(str(v) for v in known) or "unrecorded"
+        if known and None in values:
+            key += " or unrecorded"
+        groups[key].append(model)
+    tail = " (a reply cut at the cap gives no score)"
+    if len(groups) == 1:
+        key = next(iter(groups))
+        return f"Judge reply cap: max_tokens {key} for every judge{tail}"
+    ordered = sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0]))
+    parts = []
+    for i, (key, models) in enumerate(ordered):
+        who = f"{len(models)} judges" if i == 0 and len(models) > 2 else ", ".join(sorted(models))
+        parts.append(f"{key} for {who}")
+    return "Judge reply cap (max_tokens): " + "; ".join(parts) + tail
+
+
 def estimate_cost(n_entities: int, rate_in: float, rate_out: float) -> float:
     return (n_entities * EST_IN_PER_ENTITY * rate_in
             + n_entities * EST_OUT_PER_ENTITY * rate_out) / 1e6
@@ -179,6 +227,7 @@ def collect_tier_eval_data(
                 "rho": rho, "n": n, "cost": cost,
                 "cost_is_measured": True,
                 "axis_name": axis_name,
+                "max_tokens": cell_max_tokens(model_dir),
             })
 
     return per_model
@@ -259,6 +308,7 @@ def collect_legacy_data(
                 "rho": rho, "n": n, "cost": cost,
                 "cost_is_measured": False,
                 "axis_name": axis_name,
+                "max_tokens": cell_max_tokens(axis_dir / subdir, legacy=True),
             })
 
     return per_model
@@ -280,6 +330,7 @@ def aggregate(per_model: Dict[str, List[dict]]) -> Dict[str, dict]:
             "n_axes": n_axes,
             "cost_is_measured": measured,
             "provider": provider_of(model),
+            "max_tokens": {e.get("max_tokens") for e in entries},
         }
     return agg
 
@@ -356,7 +407,8 @@ def plot(agg: Dict[str, dict], slot: int, n_total_axes: int, output_path: Path,
     title = (
         f"Pooled judge-tier Pareto: {n_total_axes} axes, slot {slot}  "
         f"[◆ = Pareto-optimal, ● = dominated]\n"
-        f"Filled = measured cost (usage.json)  Hollow = estimated (legacy tiers)"
+        f"Filled = measured cost (usage.json)  Hollow = estimated (legacy tiers)\n"
+        + cap_summary({m: d.get("max_tokens") or {None} for m, d in agg.items()})
     )
     if excluded:
         names = ", ".join(f"{m} ({d['n_axes']})"
@@ -377,7 +429,12 @@ def plot(agg: Dict[str, dict], slot: int, n_total_axes: int, output_path: Path,
         plt.Line2D([0], [0], linestyle="--", color="black", alpha=0.5,
                    label="Pareto frontier"),
     ]
-    ax.legend(handles=provider_handles, loc="lower right", fontsize=9)
+    # Room for the labels of the lowest and highest points (a label pushed down by
+    # the collision rule used to land on the x-axis title), and the legend in the
+    # corner a cost/quality frontier leaves empty (high cost, high quality is
+    # rare; low cost, low quality is where cheap judges sit).
+    ax.margins(x=0.06, y=0.14)
+    ax.legend(handles=provider_handles, loc="upper right", fontsize=9)
 
     fig.tight_layout()
     output_path.parent.mkdir(parents=True, exist_ok=True)

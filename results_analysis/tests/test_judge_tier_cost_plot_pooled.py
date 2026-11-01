@@ -97,6 +97,27 @@ def test_price_basis_falls_back_to_recorded_for_an_unpriced_model(tmp_path: Path
     assert "no list price" in capsys.readouterr().err
 
 
+def test_cell_max_tokens_and_cap_summary(tmp_path: Path) -> None:
+    from results_analysis.judge_tier_cost_plot_pooled import (
+        TIER_EVAL_DEFAULT_MAX_TOKENS, cap_summary, cell_max_tokens)
+    old = tmp_path / "old"; old.mkdir()                     # an early tier cell: no max_tokens recorded
+    (old / "scores_descriptions.json").write_text(json.dumps({"result": {}, "_provenance": {"judge_model": "m"}}))
+    new = tmp_path / "new"; new.mkdir()
+    (new / "scores_descriptions.json").write_text(json.dumps({"result": {}, "_provenance": {"max_tokens": 300}}))
+    legacy = tmp_path / "legacy"; legacy.mkdir()
+    (legacy / "config.json").write_text(json.dumps({"args": {"max_tokens": 1024}}))
+    bare = tmp_path / "bare"; bare.mkdir()                  # a legacy cell with no config.json
+    assert cell_max_tokens(old) == TIER_EVAL_DEFAULT_MAX_TOKENS == 200
+    assert cell_max_tokens(new) == 300
+    assert cell_max_tokens(legacy, legacy=True) == 1024
+    assert cell_max_tokens(bare, legacy=True) is None
+    one = cap_summary({"a": {200}, "b": {200}})
+    assert one.startswith("Judge reply cap: max_tokens 200 for every judge")
+    mixed = cap_summary({"a": {200}, "b": {200}, "c": {200}, "x (May)": {1024}, "y (May)": {1024, None}})
+    assert mixed.startswith("Judge reply cap (max_tokens): 200 for 3 judges; ")
+    assert "1024 for x (May)" in mixed and "1024 or unrecorded for y (May)" in mixed
+
+
 def test_cli_default_excludes_and_min_axes_restores(tmp_path: Path) -> None:
     _fixture(tmp_path)
     env = {"MPLBACKEND": "Agg", "PATH": "/usr/bin:/bin"}

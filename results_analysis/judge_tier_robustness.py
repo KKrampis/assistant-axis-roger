@@ -185,6 +185,8 @@ from results_analysis.judge_tier_cost_plot_pooled import (  # noqa: E402
     PRICE_BASES,
     PRICE_BASIS_LABEL,
     PROVIDER_COLOR,
+    cap_summary,
+    cell_max_tokens,
     estimate_cost,
     load_measured_cost,
     pareto_frontier,
@@ -1132,6 +1134,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # Aggregation
     costs = {m: float(np.mean([c.cost for c in cells[m].values()])) for m in models}
     measured = {m: all(c.cost_is_measured for c in cells[m].values()) for m in models}
+    # Each judge's reply cap (max_tokens) over its cells: tier-eval cells record it or
+    # used the script's default (200); legacy cells have it in config.json.
+    caps = {m: {cell_max_tokens(c.scores_path.parent, legacy=not c.cost_is_measured)
+                for c in cells[m].values()} for m in models}
     per_variant: Dict[str, Dict[str, dict]] = {}
     frontiers: Dict[str, List[str]] = {}
     for k in vkeys:
@@ -1187,7 +1193,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         },
         "axes": [vars(a) for a in axes_used],
         "models": {m: {"n_axes": len(cells[m]), "mean_cost": costs[m], "cost_is_measured": measured[m],
-                       "provider": provider_of(m)} for m in models},
+                       "provider": provider_of(m), "max_tokens": sorted(caps[m], key=lambda v: (v is None, v))}
+                   for m in models},
         "excluded_models": excluded,
         "skipped_cells": skipped,
         "rho": rho,
@@ -1215,7 +1222,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print(f"\nWrote {json_path}")
 
     subtitle = (f"soft_K: K={args.soft_K} (augmented pool, poles held out); soft_shear: L={args.shear_L} "
-                f"({args.ca_kind} goal/no-goal); cost at {PRICE_BASIS_LABEL[args.price_basis]}")
+                f"({args.ca_kind} goal/no-goal); cost at {PRICE_BASIS_LABEL[args.price_basis]}\n"
+                + cap_summary({m: caps[m] for m in models}))
     if excluded:
         subtitle += "\nnot compared (judged on fewer axes): " + ", ".join(f"{m} ({k})" for m, k in excluded.items())
     png_path = output_dir / f"{OUTPUT_STEM}.png"
