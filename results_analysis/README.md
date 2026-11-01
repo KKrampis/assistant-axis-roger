@@ -2895,6 +2895,50 @@ uv run python results_analysis/judge_tier_cost_plot.py \
     --output roger/axis_judge_experiments/angel_vs_demon_tier_eval/cost_vs_quality.png
 ```
 
+### Pooled plot across axes, and the robustness check (2026-11-01)
+
+[`judge_tier_cost_plot_pooled.py`](./judge_tier_cost_plot_pooled.py) pools
+every `<axis>_tier_eval/<model>/` cell into one Pareto plot: mean ρ over the
+axes, mean cost per axis, log cost axis, labels placed next to their own
+point.
+
+- **Coverage.**  A model judged on fewer axes than the headline count (the
+  most any model has) is left off and named in the title; `--min_axes N`
+  lowers the bar.
+- **Cost.**  `--price_basis list` (default) recomputes every cell from its
+  token counts at the real-time list price, so batch and Flex cells compare
+  with real-time ones; `batch` halves that; `recorded` takes `usage.json` as
+  billed.
+- **ρ.**  `--robustness_json` takes each cell's ρ from
+  `judge_tier_robustness.py`'s output (default variant `s6_l25_raw`), which
+  drops the nine trait/role collision names on bare-keyed axes that the
+  cells' own `correlations.json` mismatch.
+- **Leaving runs out.**  `--exclude_models CELL ...` drops cell directories,
+  for example a run superseded by one under consistent settings; they are
+  named in the title.
+- **Labels.**  A cell label's suffix is spelled out (`@none` "no reasoning",
+  `@t0` "T=0", `@nothink` "thinking off"), unlabelled cells of the
+  2026-10-26 runs say their setting (Opus and Sonnet 5 "effort low", GPT-5.6
+  "default reasoning"), and gpt-4.1-mini is marked as retiring on 2027-01-14.
+  The May 2026 legacy cells enter only with `--legacy`.
+
+[`judge_tier_robustness.py`](./judge_tier_robustness.py) asks whether the
+choice of judge depends on which projection the scores are compared with.  It
+recomputes every judge's ρ, axis by axis, against 12 projection variants:
+token slot 0 or 6, layer 25 or 49, and three regimes (raw; soft whitening
+with K=2; soft shear with L=3, combined goal/no-goal).  It reports mean ρ per
+variant, Kendall τ of each variant's ranking against the default, the Pareto
+frontier per variant and how often each judge is on it, the best judge under
+a price band, and a bootstrap over axes of the top two judges' order.  It
+checks itself against the cells' cached `correlations.json` at `s6_l25_raw`
+(identical where the entity count matches).  It reads the May 2026 8-slot
+vectors (`--data_dir`) and caches the activation slices it needs
+(`--cache_dir`); it also takes `--exclude_models` and `--legacy`.
+
+The current results, with the commands that made them:
+[`pareto_pooled_61axes_notes.md`](../roger/axis_judge_experiments/pareto_pooled_61axes_notes.md)
+and [`pareto_pooled_20axes_notes.md`](../roger/axis_judge_experiments/pareto_pooled_20axes_notes.md).
+
 ## Output layout
 
 ```
