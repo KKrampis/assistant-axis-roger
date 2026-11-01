@@ -96,10 +96,12 @@ Extending haiku to 61 axes costs ~61 × $0.52 ≈ **$32** and would resolve this
 ## Reproduce
 
 ```bash
-# Regenerate the plot from existing results:
+# Regenerate the plot from existing results (--min_axes 60 excludes haiku/sol/sonnet-5
+# which were only run on 2 axes — rhos not comparable across different axis sets):
 uv run python results_analysis/judge_tier_cost_plot_pooled.py \
     --experiments_dir roger/axis_judge_experiments \
     --slot 6 \
+    --min_axes 60 \
     --output roger/axis_judge_experiments/pareto_pooled_61axes.png
 
 # Re-run all 61 axes from scratch (corpus must be pinned first):
