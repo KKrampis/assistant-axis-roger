@@ -219,10 +219,9 @@ and two for 0.8%, while the rows and columns of 10 x 10 squares share no
 other member.  On the 30 development axes the grid ties the random shuffles:
 GPT-5.6 Luna +0.004 (consistently, bootstrap 1.00), GPT-6 Luna 0.000, Haiku
 5.5 +0.001, with the same between-pass agreement (0.85 to 0.86).  Cells
-`<judge>@b10gr`, `@b10gc` and the average `@b10g2`.  The grid is the cleaner
-design at no extra cost, so it is the one to use for new runs; the 61-axis
-plot above keeps the random-shuffle cells, since the difference is within
-noise.
+`<judge>@b10gr`, `@b10gc` and the average `@b10g2`.  Roger's decision: the
+method is two independent random shuffles at a fixed batch size of ten; the
+grid stays in the code as an option but is not used.
 
 **Caveats.**  This is description judging only; instruction and response
 judging are the next cross-checks (Roger's strategy: tune on the cheapest,

@@ -2966,8 +2966,9 @@ with its own prompt builder and parser, recorded in every cell's provenance
   and the other the columns, so an entity's two batches share no other
   member (two independent shuffles put one of the same batch-mates back
   together for 13% of entities, two for 0.8%).  On the 30 development axes
-  the grid ties two random shuffles (within 0.004 of ρ for every judge); use it
-  for new runs as the cleaner design.
+  the grid ties two random shuffles (within 0.004 of ρ for every judge), so
+  the method is two independent shuffles at a fixed batch size (Roger,
+  2026-11-01); the grid is kept as an option only.
 
 **Result (2026-11-01, 61 axes, slot 6 layer 25 raw):** batched percentile
 judging with two shuffles averaged (`b10`, `--entities_per_call 10`, cells
