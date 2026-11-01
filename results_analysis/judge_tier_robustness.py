@@ -390,7 +390,8 @@ def _bare(key: str) -> str:
 
 def load_cells(axes: Sequence[AxisDef], experiments_dir: Path, tier_eval_dir: Path,
                kinds_for_name: Dict[str, set], price_basis: str = "list",
-               inputs: Optional[list] = None) -> Tuple[Dict[str, Dict[str, Cell]], List[dict]]:
+               inputs: Optional[list] = None,
+               include_legacy: bool = True) -> Tuple[Dict[str, Dict[str, Cell]], List[dict]]:
     """``({model: {axis_dir: Cell}}, skipped)``.  Tier cells first; a legacy
     cell fills an axis only where no tier cell of the same label exists."""
     cells: Dict[str, Dict[str, Cell]] = {}
@@ -424,7 +425,7 @@ def load_cells(axes: Sequence[AxisDef], experiments_dir: Path, tier_eval_dir: Pa
                 cells.setdefault(model, {})[ax.axis_dir] = Cell(
                     model, ax.axis_dir, lift_scores(raw, kinds_for_name),
                     sum(1 for k in raw if _bare(k) not in poles), float(cost), True, sp)
-        for model, sub, rin, rout in LEGACY_CELLS:
+        for model, sub, rin, rout in (LEGACY_CELLS if include_legacy else ()):
             sp = Path(experiments_dir) / ax.axis_dir / sub / "scores_descriptions.json"
             if not sp.exists() or ax.axis_dir in cells.get(model, {}):
                 continue
@@ -1043,6 +1044,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help=f"The variant the others are compared with (default: {DEFAULT_VARIANT}).")
     p.add_argument("--price_basis", choices=PRICE_BASES, default="list",
                    help="Cost basis, as judge_tier_cost_plot_pooled.py (default: list).")
+    p.add_argument("--legacy", action="store_true",
+                   help="Also compare the May 2026 cells, \"gpt-4.1-mini (May)\" and \"claude-sonnet-4 (May)\" "
+                        "(T=0, max_tokens 1024, mixed rubric versions; the Sonnet cells mix two models).  Off "
+                        "by default since 2026-11-01 (Roger).")
     p.add_argument("--min_axes", type=int, default=None,
                    help="Compare only models with at least this many axes (default: the most any model has).")
     p.add_argument("--price_band", type=float, default=DEFAULT_PRICE_BAND,
@@ -1094,7 +1099,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         inputs.append(current_file_input("axes_file", Path(args.axes_file)))
 
     cells, skipped = load_cells(axes, experiments_dir, tier_eval_dir, kinds_for_name,
-                                args.price_basis, inputs)
+                                args.price_basis, inputs, include_legacy=args.legacy)
     models, excluded, min_axes = apply_coverage(cells, args.min_axes)
     for s in skipped:
         log(f"  NOTE: {s['model']} / {s['axis']}: {s['reason']} -- cell skipped")

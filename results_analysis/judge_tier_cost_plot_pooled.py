@@ -493,8 +493,14 @@ def main() -> None:
                              "If omitted with --experiments_dir, auto-detected from "
                              "*_tier_eval siblings that have a gpt/correlations.json.")
     parser.add_argument("--slot", type=int, default=6)
+    parser.add_argument("--legacy", action="store_true",
+                        help="Also plot the May 2026 cells, \"gpt-4.1-mini (May)\" and \"claude-sonnet-4 "
+                             "(May)\" (axis_judge_correlation.py, T=0, max_tokens 1024, rubric v2/v3/unrecorded; "
+                             "the Sonnet cells mix claude-sonnet-4-5 and the retired claude-sonnet-4-20250514).  "
+                             "Off by default since 2026-11-01 (Roger): gpt-4.1-mini is rejudged under the "
+                             "tier-eval settings at T=0 and the Sonnet point cannot be reproduced.")
     parser.add_argument("--no_legacy", action="store_true",
-                        help="Skip legacy model overlay entirely")
+                        help="Deprecated: legacy cells are off unless --legacy is given.")
     parser.add_argument("--min_axes", type=int, default=None,
                         help="Plot only models judged on at least this many axes. Default: the "
                              "headline axis count (the most any model has), so every plotted "
@@ -531,7 +537,7 @@ def main() -> None:
 
     per_model = collect_tier_eval_data(tier_eval_dirs, args.slot, args.price_basis)
 
-    if not args.no_legacy:
+    if args.legacy and not args.no_legacy:
         if args.legacy_dirs is not None:
             legacy_dirs = [Path(p) for p in args.legacy_dirs]
         elif args.experiments_dir:

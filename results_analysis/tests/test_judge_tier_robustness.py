@@ -296,10 +296,11 @@ def test_discover_axes_and_cells(data_dir, experiments_dir):
     assert cells["fake-judge"]["alpha_vs_beta"].cost == pytest.approx(0.04)
 
 
-def _run(tmp_path, data_dir, experiments_dir, *extra):
+def _run(tmp_path, data_dir, experiments_dir, *extra, legacy=True):
     out = tmp_path / "out"
     rc = jtr.main(["--data_dir", str(data_dir), "--experiments_dir", str(experiments_dir),
-                   "--output_dir", str(out), "--price_basis", "recorded", "--bootstrap_draws", "200", *extra])
+                   "--output_dir", str(out), "--price_basis", "recorded", "--bootstrap_draws", "200",
+                   *(["--legacy"] if legacy else []), *extra])
     assert rc == 0
     return json.loads((out / "judge_tier_robustness.json").read_text()), out
 
@@ -332,3 +333,9 @@ def test_end_to_end(tmp_path, data_dir, experiments_dir):
     # lowering the bar brings in the tier judge (one axis)
     res3, _ = _run(tmp_path, data_dir, experiments_dir, "--min_axes", "1", "--axes", "alpha_vs_beta")
     assert sorted(res3["result"]["models"]) == ["claude-sonnet-4 (May)", "fake-judge", "gpt-4.1-mini (May)"]
+
+
+def test_legacy_cells_off_by_default(tmp_path, data_dir, experiments_dir):
+    """Since 2026-11-01 the May cells enter only with --legacy."""
+    res, _ = _run(tmp_path, data_dir, experiments_dir, "--min_axes", "1", "--axes", "alpha_vs_beta", legacy=False)
+    assert sorted(res["result"]["models"]) == ["fake-judge"]
