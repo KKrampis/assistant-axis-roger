@@ -47,7 +47,7 @@ import json
 import sys
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -373,6 +373,104 @@ def split_by_coverage(agg: Dict[str, dict], min_axes: int) -> Tuple[Dict[str, di
     return kept, excluded
 
 
+#: What a cell directory's label suffix (judge_tier_cost_eval.py --cell_label) means, for plot labels.
+CELL_LABEL_TEXT = {"@none": "no reasoning", "@t0": "T=0", "@nothink": "thinking off"}
+#: A note after a model's name in plot labels (OpenAI deprecations page, read 2026-11-01:
+#: gpt-4.1-mini leaves the API on 2027-01-14, replacement gpt-6-luna).
+MODEL_NOTES = {"gpt-4.1-mini": "retires 2027-01-14"}
+
+
+def display_name(cell: str) -> str:
+    """A cell directory name as plots show it: ``gpt-5.6-luna@none`` ->
+    ``gpt-5.6-luna (no reasoning)``, ``gpt-4.1-mini`` -> ``gpt-4.1-mini
+    (retires 2027-01-14)``; other names unchanged."""
+    model, sep, label = cell.partition("@")
+    notes = [CELL_LABEL_TEXT.get(f"@{label}", f"@{label}")] if sep else []
+    if model in MODEL_NOTES:
+        notes.append(MODEL_NOTES[model])
+    return f"{model} ({', '.join(notes)})" if notes else model
+
+
+def drop_models(per_model: Dict[str, Any], names: Sequence[str]) -> List[str]:
+    """Remove the cells named in ``names`` (--exclude_models) from ``per_model``
+    in place; returns the names actually removed."""
+    dropped = [m for m in names if m in per_model]
+    for m in dropped:
+        del per_model[m]
+    for m in names:
+        if m not in dropped:
+            print(f"  NOTE: --exclude_models {m}: no such cell", file=sys.stderr)
+    return dropped
+
+
+# Label positions tried around a point, in points: (dx, dy, ha).  The text
+# sits with va="center" at (dx, dy) from the point; the later entries are
+# farther out and get a leader line.
+_LABEL_CANDIDATES = [(7, 0, "left"), (-7, 0, "right"), (0, 9, "center"), (0, -9, "center"),
+                     (6, 9, "left"), (-6, 9, "right"), (6, -9, "left"), (-6, -9, "right"),
+                     (16, 16, "left"), (-16, 16, "right"), (16, -16, "left"), (-16, -16, "right"),
+                     (0, 20, "center"), (0, -20, "center"), (24, 0, "left"), (-24, 0, "right"),
+                     (30, 26, "left"), (-30, 26, "right"), (30, -26, "left"), (-30, -26, "right")]
+_NEAR_CANDIDATES = 8
+
+
+def place_labels(ax, points: Sequence[Tuple[float, float]], labels: Sequence[str],
+                 bold: Sequence[bool], fontsize: float = 7.5) -> None:
+    """Greedy label placement: each label takes the first candidate position
+    whose (estimated) box overlaps no marker, no earlier label, stays in the
+    axes and lies nearer its own point than any other point (so a label is
+    never read as another point's); failing that, the least bad one.  A label
+    may have several lines.  Call after the axes limits, scale and position
+    are final."""
+    k = ax.figure.dpi / 72.0
+    disp = ax.transData.transform(np.asarray(points, dtype=float))
+    ab = ax.get_window_extent()
+    r = 5.5 * k
+    obstacles = [(x - r, y - r, x + r, y + r) for x, y in disp]
+
+    def overlap(a, b):
+        w = min(a[2], b[2]) - max(a[0], b[0])
+        h = min(a[3], b[3]) - max(a[1], b[1])
+        return w * h if w > 0 and h > 0 else 0.0
+
+    def gap(box, p):
+        dx = max(box[0] - p[0], 0.0, p[0] - box[2])
+        dy = max(box[1] - p[1], 0.0, p[1] - box[3])
+        return (dx * dx + dy * dy) ** 0.5
+
+    placed: List[Tuple[float, float, float, float]] = []
+    for i in sorted(range(len(labels)), key=lambda i: (not bold[i], -disp[i][1])):
+        lines = labels[i].split("\n")
+        w = (0.62 if bold[i] else 0.56) * fontsize * max(len(t) for t in lines) * k
+        h = 1.1 * fontsize * k * len(lines)
+        best, best_cost = None, float("inf")
+        for ci, (dx, dy, ha) in enumerate(_LABEL_CANDIDATES):
+            x0 = disp[i][0] + dx * k - (w if ha == "right" else w / 2 if ha == "center" else 0.0)
+            y0 = disp[i][1] + dy * k - h / 2
+            box = (x0, y0, x0 + w, y0 + h)
+            cost = sum(overlap(box, o) for o in obstacles) + sum(overlap(box, p) for p in placed)
+            out = (max(0.0, ab.x0 - box[0]) + max(0.0, box[2] - ab.x1)
+                   + max(0.0, ab.y0 - box[1]) + max(0.0, box[3] - ab.y1))
+            own = gap(box, disp[i])
+            nearer = sum(1 for j, p in enumerate(disp) if j != i and gap(box, p) < own)
+            cost += out * h * 4 + nearer * h * h + ci * 1e-3
+            if cost < best_cost:
+                best, best_cost = (ci, dx, dy, ha, box), cost
+            if cost < 1e-2:
+                break
+        ci, dx, dy, ha, box = best
+        placed.append(box)
+        ax.annotate(labels[i], points[i], textcoords="offset points", xytext=(dx, dy), ha=ha, va="center",
+                    fontsize=fontsize, fontweight="bold" if bold[i] else "normal", zorder=5,
+                    arrowprops=(dict(arrowstyle="-", color="#888888", lw=0.6, shrinkA=0, shrinkB=4)
+                                if ci >= _NEAR_CANDIDATES else None))
+
+
+def cost_ticks(lo: float, hi: float) -> List[float]:
+    cands = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50]
+    return [c for c in cands if lo <= c <= hi]
+
+
 PRICE_BASIS_LABEL = {
     "list": "real-time list price",
     "batch": "batch price (half of list)",
@@ -382,7 +480,7 @@ PRICE_BASIS_LABEL = {
 
 def plot(agg: Dict[str, dict], slot: int, n_total_axes: int, output_path: Path,
          excluded: Optional[Dict[str, dict]] = None, price_basis: str = "list",
-         rho_note: str = "") -> None:
+         rho_note: str = "", left_out: Sequence[str] = ()) -> None:
     fig, ax = plt.subplots(figsize=(11, 8))
 
     model_list = sorted(agg.items(), key=lambda kv: kv[1]["mean_cost"])
@@ -397,22 +495,21 @@ def plot(agg: Dict[str, dict], slot: int, n_total_axes: int, output_path: Path,
     ax.plot(frontier_costs, frontier_qualities, "k--", linewidth=1.2, alpha=0.5, zorder=2,
             label="Pareto frontier")
 
-    # Assign vertical label offsets to avoid crowding among points with similar quality.
-    # Strategy: for each point, if a previously placed label is within 0.08 quality units,
-    # nudge this one down by 18pt per collision.
-    placed: list[tuple[float, float, float]] = []  # (cost, quality, y_offset_pts)
-    label_offsets: list[tuple[int, int]] = []
-    for i, (model, d) in enumerate(model_list):
-        cost = costs[i]
-        quality = qualities[i]
-        base_x = 12 if d["mean_cost"] < 0.5 else -12
-        y_pts = 8
-        for _, pq, py in placed:
-            if abs(quality - pq) < 0.08:
-                y_pts = py - 18  # push below the colliding label
-        label_offsets.append((base_x, y_pts))
-        placed.append((cost, quality, y_pts))
+    # Costs span two orders of magnitude (GPT-6 Luna about $0.03 per axis, Opus 5 about $3): a log
+    # axis keeps the cheap judges apart.
+    ax.set_xscale("log")
+    x_lo, x_hi = min(costs) / 1.8, max(costs) * 1.8
+    ax.set_xlim(x_lo, x_hi)
+    q_lo, q_hi = min(qualities), max(qualities)
+    pad = 0.12 * ((q_hi - q_lo) or 0.1)
+    ax.set_ylim(q_lo - pad, q_hi + pad)
+    ticks = cost_ticks(x_lo, x_hi)
+    if ticks:
+        ax.set_xticks(ticks)
+        ax.set_xticklabels([f"\\${t:g}" for t in ticks])
+        ax.minorticks_off()
 
+    pts, labels, bold = [], [], []
     for i, (model, d) in enumerate(model_list):
         quality = qualities[i]
         cost = costs[i]
@@ -424,25 +521,29 @@ def plot(agg: Dict[str, dict], slot: int, n_total_axes: int, output_path: Path,
         ax.scatter(cost, quality, s=size, marker=marker,
                    facecolors=facecolor, edgecolors=edgecolor, linewidths=2.0, zorder=4)
         cost_note = "" if d["cost_is_measured"] else " (est.)"
-        label = f"{model}  ρ={d['mean_rho']:.3f}  ${cost:.2f}{cost_note}  n={d['n_axes']}ax"
-        ox, oy = label_offsets[i]
-        ha = "left" if d["mean_cost"] < 0.5 else "right"
-        ax.annotate(label, (cost, quality), textcoords="offset points",
-                    xytext=(ox, oy), fontsize=9, ha=ha)
+        price = f"\\${cost:.2f}" if cost >= 0.1 else f"\\${cost:.3f}"
+        pts.append((cost, quality))
+        labels.append(f"{display_name(model)}\nρ={d['mean_rho']:.3f}  {price}/axis{cost_note}")
+        bold.append(is_pareto)
+    fig.tight_layout()
+    place_labels(ax, pts, labels, bold, fontsize=9)
 
-    ax.set_xlabel(f"Mean cost per axis (USD at {PRICE_BASIS_LABEL[price_basis]}, descriptions mode)")
+    ax.set_xlabel(f"Mean cost per axis (USD at {PRICE_BASIS_LABEL[price_basis]}, log scale; descriptions mode)")
     ax.set_ylabel("Mean quality = 1 / (1 − ρ̄)")
-    title = (
-        f"Pooled judge-tier Pareto: {n_total_axes} axes, slot {slot}  "
-        f"[◆ = Pareto-optimal, ● = dominated]\n"
-        f"Filled = measured cost (usage.json)  Hollow = estimated (legacy tiers)"
-    )
+    title = (f"Pooled judge-tier Pareto: {n_total_axes} axes, slot {slot}  "
+             f"[◆ = Pareto-optimal (bold label), ● = dominated]")
+    if price_basis == "list":
+        title += "\nCost at real-time list price; Flex and Batch are half price for every judge here"
+    if any(not d["cost_is_measured"] for d in agg.values()):
+        title += "\nFilled = measured cost (usage.json)  Hollow = estimated (legacy tiers)"
     if rho_note:
         title += f"\n{rho_note}"
     if excluded:
-        names = ", ".join(f"{m} ({d['n_axes']})"
+        names = ", ".join(f"{display_name(m)} ({d['n_axes']})"
                           for m, d in sorted(excluded.items(), key=lambda kv: -kv[1]["n_axes"]))
         title += f"\nNot shown, judged on fewer than {n_total_axes} axes: {names}"
+    if left_out:
+        title += "\nLeft out (--exclude_models): " + ", ".join(display_name(m) for m in left_out)
     ax.set_title(title, fontsize=11)
     ax.grid(True, alpha=0.3)
 
@@ -462,10 +563,7 @@ def plot(agg: Dict[str, dict], slot: int, n_total_axes: int, output_path: Path,
     # the collision rule used to land on the x-axis title), and the legend in the
     # corner a cost/quality frontier leaves empty (high cost, high quality is
     # rare; low cost, low quality is where cheap judges sit).
-    ax.margins(x=0.06, y=0.14)
-    ax.legend(handles=provider_handles, loc="upper right", fontsize=9)
-
-    fig.tight_layout()
+    ax.legend(handles=provider_handles, loc="lower right", fontsize=9)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=150, bbox_inches="tight",
                 metadata=png_metadata(
@@ -519,6 +617,10 @@ def main() -> None:
     parser.add_argument("--robustness_variant", type=str, default="s6_l25_raw",
                         help="Variant key in --robustness_json (default s6_l25_raw: slot 6, layer 25, raw, "
                              "the cells' own projection).")
+    parser.add_argument("--exclude_models", nargs="+", default=[], metavar="CELL",
+                        help="Cell directory names to leave out, e.g. a run superseded by one under "
+                             "consistent settings (claude-haiku-4-5, T=1, beside claude-haiku-4-5@t0); named in "
+                             "the title.")
     parser.add_argument("--output", type=str, required=True)
     args = parser.parse_args()
 
@@ -558,11 +660,19 @@ def main() -> None:
             for model, entries in legacy_data.items():
                 per_model[model].extend(entries)
 
+    left_out = drop_models(per_model, args.exclude_models)
+    # Coverage is judged on the cells themselves: the robustness JSON holds only the models it compared.
+    n_axes_raw = {m: len(v) for m, v in per_model.items() if v}
+    n_total = max(n_axes_raw.values(), default=0)
+    min_axes = args.min_axes if args.min_axes is not None else n_total
+    excluded_raw = {m: {"n_axes": k} for m, k in n_axes_raw.items() if k < min_axes}
+
     if args.robustness_json:
         if not args.robustness_variant.startswith(f"s{args.slot}_"):
             print(f"WARNING: --robustness_variant {args.robustness_variant} is not slot {args.slot}",
                   file=sys.stderr)
-        per_model = rho_from_robustness(per_model, Path(args.robustness_json), args.robustness_variant)
+        per_model = rho_from_robustness({m: v for m, v in per_model.items() if m not in excluded_raw},
+                                        Path(args.robustness_json), args.robustness_variant)
 
     if not per_model:
         print("ERROR: no data found at all.", file=sys.stderr)
@@ -577,9 +687,8 @@ def main() -> None:
               f"mean_cost=${d['mean_cost']:.2f}  n_axes={d['n_axes']}  cost={measured}",
               file=sys.stderr)
 
-    n_total = max(len(v) for v in per_model.values())
-    min_axes = args.min_axes if args.min_axes is not None else n_total
     agg, excluded = split_by_coverage(agg, min_axes)
+    excluded = {**excluded_raw, **excluded}
     if excluded:
         print(f"Not plotted (judged on fewer than {min_axes} axes): "
               + ", ".join(f"{m} (n_axes={d['n_axes']})" for m, d in sorted(excluded.items())),
@@ -590,7 +699,7 @@ def main() -> None:
     rho_note = (f"rho from {Path(args.robustness_json).name}, variant {args.robustness_variant} "
                 f"(collision names dropped on bare-keyed axes)") if args.robustness_json else ""
     plot(agg, args.slot, n_total, Path(args.output), excluded=excluded, price_basis=args.price_basis,
-         rho_note=rho_note)
+         rho_note=rho_note, left_out=left_out)
 
 
 if __name__ == "__main__":

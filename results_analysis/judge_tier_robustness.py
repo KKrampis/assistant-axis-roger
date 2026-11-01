@@ -182,6 +182,9 @@ from results_analysis.canonical_angles.whitening import (  # noqa: E402
     WhiteningBasis,
 )
 from results_analysis.judge_tier_cost_plot_pooled import (  # noqa: E402
+    cost_ticks as _cost_ticks,
+    display_name,
+    place_labels as _place_labels,
     PRICE_BASES,
     PRICE_BASIS_LABEL,
     PROVIDER_COLOR,
@@ -788,6 +791,8 @@ def check_vs_cached(cells: Dict[str, Dict[str, Cell]], models: Sequence[str],
 # ---------------------------------------------------------------------------
 
 def _short(model: str) -> str:
+    """The plot label: the display name (setting spelled out, notes) without the provider prefix."""
+    model = display_name(model)
     for p in ("claude-", "gpt-"):
         if model.startswith(p):
             return model[len(p):]
@@ -797,63 +802,6 @@ def _short(model: str) -> str:
 def _usd(x: float) -> str:
     """Dollar amount with the sign escaped from mathtext."""
     return f"\\${x:.2f}" if x >= 0.1 else f"\\${x:.3f}"
-
-
-# Label positions tried around a point, in points: (dx, dy, ha).  The text
-# sits with va="center" at (dx, dy) from the point; the later entries are
-# farther out and get a leader line.
-_LABEL_CANDIDATES = [(7, 0, "left"), (-7, 0, "right"), (0, 9, "center"), (0, -9, "center"),
-                     (6, 9, "left"), (-6, 9, "right"), (6, -9, "left"), (-6, -9, "right"),
-                     (16, 16, "left"), (-16, 16, "right"), (16, -16, "left"), (-16, -16, "right"),
-                     (0, 20, "center"), (0, -20, "center"), (24, 0, "left"), (-24, 0, "right")]
-_NEAR_CANDIDATES = 8
-
-
-def _place_labels(ax, points: Sequence[Tuple[float, float]], labels: Sequence[str],
-                  bold: Sequence[bool], fontsize: float = 7.5) -> None:
-    """Greedy label placement: each label takes the first candidate position
-    whose (estimated) box overlaps no marker, no earlier label and stays in
-    the axes; failing that, the least-overlapping one.  Call after the axes
-    limits, scale and position are final."""
-    k = ax.figure.dpi / 72.0
-    disp = ax.transData.transform(np.asarray(points, dtype=float))
-    ab = ax.get_window_extent()
-    r = 5.5 * k
-    obstacles = [(x - r, y - r, x + r, y + r) for x, y in disp]
-
-    def overlap(a, b):
-        w = min(a[2], b[2]) - max(a[0], b[0])
-        h = min(a[3], b[3]) - max(a[1], b[1])
-        return w * h if w > 0 and h > 0 else 0.0
-
-    placed: List[Tuple[float, float, float, float]] = []
-    for i in sorted(range(len(labels)), key=lambda i: (not bold[i], -disp[i][1])):
-        w = (0.62 if bold[i] else 0.56) * fontsize * len(labels[i]) * k
-        h = 1.1 * fontsize * k
-        best, best_cost = None, float("inf")
-        for ci, (dx, dy, ha) in enumerate(_LABEL_CANDIDATES):
-            x0 = disp[i][0] + dx * k - (w if ha == "right" else w / 2 if ha == "center" else 0.0)
-            y0 = disp[i][1] + dy * k - h / 2
-            box = (x0, y0, x0 + w, y0 + h)
-            cost = sum(overlap(box, o) for o in obstacles) + sum(overlap(box, p) for p in placed)
-            out = (max(0.0, ab.x0 - box[0]) + max(0.0, box[2] - ab.x1)
-                   + max(0.0, ab.y0 - box[1]) + max(0.0, box[3] - ab.y1))
-            cost += out * h * 4 + ci * 1e-3
-            if cost < best_cost:
-                best, best_cost = (ci, dx, dy, ha, box), cost
-            if cost < 1e-2:
-                break
-        ci, dx, dy, ha, box = best
-        placed.append(box)
-        ax.annotate(labels[i], points[i], textcoords="offset points", xytext=(dx, dy), ha=ha, va="center",
-                    fontsize=fontsize, fontweight="bold" if bold[i] else "normal", zorder=5,
-                    arrowprops=(dict(arrowstyle="-", color="#888888", lw=0.6, shrinkA=0, shrinkB=4)
-                                if ci >= _NEAR_CANDIDATES else None))
-
-
-def _cost_ticks(lo: float, hi: float) -> List[float]:
-    cands = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50]
-    return [c for c in cands if lo <= c <= hi]
 
 
 def render_figure(out_png: Path, models_by_rho: Sequence[str], variants: Sequence[Variant],
@@ -904,7 +852,7 @@ def render_figure(out_png: Path, models_by_rho: Sequence[str], variants: Sequenc
             lbl.set_fontweight("bold")
     cost0 = per_variant[vkeys[0]]
     ax_h.set_yticks(range(n_m))
-    ax_h.set_yticklabels([f"{m}  ({_usd(cost0[m]['mean_cost'])}/axis{'' if measured[m] else ' est.'})"
+    ax_h.set_yticklabels([f"{display_name(m)}  ({_usd(cost0[m]['mean_cost'])}/axis{'' if measured[m] else ' est.'})"
                           for m in models_by_rho], fontsize=9)
     for j in range(1, n_v):
         if variants[j].layer != variants[j - 1].layer or variants[j].slot != variants[j - 1].slot:
@@ -1050,6 +998,9 @@ def build_parser() -> argparse.ArgumentParser:
                         "by default since 2026-11-01 (Roger).")
     p.add_argument("--min_axes", type=int, default=None,
                    help="Compare only models with at least this many axes (default: the most any model has).")
+    p.add_argument("--exclude_models", nargs="+", default=[], metavar="CELL",
+                   help="Cell directory names to leave out (e.g. claude-haiku-4-5 at T=1, superseded by "
+                        "claude-haiku-4-5@t0).")
     p.add_argument("--price_band", type=float, default=DEFAULT_PRICE_BAND,
                    help=f"Report the best model under this cost per axis (default: {DEFAULT_PRICE_BAND}).")
     p.add_argument("--bootstrap_draws", type=int, default=DEFAULT_BOOTSTRAP_DRAWS)
@@ -1100,6 +1051,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     cells, skipped = load_cells(axes, experiments_dir, tier_eval_dir, kinds_for_name,
                                 args.price_basis, inputs, include_legacy=args.legacy)
+    left_out = [m for m in args.exclude_models if cells.pop(m, None) is not None]
+    for m in args.exclude_models:
+        if m not in left_out:
+            log(f"  NOTE: --exclude_models {m}: no such cell")
     models, excluded, min_axes = apply_coverage(cells, args.min_axes)
     for s in skipped:
         log(f"  NOTE: {s['model']} / {s['axis']}: {s['reason']} -- cell skipped")
@@ -1190,6 +1145,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "slots": list(args.slots), "layers": list(args.layers), "regimes": list(args.regimes),
             "soft_K": args.soft_K, "shear_L": args.shear_L, "ca_kind": args.ca_kind,
             "price_basis": args.price_basis, "price_band_usd": args.price_band, "min_axes": min_axes,
+            "exclude_models": left_out,
             "data_dir": str(data_dir), "experiments_dir": str(experiments_dir),
             "tier_eval_dir": str(tier_eval_dir), "axes_file": args.axes_file,
             "score_keys": "bare names lifted by migrate_v1_static_scores (collision names dropped)",
@@ -1228,7 +1184,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     subtitle = (f"soft_K: K={args.soft_K} (augmented pool, poles held out); soft_shear: L={args.shear_L} "
                 f"({args.ca_kind} goal/no-goal); cost at {PRICE_BASIS_LABEL[args.price_basis]}")
     if excluded:
-        subtitle += "\nnot compared (judged on fewer axes): " + ", ".join(f"{m} ({k})" for m, k in excluded.items())
+        subtitle += "\nnot compared (judged on fewer axes): " + ", ".join(f"{display_name(m)} ({k})"
+                                                                           for m, k in excluded.items())
+    if left_out:
+        subtitle += "\nleft out (--exclude_models): " + ", ".join(display_name(m) for m in left_out)
     png_path = output_dir / f"{OUTPUT_STEM}.png"
     render_figure(png_path, default_rank, variants, per_variant, frontiers, measured,
                   args.default_variant, len(axes_used), subtitle, inputs)

@@ -149,3 +149,26 @@ def test_cli_default_excludes_and_min_axes_restores(tmp_path: Path) -> None:
     assert r2.returncode == 0, r2.stderr
     assert "Not plotted" not in r2.stderr
     assert out2.exists()
+
+
+def test_display_names_spell_out_settings_and_notes():
+    from results_analysis.judge_tier_cost_plot_pooled import display_name
+    assert display_name("gpt-5.6-luna@none") == "gpt-5.6-luna (no reasoning)"
+    assert display_name("claude-haiku-4-5@t0") == "claude-haiku-4-5 (T=0)"
+    assert display_name("claude-opus-5@nothink") == "claude-opus-5 (thinking off)"
+    assert display_name("gpt-4.1-mini") == "gpt-4.1-mini (retires 2027-01-14)"
+    assert display_name("gpt-4.1-mini@x") == "gpt-4.1-mini (@x, retires 2027-01-14)"
+    assert display_name("claude-haiku-5-5") == "claude-haiku-5-5"
+    assert display_name("gpt-4.1-mini (May)") == "gpt-4.1-mini (May)"
+
+
+def test_exclude_models_leaves_a_cell_out_and_says_so(tmp_path: Path) -> None:
+    _fixture(tmp_path)
+    env = {"MPLBACKEND": "Agg", "PATH": "/usr/bin:/bin"}
+    out = tmp_path / "x.png"
+    r = subprocess.run([sys.executable, str(SCRIPT), "--experiments_dir", str(tmp_path), "--slot", "6",
+                        "--min_axes", "1", "--exclude_models", "partial", "nosuch", "--output", str(out)],
+                       capture_output=True, text=True, env=env)
+    assert r.returncode == 0, r.stderr
+    assert "partial" not in r.stderr.split("Aggregated results")[1].split("Wrote")[0]
+    assert "--exclude_models nosuch: no such cell" in r.stderr and out.exists()
