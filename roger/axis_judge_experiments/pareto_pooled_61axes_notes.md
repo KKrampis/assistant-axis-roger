@@ -1,7 +1,7 @@
 # Judge-Tier Pareto Analysis — 61 Axes
 
 **Plot:** [`pareto_pooled_61axes.png`](./pareto_pooled_61axes.png)
-**Robustness check:** [`judge_tier_robustness_61axes.png`](./judge_tier_robustness_61axes.png), numbers in [`judge_tier_robustness_61axes.json`](./judge_tier_robustness_61axes.json)
+**Robustness check:** [`judge_tier_robustness_61axes.png`](./judge_tier_robustness_61axes.png), numbers in [`judge_tier_robustness_61axes.json`](./judge_tier_robustness_61axes.json); with the superseded runs too, [`judge_tier_robustness_61axes_all.json`](./judge_tier_robustness_61axes_all.json) ([`.png`](./judge_tier_robustness_61axes_all.png))
 
 ## Update, 2026-11-01: every judge on all 61 axes under one set of settings
 
@@ -14,13 +14,17 @@ the record.
 - **One rubric, one corpus, consistent settings.**  Every cell uses the v3
   descriptions-mode prompt against the corpus pinned at `1448a84c`.  Each judge
   runs at temperature 0 where its API accepts it, and with reasoning switched
-  off where it can be.  The May 2026 cells (`gpt-4.1-mini` and `claude-sonnet-4`
-  from earlier sessions) are no longer plotted; gpt-4.1-mini was rejudged under
-  these settings.
+  off where it can be.  The one exception is claude-opus-5, shown at the low
+  effort setting of the 26 October run (it thinks): it is the only Opus run on
+  all 61 axes, and the 20-axis plot shows it beside Opus with thinking off.
+  The May 2026 cells (`gpt-4.1-mini` and `claude-sonnet-4` from earlier
+  sessions) are no longer plotted; gpt-4.1-mini was rejudged under these
+  settings.
 - **Reply cap.**  A reply cut at `max_tokens` is now scored as missing rather
   than parsed for a stray number, and the few cut replies were asked again at
   300 tokens (`--repair_truncated` in
   [`judge_tier_cost_eval.py`](../../results_analysis/judge_tier_cost_eval.py)).
+  The 26 October cells ran before this check, at a 200-token cap.
 - **Collision names.**  On the bare-keyed axes, nine names that are both a
   trait and a role had been judged on one description and compared with the
   other's projection.  ρ now comes from the robustness tool, which drops them
@@ -31,14 +35,17 @@ the record.
   $4/$20 (promotional, "at least through November 21, 2026").  Flex and Batch
   are half price for every judge here, so the frontier is the same at either
   price.
-- **Left out:** `claude-haiku-4-5` at temperature 1, superseded by the
-  temperature-0 run shown.
+- **Left out:** claude-haiku-4-5 at T=1 (superseded by the T=0 run), and
+  gpt-5.6-luna and gpt-5.6-terra at their default reasoning effort
+  (superseded by the reasoning-off runs).  Their numbers are in the "all"
+  file above and in the comparisons below.
 
 **The judges** (ρ: mean Spearman correlation over the 61 axes at slot 6, layer
 25, raw projection; cost per axis at list price)
 
 | judge | settings | ρ | cost per axis |
 |---|---|---|---|
+| claude-opus-5 | effort low (thinks); refuses T=0 | 0.622 | $3.217 |
 | gpt-4.1-mini | T=0 | 0.605 | $0.130 |
 | claude-haiku-4-5 | T=0 | 0.561 | $0.521 |
 | claude-sonnet-5 | effort low (no thinking seen); refuses T=0 | 0.551 | $1.187 |
@@ -48,25 +55,43 @@ the record.
 | gpt-5.4-mini | reasoning off | 0.514 | $0.291 |
 | gpt-6-luna | reasoning off | 0.478 | $0.033 |
 
-**Pareto frontier:** gpt-6-luna, claude-haiku-5-5, gpt-5.6-luna, gpt-4.1-mini.
-gpt-4.1-mini is the best judge at any price on this task.  claude-haiku-5-5
-and gpt-5.6-luna are within 0.003 of each other in ρ and cost.
+**Pareto frontier:** gpt-6-luna, claude-haiku-5-5, gpt-5.6-luna, gpt-4.1-mini,
+claude-opus-5.  Opus 5 with thinking is the best judge, 0.017 ahead of
+gpt-4.1-mini at 25 times the cost.  Below Opus, gpt-4.1-mini is the best judge
+at any price.  claude-haiku-5-5 and gpt-5.6-luna are within 0.003 of each other
+in ρ and cost.
 
 **Robustness: does the choice depend on which projection the scores are
 compared with?**  The robustness tool recomputes every judge's ρ against 12
 projections: token slot 0 or 6, layer 25 or 49, and three regimes (raw; soft
 whitening with K=2; soft shear with L=3, combined goal/no-goal subspaces).
 
-- gpt-4.1-mini is the top judge in all 12, and in every bootstrap draw over
-  axes (2,000 draws) it stays ahead of the runner-up, claude-haiku-4-5 at T=0.
+- claude-opus-5 is the top judge in 11 of the 12 variants, gpt-4.1-mini in the
+  other (slot 0, layer 25, raw).  In 2,000 bootstrap draws over axes, Opus
+  stays ahead of gpt-4.1-mini in 99% at the default variant, and in 37% to
+  100% across variants.
+- gpt-4.1-mini is ahead of every judge but Opus in all 12 variants.
 - The frontier holds gpt-6-luna, claude-haiku-5-5 and gpt-4.1-mini in all 12
-  variants; gpt-5.6-luna joins it in 6.
+  variants, claude-opus-5 in 11 and gpt-5.6-luna in 6.
 - The ranking agrees with the default's in every variant (Kendall τ from
-  0.714 to 1.000).
-- Layer 49 changes the ranking most (τ 0.714 at slot 6) and lowers every
-  judge's ρ by about 0.05.  Slot 0 lowers ρ most (gpt-4.1-mini 0.605 to 0.471
-  raw), and whitening wins most of that back at slot 0.  At slot 6, layer 25,
+  0.778 to 1.000).  It changes most at slot 0, layer 25, raw and at slot 6,
+  layer 49, raw.  Slot 0 lowers every judge's ρ most (gpt-4.1-mini 0.605 to
+  0.471 raw), and whitening wins most of that back.  At slot 6, layer 25,
   whitening and shear change ρ by at most 0.012.
+
+**Reasoning and temperature** (same cells, from the "all" file; 61 axes
+unless noted)
+
+| judge | with | without | ρ with | ρ without | cost with | cost without |
+|---|---|---|---|---|---|---|
+| claude-opus-5 (20 axes) | effort low | thinking off | 0.704 | 0.693 | $3.18 | $3.20 |
+| gpt-5.6-terra | default reasoning | reasoning off | 0.553 | 0.550 | $0.88 | $0.72 |
+| gpt-5.6-luna | default reasoning | reasoning off | 0.535 | 0.547 | $0.10 | $0.07 |
+| claude-haiku-4-5 | T=1 | T=0 | 0.557 | 0.561 | $0.52 | $0.52 |
+
+Thinking helps Opus 5: low effort stays ahead of thinking off in at least 98.7%
+of bootstrap draws in every variant.  Reasoning makes little difference to
+GPT-5.6, and temperature little to Haiku 4.5.
 
 **Caveats**
 
@@ -81,20 +106,30 @@ whitening with K=2; soft shear with L=3, combined goal/no-goal subspaces).
 - Only gpt-4.1-mini and claude-haiku-4-5 ran at T=0.  The other judges
   refuse T=0 or take no temperature setting, and ran at their default with
   one sample per item.
-- Opus 5 is on the 20-axis plot only
-  ([`pareto_pooled_20axes_notes.md`](./pareto_pooled_20axes_notes.md)).
+- The 26 October cells (claude-opus-5, and gpt-5.6-luna and gpt-5.6-terra at
+  default reasoning) ran in real time at a 200-token cap before cut replies
+  were detected, so a few replies may have been scored from a stray number;
+  Opus scored about 1.6 fewer entities per axis than the other judges (0.3%).
+- **The vectors were built with gpt-4.1-mini in the loop.**  In the April-May
+  extraction, pipeline step 3 judged each response with gpt-4.1-mini, and each
+  pole vector is the mean activation over the responses it scored 3 (fully in
+  persona).  A judge that reads personas as gpt-4.1-mini does may start with
+  an advantage here.  The October extraction, judged by gpt-5.6-luna, is the
+  natural test.
 
 **Reproduce** (from the repository root; the robustness tool reads the May
 2026 8-slot vectors by default):
 
 ```bash
 uv run python results_analysis/judge_tier_robustness.py --axes_file scripts/tier_eval_axes.tsv \
-    --exclude_models claude-haiku-4-5 --output_dir /tmp/robust61
+    --exclude_models claude-haiku-4-5 gpt-5.6-luna gpt-5.6-terra --output_dir /tmp/robust61
 cp /tmp/robust61/judge_tier_robustness.json roger/axis_judge_experiments/judge_tier_robustness_61axes.json
 cp /tmp/robust61/judge_tier_robustness.png roger/axis_judge_experiments/judge_tier_robustness_61axes.png
 uv run python results_analysis/judge_tier_cost_plot_pooled.py --experiments_dir roger/axis_judge_experiments \
     --robustness_json roger/axis_judge_experiments/judge_tier_robustness_61axes.json \
-    --exclude_models claude-haiku-4-5 --output roger/axis_judge_experiments/pareto_pooled_61axes.png
+    --exclude_models claude-haiku-4-5 gpt-5.6-luna gpt-5.6-terra \
+    --output roger/axis_judge_experiments/pareto_pooled_61axes.png
+# the "all" file: the same robustness command without --exclude_models
 ```
 
 ---

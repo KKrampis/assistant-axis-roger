@@ -159,6 +159,8 @@ def test_display_names_spell_out_settings_and_notes():
     assert display_name("gpt-4.1-mini") == "gpt-4.1-mini (retires 2027-01-14)"
     assert display_name("gpt-4.1-mini@x") == "gpt-4.1-mini (@x, retires 2027-01-14)"
     assert display_name("claude-haiku-5-5") == "claude-haiku-5-5"
+    assert display_name("claude-opus-5") == "claude-opus-5 (effort low)"
+    assert display_name("gpt-5.6-luna") == "gpt-5.6-luna (default reasoning)"
     assert display_name("gpt-4.1-mini (May)") == "gpt-4.1-mini (May)"
 
 

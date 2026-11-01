@@ -378,6 +378,12 @@ CELL_LABEL_TEXT = {"@none": "no reasoning", "@t0": "T=0", "@nothink": "thinking 
 #: A note after a model's name in plot labels (OpenAI deprecations page, read 2026-11-01:
 #: gpt-4.1-mini leaves the API on 2027-01-14, replacement gpt-6-luna).
 MODEL_NOTES = {"gpt-4.1-mini": "retires 2027-01-14"}
+#: The setting of cells without a label, where it matters for reading the plot: the 2026-10-26 runs
+#: (Opus 5 and Sonnet 5 at output_config effort "low", GPT-5.6 at the default reasoning effort) and
+#: claude-haiku-4-5 at its default temperature (superseded by claude-haiku-4-5@t0).
+UNLABELED_SETTINGS = {"claude-opus-5": "effort low", "claude-sonnet-5": "effort low", "claude-haiku-4-5": "T=1",
+                      "gpt-5.6-luna": "default reasoning", "gpt-5.6-terra": "default reasoning",
+                      "gpt-5.6-sol": "default reasoning"}
 
 
 def display_name(cell: str) -> str:
@@ -385,7 +391,10 @@ def display_name(cell: str) -> str:
     ``gpt-5.6-luna (no reasoning)``, ``gpt-4.1-mini`` -> ``gpt-4.1-mini
     (retires 2027-01-14)``; other names unchanged."""
     model, sep, label = cell.partition("@")
-    notes = [CELL_LABEL_TEXT.get(f"@{label}", f"@{label}")] if sep else []
+    if sep:
+        notes = [CELL_LABEL_TEXT.get(f"@{label}", f"@{label}")]
+    else:
+        notes = [UNLABELED_SETTINGS[model]] if model in UNLABELED_SETTINGS else []
     if model in MODEL_NOTES:
         notes.append(MODEL_NOTES[model])
     return f"{model} ({', '.join(notes)})" if notes else model
