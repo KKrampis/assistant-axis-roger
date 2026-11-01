@@ -2955,7 +2955,9 @@ with its own prompt builder and parser, recorded in every cell's provenance
 - `b5`, `b10`: batch forms (`--entities_per_call N`, `--shuffle_seed S`):
   N entities of one axis per call in a seeded shuffle, one line each in the
   reply, so the judge has a comparison frame and the rubric is shared (input
-  cost per entity about a third at N=10).  Live and Flex transports only.
+  cost per entity about a third at N=10).  Through any transport: one Batch
+  API request per group (the group's members recorded in the batch work
+  directory's `groups.json`; a group no batch answers is judged live).
   Judging each entity under two seeds measures the crosstalk between
   batch-mates (between-seed agreement about 0.85), and averaging the two
   beats single-entity judging at lower cost.  Raise `--max_tokens` (600 for

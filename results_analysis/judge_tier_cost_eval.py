@@ -838,12 +838,10 @@ async def run_live(ctx: RunContext, mrun: ModelRun, todo: List[AxisJob], *, tier
         # another --shuffle_seed gives every entity different ones
         groups: List[Tuple[int, List[Tuple[str, str, str]]]] = []
         for i in sorted({it[0] for it in items}):
-            # the grid passes shuffle the axis's FULL entity list (so rows and cols of one seed agree)
-            # and then drop what is already scored; the shuffle design shuffles what is left
-            full = list(cells[i].job.entities) if ctx.batch_design != "shuffle" else [it[1:] for it in items if it[0] == i]
-            random.Random(ctx.shuffle_seed * 1_000_003 + i).shuffle(full)
+            # groups come from the axis's FULL entity list (so rows and cols of one seed agree, and the
+            # Batch API path makes the same groups), minus what is already scored
             todo_names = {it[2] for it in items if it[0] == i}
-            batches = grid_batches(full, n_per, ctx.batch_design)
+            batches = axis_groups(cells[i].job, ctx)
             groups += [(i, g) for g in ([[e for e in b if e[1] in todo_names] for b in batches]) if g]
         if mrun.resumed:
             logger.info(f"[{model}] {mrun.resumed} answers taken from the answer logs of earlier runs")
@@ -1005,8 +1003,20 @@ def inflight_batches(work: Path) -> int:
 
 
 def batch_settings(ctx: RunContext, mrun: ModelRun) -> Dict[str, Any]:
-    return {"model": mrun.model, "max_tokens": ctx.max_tokens, "request_settings": mrun.settings,
-            "rubric_version": RUBRIC.version, "instructions_dir": str(Path(ctx.instructions_dir).resolve())}
+    out = {"model": mrun.model, "max_tokens": ctx.max_tokens, "request_settings": mrun.settings,
+           "rubric_version": RUBRIC.version, "instructions_dir": str(Path(ctx.instructions_dir).resolve())}
+    if ctx.entities_per_call > 1:
+        out.update(entities_per_call=ctx.entities_per_call, shuffle_seed=ctx.shuffle_seed,
+                   batch_design=ctx.batch_design)
+    return out
+
+
+def axis_groups(job: AxisJob, ctx: RunContext) -> List[List[Tuple[str, str, str]]]:
+    """The batched-judging groups of an axis's full entity list, from the seed
+    and design (the same in every run with the same settings)."""
+    full = list(job.entities)
+    random.Random(ctx.shuffle_seed * 1_000_003 + 0).shuffle(full)
+    return grid_batches(full, ctx.entities_per_call, ctx.batch_design)
 
 
 async def run_batch(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob]) -> None:
@@ -1095,6 +1105,23 @@ async def run_batch(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob]) -> Non
 
     touched: Set[int] = set()
 
+    groups_path = work / "groups.json"
+    groups: Dict[str, List[str]] = json.loads(groups_path.read_text()) if groups_path.exists() else {}
+    n_per = ctx.entities_per_call
+
+    def group_members(cid: str) -> Optional[List[str]]:
+        """The member names of a group custom id (``a<idx>|g<k>``), from groups.json."""
+        return groups.get(cid)
+
+    def record_group(cell: Cell, cid: str, reply: Any) -> None:
+        members = group_members(cid)
+        if members is None:
+            logger.warning(f"[{model}] group {cid!r} is not in {groups_path}; its reply is dropped")
+            return
+        parsed = ({} if isinstance(reply, tt.Truncated) or not reply else RUBRIC.parse_batch(reply, len(members)))
+        for k, gname in enumerate(members, 1):
+            record(mrun, cell, gname, reply, score=parsed.get(k) if parsed else None)
+
     def on_result(cid: str, body: Optional[dict], error: Optional[str]) -> None:
         if body is None:
             return   # unanswered: comes back from runner.run and is sent in real time
@@ -1118,7 +1145,10 @@ async def run_batch(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob]) -> Non
                            f"(its tokens are in this run's total only)")
             return
         _Charge(cell.usage, mrun.usage, ctx.run_usage).charge(batch_key, n_in, n_out)
-        record(mrun, cell, name, reply)
+        if name.startswith("g") and name[1:].isdigit() and n_per > 1:
+            record_group(cell, cid, reply)
+        else:
+            record(mrun, cell, name, reply)
         touched.add(idx)
 
     def flush() -> None:
@@ -1156,9 +1186,19 @@ async def run_batch(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob]) -> Non
 
     # 2. One submission for everything still missing.
     def pending():
+        """``(cid, idx, prompt)`` for every request still to submit: one per entity, or with
+        batched judging one per group with any member unscored."""
         for idx in current:
             cell = cells[idx]
             if cell.written:
+                continue
+            if n_per > 1:
+                for k, group in enumerate(axis_groups(cell.job, ctx)):
+                    cid = custom_id(idx, f"g{k}")
+                    if cid in unanswered or cid in inflight or all(name in cell.scores for _, name, _ in group):
+                        continue
+                    groups[cid] = [name for _, name, _ in group]
+                    yield cid, idx, RUBRIC.build_batch(cell.job.axis_spec, cell.job.pair_type, group)
                 continue
             for etype, name, desc in cell.job.entities:
                 if name in cell.scores:
@@ -1166,16 +1206,17 @@ async def run_batch(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob]) -> Non
                 cid = custom_id(idx, name)
                 if cid in unanswered or cid in inflight:
                     continue
-                yield cid, idx, etype, name, desc
+                yield cid, idx, build_prompt(cell.job, etype, name, desc)
 
     n_pending = sum(1 for _ in pending())
     if n_pending:
         amap.settings = settings_now
         amap.save()   # before the submission, so a rerun can route what it collects
+        if n_per > 1:
+            atomic_write_text(json.dumps(groups, indent=0, sort_keys=True) + "\n", groups_path, logger_obj=logger)
         chunks = runner.write_chunks(
-            ((cid, tt.request_for(model, build_prompt(cells[idx].job, etype, name, desc),
-                                  ctx.max_tokens, mrun.settings))
-             for cid, idx, etype, name, desc in pending()),
+            ((cid, tt.request_for(model, prompt, ctx.max_tokens, mrun.settings))
+             for cid, idx, prompt in pending()),
             # the runner's own default unless --batch_chunk_requests says otherwise
             **({"max_requests": ctx.batch_chunk_requests} if ctx.batch_chunk_requests != DEFAULT_BATCH_CHUNK_REQUESTS
                else {}))
@@ -1198,9 +1239,10 @@ async def run_batch(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob]) -> Non
             nonlocal unfinished
             cid, request = entry
             idx, name = split_custom_id(cid)
+            is_group = n_per > 1 and name.startswith("g") and name[1:].isdigit()
             try:
                 cell = cell_for(idx)
-                if cell is None or cell.written or name in cell.scores:
+                if cell is None or cell.written or (not is_group and name in cell.scores):
                     return
                 prompt = tt.prompt_of_request(request)
                 charge = _Charge(cell.usage, mrun.usage, ctx.run_usage)
@@ -1216,9 +1258,17 @@ async def run_batch(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob]) -> Non
                 ctx.live_pending -= 1
             if text is tt.SKIPPED:
                 return
-            if charge.charges:
-                append_answer(cell, model, header, name, text, charge.charges, prompt)
-            record(mrun, cell, name, text)
+            if is_group:
+                members = group_members(cid) or []
+                for k, gname in enumerate(members, 1):
+                    if charge.charges:
+                        append_answer(cell, model, header, gname, text, charge.charges if k == 1 else [], prompt,
+                                      batch=members)
+                record_group(cell, cid, text)
+            else:
+                if charge.charges:
+                    append_answer(cell, model, header, name, text, charge.charges, prompt)
+                record(mrun, cell, name, text)
             ctx.note_answer()
             touched.add(idx)
 
@@ -2021,8 +2071,9 @@ def build_parser() -> argparse.ArgumentParser:
                              "2026-11-01 while Flex runs saturated the connection; 2,500 is safer then.")
     parser.add_argument("--entities_per_call", type=int, default=1,
                         help="Batched judging: this many entities of one axis per call, in a seeded shuffle "
-                             "(--shuffle_seed), with a rubric that has a batch form (b5).  Live and Flex "
-                             "transports only.  Default 1: one entity per call.")
+                             "(--shuffle_seed), with a rubric that has a batch form (b5, b10), through any "
+                             "transport (one Batch API request per group since 2026-11-01).  Default 1: one "
+                             "entity per call.")
     parser.add_argument("--batch_design", choices=("shuffle", "rows", "cols"), default="shuffle",
                         help="How --entities_per_call groups an axis's entities: 'shuffle' (default), consecutive "
                              "groups of a seeded shuffle; 'rows' / 'cols', the rows or the columns of N x N squares "
@@ -2121,8 +2172,6 @@ async def main_async(argv: Optional[Sequence[str]] = None) -> int:
     if args.entities_per_call > 1:
         if RUBRIC.build_batch is None:
             parser.error(f"--entities_per_call needs a rubric with a batch form (b5, b10), not {args.rubric}")
-        if args.transport not in ("flex", "realtime"):
-            parser.error("--entities_per_call runs live only: --transport flex or realtime")
         if not CELL_LABEL:
             parser.error("--entities_per_call needs a --cell_label (e.g. @b5s1)")
     if args.rubric != "v3" and not CELL_LABEL:

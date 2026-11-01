@@ -45,15 +45,23 @@ CUT_TEXT = "It leans 2 ways, and on balance the"
 
 
 _BATCH_ITEM_RE = re.compile(r"^(\d+)\. (.+?) \((?:role|trait)\): ", flags=re.MULTILINE)
+_BATCH_MARK = "Answer with exactly"          # how both batch prompts (b5, b10) end
+
+
+def batch_score(key: str, pct: bool) -> int:
+    """The fake's batched score for an entity: SCORES x 10 on the -100..+100 rubric (b5),
+    50 + SCORES x 10 on the percentile rubric (b10)."""
+    return 50 + SCORES[key] * 10 if pct else SCORES[key] * 10
 
 
 def capped_reply(prompt: str, cap: int, needs: dict):
     """``(text, cut, name)``: the reply is cut when the entity needs more than ``cap`` tokens."""
-    if "Place each of these" in prompt:                       # a batched prompt: one line per entity
+    if _BATCH_MARK in prompt:                       # a batched prompt: one line per entity
         lines = []
+        pct = "from 0 to 100" in prompt                 # b10 answers percentiles, b5 -100..+100
         for k, shown in _BATCH_ITEM_RE.findall(prompt):
             key = next(x for x in SCORES if x.split("|")[0] == shown)
-            lines.append(f"{k}. It leans.  SCORE: {SCORES[key] * 10}")
+            lines.append(f"{k}. It leans.  SCORE: {batch_score(key, pct)}")
         return "\n".join(lines), False, "batch"
     text, name = reply_for(prompt)
     if cap < needs.get(name, 0):
@@ -194,7 +202,8 @@ class FakeAnthropic:
         out = []
         for r in self._batches[bid]["requests"]:
             prompt = r["params"]["messages"][0]["content"]
-            if reply_for(prompt)[1] in self.errored_names:
+            name = "batch" if _BATCH_MARK in prompt else reply_for(prompt)[1]
+            if name in self.errored_names:
                 out.append(SimpleNamespace(custom_id=r["custom_id"], result=SimpleNamespace(type="errored", error=None)))
             else:
                 out.append(SimpleNamespace(custom_id=r["custom_id"], result=SimpleNamespace(
@@ -1338,10 +1347,7 @@ def test_batched_judging_scores_every_entity_and_shares_the_charge(world, monkey
     assert len(answers) == 5 and sum(1 for r in answers if r["charges"]) == 2 and all(r["batch"] for r in answers)
 
 
-def test_batched_judging_needs_live_transport_and_a_batch_rubric(world, capsys):
-    with pytest.raises(SystemExit):
-        _run(world, "gpt-4.1-mini", extra=["--transport", "batch", "--rubric", "b5", "--cell_label", "@b", "--entities_per_call", "3"])
-    assert "runs live only" in capsys.readouterr().err
+def test_batched_judging_needs_a_batch_rubric(world, capsys):
     with pytest.raises(SystemExit):
         _run(world, "gpt-4.1-mini", extra=["--transport", "realtime", "--rubric", "c5", "--cell_label", "@c", "--entities_per_call", "3"])
     assert "batch form" in capsys.readouterr().err
@@ -1404,3 +1410,20 @@ def test_grid_passes_judge_every_entity_in_disjoint_company(world, monkeypatch):
                 mates.setdefault((design, axis, shown), set()).update(s for _, s in items if s != shown)
     for _, axis, e in {k for k in mates if k[0] == "rows"}:
         assert not (mates.get(("rows", axis, e), set()) & mates.get(("cols", axis, e), set()))
+
+
+def test_batched_judging_through_the_batch_api(world, monkeypatch):
+    """One Batch API request per group; a reply scores its members; a group a batch never
+    answers is judged live; a rerun resubmits only groups with unscored members."""
+    client = FakeAnthropic(errored_names=())
+    monkeypatch.setattr(ev, "make_anthropic_client", lambda: client)
+    assert _run(world, "claude-haiku-5-5", extra=["--rubric", "b10", "--cell_label", "@b10s1",
+                                                 "--entities_per_call", "3", "--shuffle_seed", "1"]) == 0
+    reqs = [r for b in client._batches.values() for r in b["requests"]]
+    assert len(reqs) == 4                                             # two axes x ceil(5/3) groups
+    assert all(_BATCH_MARK in r["params"]["messages"][0]["content"] for r in reqs)
+    scores, usage, d = _cell(world, "alpha_vs_beta", "claude-haiku-5-5@b10s1")
+    assert scores["result"] == {e: batch_score(e, True) for e in ENTITIES} and usage["n_calls"] == 2
+    groups = json.loads((world.exp / "_tier_eval_batches" / "claude-haiku-5-5@b10s1" / "groups.json").read_text())
+    assert sorted(sum((groups[k] for k in groups if k.startswith("a0|")), [])) == ENTITIES
+    assert not client.calls                                           # nothing went live
