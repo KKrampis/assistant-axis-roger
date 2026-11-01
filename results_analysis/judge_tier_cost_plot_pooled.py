@@ -7,8 +7,8 @@ Reads all *_tier_eval/ directories found under roger/axis_judge_experiments/
 for each judge model, then plots mean quality = 1/(1-rho) vs mean cost-per-axis
 with the Pareto frontier highlighted.
 
-Also optionally overlays the two legacy reference models (gpt-4.1-mini and
-claude-sonnet-4) whose judge caches predate usage.json tracking: their rhos
+Also optionally overlays the two legacy reference models ("gpt-4.1-mini (May)" and
+"claude-sonnet-4 (May)", the May 2026 cells: T=0, max_tokens 1024) whose judge caches predate usage.json tracking: their rhos
 come from the gpt/ and sonnet/ subdirs of the original axis directories and
 their costs are ESTIMATED from the same token/pricing model as the dry-run.
 
@@ -233,8 +233,11 @@ def collect_legacy_data(
     per_model: Dict[str, List[dict]] = defaultdict(list)
 
     legacy_cells = [
-        ("gpt-4.1-mini", "gpt", GPT_MINI_RATE_IN, GPT_MINI_RATE_OUT),
-        ("claude-sonnet-4", "sonnet", SONNET4_RATE_IN, SONNET4_RATE_OUT),
+        # Labelled "(May)": the May 2026 cells of axis_judge_correlation.py (T=0, max_tokens
+        # 1024), kept apart from any tier-eval cell of the same model (gpt-4.1-mini rejudged at
+        # T=0 and max_tokens 200 on 2026-11-01 sits under <axis>_tier_eval/gpt-4.1-mini/).
+        ("gpt-4.1-mini (May)", "gpt", GPT_MINI_RATE_IN, GPT_MINI_RATE_OUT),
+        ("claude-sonnet-4 (May)", "sonnet", SONNET4_RATE_IN, SONNET4_RATE_OUT),
     ]
 
     for axis_dir in legacy_axis_dirs:

@@ -286,9 +286,9 @@ def test_discover_axes_and_cells(data_dir, experiments_dir):
     assert axes == [jtr.AxisDef("alpha_vs_beta", "alpha", "beta", "traits"),
                     jtr.AxisDef("r1_vs_r2", "r1", "r2", "roles")]
     cells, skipped = jtr.load_cells(axes, experiments_dir, experiments_dir, kinds, "recorded")
-    assert sorted(cells) == ["claude-sonnet-4", "fake-judge", "gpt-4.1-mini"]
+    assert sorted(cells) == ["claude-sonnet-4 (May)", "fake-judge", "gpt-4.1-mini (May)"]
     assert skipped == [{"model": "no-usage-judge", "axis": "alpha_vs_beta", "reason": "no usage.json"}]
-    son = cells["claude-sonnet-4"]["alpha_vs_beta"]
+    son = cells["claude-sonnet-4 (May)"]["alpha_vs_beta"]
     assert "patient|T" not in son.scores and all("|" in k for k in son.scores)   # collision dropped
     # bare file: 10 trait names (patient included) + 9 role names, one of them a gap
     assert son.cost_is_measured is False and son.n_scored == 18
@@ -310,15 +310,15 @@ def test_end_to_end(tmp_path, data_dir, experiments_dir):
     assert sorted((out / "judge_tier_robustness_cache").glob("slices_*.npz"))
     r = res["result"]
     assert "_provenance" in res and r["config"]["variants"][6] == "s6_l25_raw"
-    assert sorted(r["models"]) == ["claude-sonnet-4", "gpt-4.1-mini"]
+    assert sorted(r["models"]) == ["claude-sonnet-4 (May)", "gpt-4.1-mini (May)"]
     assert r["excluded_models"] == {"fake-judge": 1}
-    assert len(r["rho"]["gpt-4.1-mini"]["alpha_vs_beta"]) == 12
+    assert len(r["rho"]["gpt-4.1-mini (May)"]["alpha_vs_beta"]) == 12
     # the default variant reproduces the cached correlations.json of the gpt cells
     chk = r["check_vs_cached_correlations"]
     assert chk["n_cells_same_n"] == 2 and chk["max_abs_diff_same_n"] < 1e-6
     assert len(r["summary"]["kendall_tau_vs_default"]) == 12
     assert r["summary"]["kendall_tau_vs_default"]["s6_l25_raw"] == pytest.approx(1.0)
-    assert set(r["summary"]["frontier_counts"]) == {"claude-sonnet-4", "gpt-4.1-mini"}
+    assert set(r["summary"]["frontier_counts"]) == {"claude-sonnet-4 (May)", "gpt-4.1-mini (May)"}
     boot = r["summary"]["bootstrap_keep_order"]
     assert boot["top"] == r["summary"]["default_ranking"][0] and boot["n_axes"] == 2
     # mean rho per variant is the mean of the per-axis rho
@@ -331,4 +331,4 @@ def test_end_to_end(tmp_path, data_dir, experiments_dir):
     assert res2["result"]["rho"] == r["rho"]
     # lowering the bar brings in the tier judge (one axis)
     res3, _ = _run(tmp_path, data_dir, experiments_dir, "--min_axes", "1", "--axes", "alpha_vs_beta")
-    assert sorted(res3["result"]["models"]) == ["claude-sonnet-4", "fake-judge", "gpt-4.1-mini"]
+    assert sorted(res3["result"]["models"]) == ["claude-sonnet-4 (May)", "fake-judge", "gpt-4.1-mini (May)"]

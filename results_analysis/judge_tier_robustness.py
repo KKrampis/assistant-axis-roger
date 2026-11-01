@@ -70,8 +70,8 @@ Inputs
   goal / no-goal residual marginals under
   ``combinations/vectors/derived/``.
 - ``--experiments_dir``: legacy cells
-  ``<axis>/gpt/scores_descriptions.json`` (labelled ``gpt-4.1-mini``) and
-  ``<axis>/sonnet/scores_descriptions.json`` (``claude-sonnet-4``), whose
+  ``<axis>/gpt/scores_descriptions.json`` (labelled ``gpt-4.1-mini (May)``) and
+  ``<axis>/sonnet/scores_descriptions.json`` (``claude-sonnet-4 (May)``), whose
   cost is the pooled plotter's estimate; axes are the ``<pos>_vs_<neg>``
   directories that have ``gpt/scores_descriptions.json``, with poles and
   pair type from ``gpt/config.json`` (the record of how the cached axis was
@@ -206,8 +206,10 @@ CACHE_VERSION = "v1"
 # (label, subdir, real-time input rate, output rate): the two judges whose
 # caches predate usage.json, as judge_tier_cost_plot_pooled.collect_legacy_data.
 LEGACY_CELLS = (
-    ("gpt-4.1-mini", "gpt", GPT_MINI_RATE_IN, GPT_MINI_RATE_OUT),
-    ("claude-sonnet-4", "sonnet", SONNET4_RATE_IN, SONNET4_RATE_OUT),
+    # "(May)": the May 2026 cells (T=0, max_tokens 1024), kept apart from a tier-eval cell of the
+    # same model (gpt-4.1-mini at T=0 and max_tokens 200, <axis>_tier_eval/gpt-4.1-mini/).
+    ("gpt-4.1-mini (May)", "gpt", GPT_MINI_RATE_IN, GPT_MINI_RATE_OUT),
+    ("claude-sonnet-4 (May)", "sonnet", SONNET4_RATE_IN, SONNET4_RATE_OUT),
 )
 
 
