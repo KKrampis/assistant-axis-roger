@@ -392,33 +392,54 @@ UNLABELED_SETTINGS = {"claude-opus-5": "effort low", "claude-sonnet-5": "effort 
 LABEL_TOKEN_TEXT = {"v3fix": "rubric v3fix", "rep2": "repeat run"}
 
 
+#: Rubric and batching tokens are shown as they are (``c8``, ``b10x2``), with their meaning in a
+#: key under the plot title (:func:`label_key`): spelled out they made labels too long to follow
+#: to their points (Roger, 2026-11-01).
+TOKEN_KEY = {
+    r"c(\d+)": "c{0}: single-entity rubric c{0}",
+    r"b(\d+)x(\d+)": "b{0}x{1}: batched rubric b{0}, {1} shuffles averaged",
+    r"b(\d+)s(\d+)": "b{0}s{1}: batched rubric b{0}, shuffle {1}",
+    r"b(\d+)g2": "b{0}g2: batched rubric b{0}, rows and columns averaged",
+    r"b(\d+)g([rc])": "b{0}g{1}: batched rubric b{0}, grid pass {1}",
+}
+
+
 def _label_text(token: str) -> str:
     if f"@{token}" in CELL_LABEL_TEXT:
         return CELL_LABEL_TEXT[f"@{token}"]
     if token in LABEL_TOKEN_TEXT:
         return LABEL_TOKEN_TEXT[token]
-    if re.fullmatch(r"c\d+", token):
-        return f"rubric {token}"
-    m = re.fullmatch(r"b(\d+)x(\d+)", token)        # b10x2: batched rubric b10, two shuffles averaged
-    if m:
-        return f"batched rubric b{m.group(1)}, {m.group(2)} shuffles averaged"
-    m = re.fullmatch(r"b(\d+)s(\d+)", token)        # b10s1: batched rubric b10, shuffle seed 1
-    if m:
-        return f"batched rubric b{m.group(1)}, shuffle {m.group(2)}"
+    if any(re.fullmatch(pat, token) for pat in TOKEN_KEY):
+        return token
     return f"@{token}"
 
 
-def display_name(cell: str) -> str:
+def label_key(cells: Sequence[str]) -> str:
+    """One line explaining the rubric and batching tokens the given cells use, for a plot title."""
+    seen: List[str] = []
+    for cell in cells:
+        for token in cell.split("@")[1:]:
+            for pat, text in TOKEN_KEY.items():
+                m = re.fullmatch(pat, token)
+                if m:
+                    t = text.format(*m.groups())
+                    if t not in seen:
+                        seen.append(t)
+    return "; ".join(seen)
+
+
+def display_name(cell: str, short: bool = False) -> str:
     """A cell directory name as plots show it: ``gpt-5.6-luna@none`` ->
     ``gpt-5.6-luna (no reasoning)``, ``gpt-5.6-luna@none@c2`` -> ``gpt-5.6-luna
-    (no reasoning, rubric c2)``, ``gpt-4.1-mini`` -> ``gpt-4.1-mini (retires
-    2027-01-14)``; other names unchanged."""
+    (no reasoning, c2)``, ``gpt-4.1-mini`` -> ``gpt-4.1-mini (retires
+    2027-01-14)``; other names unchanged.  ``short`` drops the model notes
+    (for small panels)."""
     model, *labels = cell.split("@")
     if labels:
         notes = [_label_text(t) for t in labels]
     else:
         notes = [UNLABELED_SETTINGS[model]] if model in UNLABELED_SETTINGS else []
-    if model in MODEL_NOTES:
+    if model in MODEL_NOTES and not short:
         notes.append(MODEL_NOTES[model])
     return f"{model} ({', '.join(notes)})" if notes else model
 
@@ -460,13 +481,14 @@ _NEAR_CANDIDATES = 8
 
 
 def place_labels(ax, points: Sequence[Tuple[float, float]], labels: Sequence[str],
-                 bold: Sequence[bool], fontsize: float = 7.5) -> None:
+                 bold: Sequence[bool], fontsize: float = 7.5, leaders: str = "far") -> None:
     """Greedy label placement: each label takes the first candidate position
     whose (estimated) box overlaps no marker, no earlier label, stays in the
     axes and lies nearer its own point than any other point (so a label is
     never read as another point's); failing that, the least bad one.  A label
     may have several lines.  Call after the axes limits, scale and position
-    are final."""
+    are final.  ``leaders``: ``"far"`` draws a leader line only for a label
+    placed away from its point, ``"all"`` for every label."""
     k = ax.figure.dpi / 72.0
     disp = ax.transData.transform(np.asarray(points, dtype=float))
     ab = ax.get_window_extent()
@@ -508,7 +530,7 @@ def place_labels(ax, points: Sequence[Tuple[float, float]], labels: Sequence[str
         ax.annotate(labels[i], points[i], textcoords="offset points", xytext=(dx, dy), ha=ha, va="center",
                     fontsize=fontsize, fontweight="bold" if bold[i] else "normal", zorder=5,
                     arrowprops=(dict(arrowstyle="-", color="#888888", lw=0.6, shrinkA=0, shrinkB=4)
-                                if ci >= _NEAR_CANDIDATES else None))
+                                if (leaders == "all" or ci >= _NEAR_CANDIDATES) else None))
 
 
 def cost_ticks(lo: float, hi: float) -> List[float]:
@@ -590,6 +612,9 @@ def plot(agg: Dict[str, dict], slot: int, n_total_axes: int, output_path: Path,
         title += "\nCost at real-time list price; Flex and Batch are half price for every judge here"
     if any(not d["cost_is_measured"] for d in agg.values()):
         title += "\nFilled = measured cost (usage.json)  Hollow = estimated (legacy tiers)"
+    key = label_key(list(agg))
+    if key:
+        title += f"\nLabel key: {key}"
     if rho_note:
         title += f"\n{rho_note}"
     if excluded:

@@ -184,6 +184,7 @@ from results_analysis.canonical_angles.whitening import (  # noqa: E402
 from results_analysis.judge_tier_cost_plot_pooled import (  # noqa: E402
     cost_ticks as _cost_ticks,
     display_name,
+    label_key,
     place_labels as _place_labels,
     PRICE_BASES,
     PRICE_BASIS_LABEL,
@@ -791,8 +792,9 @@ def check_vs_cached(cells: Dict[str, Dict[str, Cell]], models: Sequence[str],
 # ---------------------------------------------------------------------------
 
 def _short(model: str) -> str:
-    """The plot label: the display name (setting spelled out, notes) without the provider prefix."""
-    model = display_name(model)
+    """The panel label: the short display name (tokens as they are, no model notes) without the
+    provider prefix."""
+    model = display_name(model, short=True)
     for p in ("claude-", "gpt-"):
         if model.startswith(p):
             return model[len(p):]
@@ -917,7 +919,7 @@ def render_figure(out_png: Path, models_by_rho: Sequence[str], variants: Sequenc
                 ax.set_ylabel("1 / (1 - mean rho)", fontsize=8.5)
             if r == n_rows - 1:
                 ax.set_xlabel("mean cost per axis (USD)", fontsize=8.5)
-            _place_labels(ax, pts, labels, bold)
+            _place_labels(ax, pts, labels, bold, leaders="all")
     handles = [
         plt.Line2D([0], [0], marker="o", color="w", markerfacecolor=PROVIDER_COLOR["anthropic"],
                    markeredgecolor=PROVIDER_COLOR["anthropic"], markersize=8, label="Anthropic"),
@@ -933,8 +935,9 @@ def render_figure(out_png: Path, models_by_rho: Sequence[str], variants: Sequenc
              f"{n_m} judges (default {default_key})")
     fig.suptitle(title + "\n" + subtitle, fontsize=12, y=1 - 0.12 / fig_h, va="top")
     y_b = pan_top + 0.42 / fig_h
-    fig.text(0.01, y_b, "(b) Pareto plots, one per variant (rows share y limits; x shared)",
-             fontsize=10, va="center")
+    key = label_key(list(models_by_rho))
+    fig.text(0.01, y_b, "(b) Pareto plots, one per variant (rows share y limits; x shared)"
+             + (f"; {key}" if key else ""), fontsize=10, va="center")
     fig.legend(handles=handles, loc="center right", ncol=5, fontsize=8.5, frameon=False,
                bbox_to_anchor=(0.99, y_b))
     out_png = Path(out_png)

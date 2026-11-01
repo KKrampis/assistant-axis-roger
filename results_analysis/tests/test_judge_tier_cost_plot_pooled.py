@@ -161,10 +161,14 @@ def test_display_names_spell_out_settings_and_notes():
     assert display_name("claude-haiku-5-5") == "claude-haiku-5-5"
     assert display_name("claude-opus-5") == "claude-opus-5 (effort low)"
     assert display_name("gpt-5.6-luna") == "gpt-5.6-luna (default reasoning)"
-    assert display_name("gpt-5.6-luna@none@c2") == "gpt-5.6-luna (no reasoning, rubric c2)"
+    assert display_name("gpt-5.6-luna@none@c2") == "gpt-5.6-luna (no reasoning, c2)"
     assert display_name("gpt-4.1-mini@v3fix") == "gpt-4.1-mini (rubric v3fix, retires 2027-01-14)"
-    assert display_name("claude-haiku-5-5@b10x2") == "claude-haiku-5-5 (batched rubric b10, 2 shuffles averaged)"
-    assert display_name("gpt-6-luna@b10s1") == "gpt-6-luna (batched rubric b10, shuffle 1)"
+    assert display_name("claude-haiku-5-5@b10x2") == "claude-haiku-5-5 (b10x2)"
+    assert display_name("gpt-6-luna@b10s1") == "gpt-6-luna (b10s1)"
+    assert display_name("gpt-4.1-mini@b10x2", short=True) == "gpt-4.1-mini (b10x2)"
+    from results_analysis.judge_tier_cost_plot_pooled import label_key
+    assert label_key(["gpt-4.1-mini", "gpt-6-luna@b10x2", "gpt-6-luna@c8", "x@b10x2"]) == (
+        "b10x2: batched rubric b10, 2 shuffles averaged; c8: single-entity rubric c8")
     assert display_name("gpt-4.1-mini (May)") == "gpt-4.1-mini (May)"
 
 
