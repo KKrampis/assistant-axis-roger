@@ -630,6 +630,30 @@ def test_axis_with_usage_json_is_skipped(world, monkeypatch):
     assert scores["_provenance"]["transport"] == "realtime" and set(usage["per_model"]) == {"gpt-4.1-mini"}
 
 
+def test_cell_label_writes_beside_earlier_cells(world, monkeypatch):
+    """--cell_label @t0: a rerun under other settings goes to <model>@t0, is not
+    skipped because the plain cell is done, and records its label."""
+    done = world.exp / "alpha_vs_beta_tier_eval" / "gpt-4.1-mini"
+    done.mkdir(parents=True)
+    (done / "usage.json").write_text('{"sentinel": true}')
+    std = FakeOpenAI()
+    _openai(monkeypatch, std=std)
+    assert _run(world, "gpt-4.1-mini", extra=["--transport", "realtime", "--cell_label", "@t0",
+                                              "--request_setting", "gpt-4.1-mini:temperature=0"]) == 0
+    assert len(std.calls) == 10 and all(c["temperature"] == 0 for c in std.calls)
+    assert (done / "usage.json").read_text() == '{"sentinel": true}'      # the plain cell is untouched
+    for axis_dir in ("alpha_vs_beta", "hero_vs_villain"):
+        scores, usage, d = _cell(world, axis_dir, "gpt-4.1-mini@t0")
+        assert scores["_provenance"]["cell_label"] == "@t0"
+        assert scores["_provenance"]["request_settings"] == {"temperature": 0}
+        assert set(usage["per_model"]) == {"gpt-4.1-mini"}                # usage keyed by the model, not the label
+    assert ev.CELL_LABEL == "@t0"
+    assert _run(world, "gpt-4.1-mini", extra=["--transport", "realtime"]) == 0   # the next run resets the label
+    assert ev.CELL_LABEL == ""
+    with pytest.raises(SystemExit):
+        _run(world, "gpt-4.1-mini", extra=["--cell_label", "bad/label"])
+
+
 def test_budget_stop(world, monkeypatch):
     # each call costs $0.40 at gpt-4.1-mini's $0.40 per million input tokens
     std = FakeOpenAI(prompt_tokens=1_000_000, completion_tokens=0)

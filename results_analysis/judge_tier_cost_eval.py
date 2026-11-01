@@ -280,8 +280,20 @@ def load_axis(job: AxisJob, instructions_dir: Path, slots: str = "all", limit: O
     return job
 
 
+#: Suffix of every cell directory (and batch work directory) of this run,
+#: from --cell_label: ``claude-opus-5@nothink`` holds Opus 5 judged with thinking
+#: off beside ``claude-opus-5`` (low effort), so cells made under different
+#: settings never overwrite or resume into each other.  Set in main_async.
+CELL_LABEL = ""
+
+
+def cell_name(model: str) -> str:
+    """The cell directory name of ``model`` in this run (the model plus --cell_label)."""
+    return f"{model}{CELL_LABEL}"
+
+
 def cell_dir(job: AxisJob, model: str) -> Path:
-    return Path(job.output_dir) / model
+    return Path(job.output_dir) / cell_name(model)
 
 
 def cell_done(job: AxisJob, model: str) -> bool:
@@ -389,7 +401,8 @@ def write_cell(cell: Cell, mrun: ModelRun, max_tokens: int) -> None:
     provenance = {"judge_model": model, "rubric_version": RUBRIC_VERSION,
                   "projections_file": str(job.projections_file),
                   "transport": mrun.transport, "transport_reason": mrun.transport_reason,
-                  "request_settings": mrun.settings, "max_tokens": max_tokens}
+                  "request_settings": mrun.settings, "max_tokens": max_tokens,
+                  "cell_label": CELL_LABEL}
     atomic_write_text(json.dumps({"result": scores, "_provenance": provenance}, indent=2),
                       d / "scores_descriptions.json", logger_obj=logger)
     correlations = compute_correlations(
@@ -589,7 +602,7 @@ def split_custom_id(cid: str) -> Tuple[int, str]:
 
 
 def batch_work_dir(ctx: RunContext, model: str) -> Path:
-    return ctx.batch_root / model
+    return ctx.batch_root / cell_name(model)
 
 
 def inflight_batches(work: Path) -> int:
@@ -897,6 +910,11 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Comma-separated slot indices, or 'all' (default; matches every "
                              "slot present in the cached projections.json).")
     parser.add_argument("--max_tokens", type=int, default=200)
+    parser.add_argument("--cell_label", type=str, default="",
+                        help="Suffix for this run's cell directories, e.g. @t0 or @nothink: cells go to "
+                             "<axis>_tier_eval/<model><label>/ (and batches to _tier_eval_batches/<model><label>/), "
+                             "so a rerun under other settings sits beside the earlier cells instead of "
+                             "overwriting them or being skipped as done.")
     parser.add_argument("--requests_per_second", type=int, default=10)
     parser.add_argument("--budget_usd", type=float, default=None,
                         help="Real-time and Flex calls (a batch's real-time remainder included): stop issuing "
@@ -967,6 +985,10 @@ def dry_run_report(jobs: List[AxisJob], runs: List[ModelRun], skipped_axes: List
 async def main_async(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    global CELL_LABEL
+    CELL_LABEL = args.cell_label or ""
+    if CELL_LABEL and not re.fullmatch(r"[@A-Za-z0-9._-]+", CELL_LABEL):
+        parser.error(f"--cell_label {CELL_LABEL!r}: letters, digits and @ . _ - only")
     jobs = build_jobs(args, parser)
     instructions_dir = Path(args.instructions_dir)
     try:
