@@ -19,6 +19,13 @@ comparable); the models left out are named in the title and on stderr.
 --min_axes N lowers the bar, e.g. --min_axes 60 keeps a legacy judge that
 is missing one axis, and --min_axes 1 shows everything as before.
 
+Price basis: batch and Flex cells are billed at half the real-time price, so
+their recorded cost (usage.json's total_cost_usd) is not comparable with a
+real-time cell's.  By default (--price_basis list) every cell's cost is
+recomputed from its recorded token counts at the model's real-time price;
+--price_basis batch prices everything at the batch rate, and
+--price_basis recorded plots the cost as billed.
+
 Usage:
     # After running judge_tier_cost_eval.py on 18+ axes:
     uv run python results_analysis/judge_tier_cost_plot_pooled.py \\
@@ -77,12 +84,46 @@ def load_rho(correlations_path: Path, slot: int,
         return None
 
 
-def load_measured_cost(usage_path: Path) -> Optional[float]:
+PRICE_BASES = ("list", "batch", "recorded")
+
+
+def _base_model(key: str) -> str:
+    """``claude-haiku-4-5:batch`` -> ``claude-haiku-4-5`` (usage keys carry the transport)."""
+    for suffix in (":batch", ":flex"):
+        if key.endswith(suffix):
+            return key[: -len(suffix)]
+    return key
+
+
+def load_measured_cost(usage_path: Path, price_basis: str = "list") -> Optional[float]:
+    """A cell's cost from its ``usage.json``.
+
+    ``recorded``: the cost the run was billed (``total_cost_usd``), which mixes
+    real-time cells with batch and Flex cells billed at half price.  ``list``
+    (the default) and ``batch`` recompute the cost from the recorded token
+    counts at the model's real-time price or its batch price, whatever
+    transport the cell was judged by, so that every point on one plot is
+    priced the same way.  A model the pricing table does not know falls back
+    to the recorded cost with a warning.
+    """
     if not usage_path.exists():
         return None
     with open(usage_path) as f:
         d = json.load(f)
-    return d.get("total_cost_usd")
+    if price_basis == "recorded" or not d.get("per_model"):
+        return d.get("total_cost_usd")
+    total = 0.0
+    for key, entry in d["per_model"].items():
+        model = _base_model(entry.get("model") or key)
+        try:
+            rate_in, rate_out = price_for_model(model if price_basis == "list" else f"{model}:batch")
+        except KeyError:
+            print(f"WARNING: {usage_path}: no {price_basis} price for {model!r}; using the recorded cost",
+                  file=sys.stderr)
+            return d.get("total_cost_usd")
+        total += (entry.get("prompt_tokens", 0) * rate_in
+                  + entry.get("completion_tokens", 0) * rate_out) / 1e6
+    return total
 
 
 def estimate_cost(n_entities: int, rate_in: float, rate_out: float) -> float:
@@ -109,6 +150,7 @@ def pareto_frontier(points: List[Tuple[float, float]]) -> List[int]:
 def collect_tier_eval_data(
     tier_eval_dirs: List[Path],
     slot: int,
+    price_basis: str = "list",
 ) -> Dict[str, List[dict]]:
     """
     Returns {model: [{rho, cost, cost_is_measured, axis_name}, ...]}
@@ -128,7 +170,7 @@ def collect_tier_eval_data(
             if result is None:
                 continue
             rho, n = result
-            cost = load_measured_cost(model_dir / "usage.json")
+            cost = load_measured_cost(model_dir / "usage.json", price_basis)
             if cost is None:
                 print(f"  NOTE: {model} / {axis_name}: no usage.json — skipping this entry",
                       file=sys.stderr)
@@ -142,14 +184,52 @@ def collect_tier_eval_data(
     return per_model
 
 
+def rho_from_stored_scores(cell_dir: Path, axis_name: str, slot: int,
+                           mode: str = "descriptions", metric: str = "raw") -> Optional[Tuple[float, int]]:
+    """Recompute a legacy cell's rho from its ``scores_<mode>.json`` and
+    ``projections.json`` when its ``correlations.json`` lacks the mode.
+
+    A later run on the same cell that scored only another mode rewrites
+    correlations.json without this one (the Sonnet cell of
+    aligned_artificial_intelligence_vs_paperclip_maximizer: descriptions
+    scored 580/580 on 2026-05-13, then a rejudge of one role's instructions
+    the same evening left correlations.json with instructions only).  Uses
+    ``compute_correlations`` itself, with the axis's two poles excluded, so
+    the result is what the original run computed.
+    """
+    scores_path = cell_dir / f"scores_{mode}.json"
+    proj_path = cell_dir / "projections.json"
+    if not (scores_path.exists() and proj_path.exists()):
+        return None
+    from results_analysis.axis_judge_correlation import compute_correlations  # heavy; only when needed
+
+    with open(scores_path) as f:
+        sd = json.load(f)
+    scores = {k: v for k, v in sd.get("result", sd).items()
+              if isinstance(v, (int, float)) and not isinstance(v, bool)}
+    with open(proj_path) as f:
+        pd_ = json.load(f)
+    projections = {int(s): v for s, v in pd_.get("result", pd_).items() if s.lstrip("-").isdigit()}
+    poles = set(axis_name.split("_vs_", 1))
+    corr = compute_correlations({mode: scores}, projections, [slot], poles)
+    cell = corr[mode][str(slot)][metric]
+    if cell["n"] < 3:
+        return None
+    return float(cell["rho"]), int(cell["n"])
+
+
 def collect_legacy_data(
     legacy_axis_dirs: List[Path],
     slot: int,
+    price_basis: str = "list",
 ) -> Dict[str, List[dict]]:
     """
     Load gpt-4.1-mini and claude-sonnet-4 from the non-tier-eval axis dirs.
-    These predate usage.json; costs are estimated.
+    These predate usage.json; costs are estimated at the real-time price
+    (``list``, also used for ``recorded``: they were judged in real time) or
+    at half of it (``batch``).
     """
+    factor = 0.5 if price_basis == "batch" else 1.0
     per_model: Dict[str, List[dict]] = defaultdict(list)
 
     legacy_cells = [
@@ -163,9 +243,15 @@ def collect_legacy_data(
             corr = axis_dir / subdir / "correlations.json"
             result = load_rho(corr, slot)
             if result is None:
+                result = rho_from_stored_scores(axis_dir / subdir, axis_name, slot)
+                if result is not None:
+                    print(f"  NOTE: {model} / {axis_name}: correlations.json has no descriptions "
+                          f"result; rho recomputed from scores_descriptions.json and "
+                          f"projections.json (rho={result[0]:.3f}, n={result[1]})", file=sys.stderr)
+            if result is None:
                 continue
             rho, n = result
-            cost = estimate_cost(n, rin, rout)
+            cost = estimate_cost(n, rin, rout) * factor
             per_model[model].append({
                 "rho": rho, "n": n, "cost": cost,
                 "cost_is_measured": False,
@@ -206,8 +292,15 @@ def split_by_coverage(agg: Dict[str, dict], min_axes: int) -> Tuple[Dict[str, di
     return kept, excluded
 
 
+PRICE_BASIS_LABEL = {
+    "list": "real-time list price",
+    "batch": "batch price (half of list)",
+    "recorded": "as billed (mixed transports)",
+}
+
+
 def plot(agg: Dict[str, dict], slot: int, n_total_axes: int, output_path: Path,
-         excluded: Optional[Dict[str, dict]] = None) -> None:
+         excluded: Optional[Dict[str, dict]] = None, price_basis: str = "list") -> None:
     fig, ax = plt.subplots(figsize=(11, 8))
 
     model_list = sorted(agg.items(), key=lambda kv: kv[1]["mean_cost"])
@@ -255,7 +348,7 @@ def plot(agg: Dict[str, dict], slot: int, n_total_axes: int, output_path: Path,
         ax.annotate(label, (cost, quality), textcoords="offset points",
                     xytext=(ox, oy), fontsize=9, ha=ha)
 
-    ax.set_xlabel("Mean cost per axis (USD, descriptions mode)")
+    ax.set_xlabel(f"Mean cost per axis (USD at {PRICE_BASIS_LABEL[price_basis]}, descriptions mode)")
     ax.set_ylabel("Mean quality = 1 / (1 − ρ̄)")
     title = (
         f"Pooled judge-tier Pareto: {n_total_axes} axes, slot {slot}  "
@@ -317,6 +410,12 @@ def main() -> None:
                         help="Plot only models judged on at least this many axes. Default: the "
                              "headline axis count (the most any model has), so every plotted "
                              "model covers the same axes; --min_axes 1 shows everything.")
+    parser.add_argument("--price_basis", choices=PRICE_BASES, default="list",
+                        help="How a point's cost is priced.  'list' (default): every cell recomputed "
+                             "from its token counts at the model's real-time price, whatever transport "
+                             "judged it (batch and Flex cells are billed at half price, so their recorded "
+                             "cost is not comparable with real-time cells); 'batch': the same at the "
+                             "batch price; 'recorded': usage.json's total_cost_usd as billed.")
     parser.add_argument("--output", type=str, required=True)
     args = parser.parse_args()
 
@@ -333,7 +432,7 @@ def main() -> None:
 
     print(f"Found {len(tier_eval_dirs)} tier_eval dirs", file=sys.stderr)
 
-    per_model = collect_tier_eval_data(tier_eval_dirs, args.slot)
+    per_model = collect_tier_eval_data(tier_eval_dirs, args.slot, args.price_basis)
 
     if not args.no_legacy:
         if args.legacy_dirs is not None:
@@ -352,7 +451,7 @@ def main() -> None:
 
         if legacy_dirs:
             print(f"Loading legacy tiers from {len(legacy_dirs)} axis dirs", file=sys.stderr)
-            legacy_data = collect_legacy_data(legacy_dirs, args.slot)
+            legacy_data = collect_legacy_data(legacy_dirs, args.slot, args.price_basis)
             for model, entries in legacy_data.items():
                 per_model[model].extend(entries)
 
@@ -379,7 +478,7 @@ def main() -> None:
     if not agg:
         print(f"ERROR: no model has {min_axes} axes; lower --min_axes.", file=sys.stderr)
         sys.exit(1)
-    plot(agg, args.slot, n_total, Path(args.output), excluded=excluded)
+    plot(agg, args.slot, n_total, Path(args.output), excluded=excluded, price_basis=args.price_basis)
 
 
 if __name__ == "__main__":

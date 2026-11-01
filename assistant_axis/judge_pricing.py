@@ -198,16 +198,53 @@ _MODEL_RATES: tuple[tuple[str, float, float], ...] = (
     ("gpt-5.6-luna", GPT_LUNA_RATE_IN, GPT_LUNA_RATE_OUT),
     ("gpt-5.6-terra", GPT_TERRA_RATE_IN, GPT_TERRA_RATE_OUT),
     ("gpt-5.6-sol", GPT_SOL_RATE_IN, GPT_SOL_RATE_OUT),
+    # Ported from the main checkout's judge_pricing.py (2026-11-01, with the
+    # :batch / :flex suffix handling below).  GPT-6 Luna (developers.openai.com
+    # model page, read there 2026-10-26): $0.10 / $0.50, batch at half.
+    # GPT-5.4 mini (OpenAI pricing page, read there 2026-10-27): $0.75 / $4.50.
+    # Both are reasoning models: judge_tier_transport sends them
+    # reasoning_effort "none", else reasoning is billed as output.
+    ("gpt-6-luna", 0.10, 0.50),
+    ("gpt-5.4-mini", 0.75, 4.50),
     # Anthropic -- versioned entries before the generic "sonnet"/"opus"
     # fallbacks (see ordering note above).
     ("sonnet-4-6", SONNET4_RATE_IN, SONNET4_RATE_OUT),
     ("sonnet-4", SONNET4_RATE_IN, SONNET4_RATE_OUT),
     ("sonnet-5", SONNET_RATE_IN, SONNET_RATE_OUT),
+    ("opus-5-5", 4.00, 20.00),   # Opus 5.5 (platform.claude.com pricing, read 2026-09-30); before "opus-5"
     ("opus-5", OPUS_RATE_IN, OPUS_RATE_OUT),
+    # Haiku 5.5 (claude-haiku-5-5; Anthropic pricing page, read in the main
+    # checkout 2026-10-07): $0.10 / $0.50 for prompts up to 100,000 tokens,
+    # batch at half.  Must come before the bare "haiku" fragment, which would
+    # price it at Haiku 4.5's rates.
+    ("haiku-5-5", 0.10, 0.50),
     ("haiku", HAIKU_RATE_IN, HAIKU_RATE_OUT),
     ("sonnet", SONNET_RATE_IN, SONNET_RATE_OUT),  # generic fallback -> current (5) rate
     ("opus", OPUS_RATE_IN, OPUS_RATE_OUT),        # generic fallback -> current (5) rate; also correct for 4-6/4-7/4-8 (same price)
 )
+
+
+# Batch requests are billed at a fraction of the real-time price.  A call
+# site that runs in batch mode keeps its usage under "<model>:batch", which is
+# priced with the factor below, so that a usage record says how the tokens
+# were bought and a merged record recomputes to the right total.  (Ported
+# verbatim from the main checkout's judge_pricing.py, 2026-11-01; the
+# qwen3-32b factor has no rate row in this tree and is kept for parity.)
+BATCH_SUFFIX = ":batch"
+_BATCH_PRICE_FACTORS: tuple[tuple[str, float], ...] = (
+    ("qwen3-32b", 0.8),   # DeepInfra's own batch API, 2026-09-29
+    ("gpt-", 0.5),        # OpenAI Batch API
+    ("haiku", 0.5),       # Anthropic Message Batches
+    ("sonnet", 0.5),
+    ("opus", 0.5),
+    ("fable", 0.5),
+)
+
+
+#: OpenAI Flex processing (``service_tier="flex"``) is billed at Batch API rates
+#: (developers.openai.com Flex guide, read in the main checkout 2026-10-26); its
+#: usage is kept under ``<model>:flex`` and priced with the batch factors.
+FLEX_SUFFIX = ":flex"
 
 
 def price_for_model(model: str) -> tuple[float, float]:
@@ -218,11 +255,28 @@ def price_for_model(model: str) -> tuple[float, float]:
     ``gpt-4.1-mini`` rates, ``"claude-haiku-4-5-20251001"`` to
     ``haiku`` rates, etc.
 
+    A ``<model>:batch`` key is priced at the model's rate times its
+    :data:`_BATCH_PRICE_FACTORS` factor, and an OpenAI ``<model>:flex``
+    key at the same batch rate (:data:`FLEX_SUFFIX`).
+
     Raises ``KeyError`` for unrecognised models — callers MUST
     register new models here before judging with them, otherwise
     cost will silently appear free in budget reports.
     """
     m = model.lower()
+    if m.endswith(FLEX_SUFFIX):
+        if not m.startswith("gpt-"):
+            raise KeyError(f"Flex processing is OpenAI's; no flex price for {model!r}")
+        return price_for_model(m[: -len(FLEX_SUFFIX)] + BATCH_SUFFIX)
+    if m.endswith(BATCH_SUFFIX):
+        rate_in, rate_out = price_for_model(m[: -len(BATCH_SUFFIX)])
+        for fragment, factor in _BATCH_PRICE_FACTORS:
+            if fragment in m:
+                return rate_in * factor, rate_out * factor
+        raise KeyError(
+            f"No batch price factor for {model!r}.  Add one to "
+            f"assistant_axis/judge_pricing.py:_BATCH_PRICE_FACTORS."
+        )
     for fragment, rate_in, rate_out in _MODEL_RATES:
         if fragment in m:
             return rate_in, rate_out
@@ -653,6 +707,8 @@ __all__ = [
     "SONNET_RATE_IN",
     "SONNET_RATE_OUT",
     "ROLES_RESPONSE_LENGTH_FACTOR",
+    "BATCH_SUFFIX",
+    "FLEX_SUFFIX",
     "price_for_model",
     "cost_for_usage",
     "surgical_rejudge_cost_split",

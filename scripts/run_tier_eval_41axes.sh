@@ -3,6 +3,12 @@
 # The first 20 axes (angel/demon, decisive/indecisive + 18 from run_tier_eval_20axes.sh)
 # are already done and skipped by the usage.json resume check below.
 #
+# Superseded (2026-11-01) by scripts/run_tier_eval.sh, which runs all 61 axes of
+# scripts/tier_eval_axes.tsv in one invocation with batch / Flex transports.  This
+# script still works: it passes --transport realtime, so each (axis, model) call is
+# judged in real time as before (the default, auto, would submit and wait for one
+# batch per axis).
+#
 # Prerequisites:
 #   Corpus pinned to /tmp/corpus_2026-05-24 (run once):
 #     mkdir -p /tmp/corpus_2026-05-24
@@ -123,7 +129,8 @@ for SPEC in "${AXIS_SPECS[@]}"; do
       --projections_file "$PROJ" \
       --instructions_dir "$CORPUS" \
       --judge_model "$MODEL" \
-      --output_dir "$OUT_DIR"
+      --output_dir "$OUT_DIR" \
+      --transport realtime
   done
 done
 

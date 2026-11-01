@@ -2690,52 +2690,109 @@ comment.
 **already-computed** axis, reusing a cached `projections.json` instead of
 recomputing projections from raw activation vectors (which
 `axis_judge_correlation.py` itself always does — `--data_dir` is
-required there). Only two axes in this repo have that full reusable
-cache committed:
-`roger/axis_judge_experiments/{angel_vs_demon,decisive_vs_indecisive}/{gpt,sonnet}/projections.json`
-(571 entities × 8 slots × {raw, whitened} each) — every other axis in the
-35-axis GPT-vs-Sonnet comparison only has its aggregate summary committed
-(`gpt_vs_sonnet_rhos_di.json`), not the per-axis data this script needs.
+required there). 61 axes under `roger/axis_judge_experiments/` have that
+cache (`<axis>/gpt/projections.json`, about 571-580 entities × 8 slots ×
+{raw, whitened}); [`scripts/tier_eval_axes.tsv`](../scripts/tier_eval_axes.tsv)
+lists all of them as `axis_dir pos neg pair_type` rows (the two axes judged
+first, `angel_vs_demon` and `decisive_vs_indecisive`, then the 18 of
+[`run_tier_eval_20axes.sh`](../scripts/run_tier_eval_20axes.sh) and the 41 of
+[`run_tier_eval_41axes.sh`](../scripts/run_tier_eval_41axes.sh)).
 
 ```bash
-# Preview cost, zero API calls:
+# All 61 axes, several models, preview (zero API calls, nothing written):
+uv run python results_analysis/judge_tier_cost_eval.py \
+    --axes_file scripts/tier_eval_axes.tsv \
+    --instructions_dir /tmp/corpus_2026-05-24/data \
+    --judge_model gpt-5.6-luna --judge_model claude-haiku-5-5 --judge_model gpt-6-luna \
+    --dry_run
+
+# The same through the driver (corpus check; MODELS defaults to luna, terra, opus-5):
+MODELS="gpt-5.6-luna claude-haiku-5-5" bash scripts/run_tier_eval.sh --dry_run
+
+# One axis (the original interface):
 uv run python results_analysis/judge_tier_cost_eval.py \
     --pair angel demon --pair_type roles \
     --projections_file roger/axis_judge_experiments/angel_vs_demon/gpt/projections.json \
-    --judge_model claude-opus-5 --judge_model claude-sonnet-5 --judge_model claude-haiku-4-5 \
-    --judge_model gpt-5.6-sol --judge_model gpt-5.6-terra --judge_model gpt-5.6-luna \
+    --judge_model claude-opus-5 --judge_model gpt-5.6-luna \
     --output_dir roger/axis_judge_experiments/angel_vs_demon_tier_eval \
     --dry_run
-
-# Second reusable axis (traits, not roles):
-uv run python results_analysis/judge_tier_cost_eval.py \
-    --pair decisive indecisive --pair_type traits \
-    --projections_file roger/axis_judge_experiments/decisive_vs_indecisive/gpt/projections.json \
-    --judge_model claude-opus-5 --judge_model claude-sonnet-5 --judge_model claude-haiku-4-5 \
-    --judge_model gpt-5.6-sol --judge_model gpt-5.6-terra --judge_model gpt-5.6-luna \
-    --output_dir roger/axis_judge_experiments/decisive_vs_indecisive_tier_eval \
-    --dry_run
-
-# Drop --dry_run to actually run either (description-mode only, cheap:
-# all 6 tiers x both axes ≈ $15.76 total at current rates -- see the
-# pricing table above for the per-tier/per-axis breakdown).
 ```
 
-Writes `scores_descriptions.json`, `usage.json` (real measured cost, not
-estimated), and `correlations.json` per judge model, in the same shape
-`axis_judge_correlation.py` itself writes.
+With `--axes_file` (which excludes `--pair`, `--pair_type`,
+`--projections_file` and `--output_dir`) each axis reads
+`<experiments_dir>/<axis_dir>/gpt/projections.json` and writes
+`<experiments_dir>/<axis_dir>_tier_eval/<model>/` (`--experiments_dir`,
+default `roger/axis_judge_experiments`). An axis whose
+`<model>/usage.json` already exists is skipped for that model, in both
+modes, so a rerun judges only what is missing. The dry run prints each
+axis's entity count and, per model, the transport, the number of calls and
+the estimated cost at that transport's price (coarse token model: 470 in /
+80 out per entity).
 
-**Scope of what actually gets touched, running either command above:**
+**Transports** (`--transport`, default `auto`; 2026-11-01). The pieces are
+copied from the main checkout's pipeline step 3:
+[`judge_tier_transport.py`](./judge_tier_transport.py) (request bodies,
+capability table, Flex retry-then-fallback loop) and the two batch runners
+[`assistant_axis/openai_batch.py`](../assistant_axis/openai_batch.py) and
+[`assistant_axis/anthropic_batch.py`](../assistant_axis/anthropic_batch.py)
+(verbatim).
+
+| transport | how | usage key | chosen by `auto` for |
+|---|---|---|---|
+| `flex` | OpenAI Flex processing: all requests for all axes at once through the rate limiter (`--requests_per_second`, default 10), client timeout 900 s and 8 retries; a request Flex keeps failing is retried every 30 s for 10 minutes, then sent once to the standard tier | `<model>:flex` (batch price); fallbacks `<model>` | OpenAI models `MODEL_CAPABILITIES` lists as taking Flex (gpt-5.6-luna); untested OpenAI models with a **probe**: the first request alone, and an HTTP 400 refusing the service tier switches the model to batch for the run (that request goes into the batch) |
+| `batch` | OpenAI Batch API or Anthropic Message Batches: one submission per model for all the axes being run, custom ids `a<axis index>\|<entity>`; each cell written as soon as its axis is complete; requests a batch never answered sent in real time on the standard tier (up to `--batch_fallback_max`, default 2000) | `<model>:batch` (half price); remainder `<model>` | Anthropic models; OpenAI models listed as refusing Flex (gpt-4.1-mini) |
+| `realtime` | every request in real time through the rate limiter (the behaviour before 2026-11-01) | `<model>` | never (explicit override) |
+
+Batch work and state live in `<experiments_dir>/_tier_eval_batches/<model>/`
+(never inside a `*_tier_eval` directory): `batch_state.json` and `chunks/`
+(the runner's), `axis_map.json` (axis index → axis, cumulative, plus the
+model, `max_tokens` and request settings the batches were requested with),
+and `collected/a<index>.json` (results of axes not yet complete, so a run
+stopped between batches does not ask for them again). A rerun collects
+batches still in flight before submitting anything; it refuses (exit 1)
+when batches in flight were requested with another model or other settings,
+and a `flex` / `realtime` run refuses while a model's batches are in flight.
+
+**Request settings per model** come from `JUDGE_REQUEST_SETTINGS` in
+[`judge_tier_transport.py`](./judge_tier_transport.py). For the models the
+existing cells used they reproduce what this tree's `assistant_axis/judge.py`
+sent, so new cells extend old ones: nothing extra for the GPT-5.6 tiers
+(no `reasoning_effort`), `output_config.effort` "low" for claude-opus-5,
+claude-sonnet-5 and the other models in its `_ANTHROPIC_EFFORT_CAPABLE`,
+nothing for claude-haiku-4-5. New models follow step 3: thinking disabled
+for claude-haiku-5-5, `reasoning_effort` "none" for gpt-6-luna and
+gpt-5.4-mini. The default temperature (1) is not sent (the same sampling).
+`--request_setting [MODEL_FRAGMENT:]key=<json>` (repeatable) overrides the
+table for one run; `null` removes a field. `--max_tokens` stays 200.
+
+`--budget_usd` stops a real-time or Flex run (a batch's real-time remainder
+included) from issuing new requests once its measured spend passes the
+figure; a cell left incomplete is written as `scores_descriptions.partial.json`
+and `usage.partial.json` (no `usage.json`, so a rerun judges it again) and
+the run exits 2. A batch is submitted whole: the dry run is its control.
+At the end the script prints, per model, parsed/attempted, Flex fallbacks,
+refusals (an Anthropic `stop_reason: "refusal"` is a counted, unparseable
+call) and cost, and `warn_if_low_parse_rate` logs `*** HIGH FAIL RATE ***`
+below 99%. Models run concurrently. Exit status: 0 done, 1 a model failed
+or a key is missing, 2 the budget stop.
+
+Writes `scores_descriptions.json`, `correlations.json` and, last,
+`usage.json` (real measured cost, not estimated) per judge model, in the
+same shape `axis_judge_correlation.py` itself writes;
+`scores_descriptions.json`'s `_provenance` also records `transport`,
+`transport_reason`, `request_settings` and `max_tokens`.
+
+**Scope of what actually gets touched:**
 
 - **What's scored**: not the pole pair itself (`angel`/`demon`, excluded by
-  design) — the other 571 entities in the corpus (every other committed
+  design) — the other entities in the cached projections (every other
   role/trait), each scored for where it falls on that axis's spectrum.
 - **Network**: only `api.anthropic.com` / `api.openai.com` (the judge
-  calls themselves). No GPU, no RunPod, no other service contacted.
-- **Filesystem**: only writes new files under the new `--output_dir`
-  (`roger/axis_judge_experiments/{pair}_tier_eval/<model>/`). Never
-  touches the existing committed `gpt/`/`sonnet/` subdirectories or their
-  cached scores/projections/correlations.
+  calls and batch submissions). No GPU, no RunPod, no other service contacted.
+- **Filesystem**: writes new files under each axis's `<axis>_tier_eval/<model>/`
+  and, for batch, under `_tier_eval_batches/<model>/`. Never touches the
+  existing committed `gpt/`/`sonnet/` subdirectories or their cached
+  scores/projections/correlations.
 - **Git**: nothing is committed or pushed automatically.
 
 ### Plotting the cost/quality comparison

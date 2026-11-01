@@ -18,6 +18,7 @@ matplotlib.use("Agg")
 from results_analysis.judge_tier_cost_plot_pooled import (  # noqa: E402
     aggregate,
     collect_tier_eval_data,
+    load_measured_cost,
     plot,
     split_by_coverage,
 )
@@ -66,6 +67,34 @@ def test_plot_names_excluded_models_in_title(tmp_path: Path) -> None:
     assert out.exists() and out.stat().st_size > 0
     # the title is rendered, not returned: check the source of truth the title is built from
     assert excluded["partial"]["n_axes"] == 2
+
+
+def _usage(path: Path, key: str, model: str, pt: int, ct: int, billed: float) -> Path:
+    path.write_text(json.dumps({
+        "per_model": {key: {"model": model, "prompt_tokens": pt, "completion_tokens": ct,
+                            "cost_usd": billed, "n_calls": 1}},
+        "total_cost_usd": billed}))
+    return path
+
+
+def test_price_basis_puts_batch_and_realtime_cells_on_one_footing(tmp_path: Path) -> None:
+    # gpt-4.1-mini: $0.40 / $1.60 per million at list price, half in batch.
+    realtime = _usage(tmp_path / "rt.json", "gpt-4.1-mini", "gpt-4.1-mini", 1_000_000, 100_000, 0.56)
+    batched = _usage(tmp_path / "b.json", "gpt-4.1-mini:batch", "gpt-4.1-mini:batch",
+                     1_000_000, 100_000, 0.28)
+    assert abs(load_measured_cost(realtime, "list") - 0.56) < 1e-9
+    assert abs(load_measured_cost(batched, "list") - 0.56) < 1e-9      # recomputed at list price
+    assert abs(load_measured_cost(batched, "batch") - 0.28) < 1e-9
+    assert abs(load_measured_cost(realtime, "batch") - 0.28) < 1e-9
+    assert load_measured_cost(batched, "recorded") == 0.28              # as billed
+    flex = _usage(tmp_path / "f.json", "gpt-4.1-mini:flex", "gpt-4.1-mini:flex", 1_000_000, 100_000, 0.28)
+    assert abs(load_measured_cost(flex, "list") - 0.56) < 1e-9
+
+
+def test_price_basis_falls_back_to_recorded_for_an_unpriced_model(tmp_path: Path, capsys) -> None:
+    unknown = _usage(tmp_path / "u.json", "mystery-model", "mystery-model", 1000, 100, 0.123)
+    assert load_measured_cost(unknown, "list") == 0.123
+    assert "no list price" in capsys.readouterr().err
 
 
 def test_cli_default_excludes_and_min_axes_restores(tmp_path: Path) -> None:
