@@ -97,13 +97,18 @@ OPUS_RATE_OUT = 25.00     # supersedes the never-verified $15/$75 May-2026 place
 
 # --- OpenAI GPT-5.6 tier ladder (Sol/Terra/Luna), short-context rates ---
 # Lower-confidence sourcing than the Anthropic rates above -- see module
-# docstring. gpt-5.6-sol's rate is promotional through 2026-11-21.
+# docstring. gpt-5.6-sol's rate is promotional, "available at least through
+# November 21, 2026" (developers.openai.com/api/docs/pricing, checked
+# 2026-11-01: Sol $4.00/$20.00 standard, $2.00/$10.00 Batch and Flex; Terra,
+# Luna, gpt-6-luna, gpt-5.4-mini and gpt-4.1-mini as below).  The 2026-11-01
+# Flex charges for Sol on the OpenAI cost dashboard match the recorded token
+# counts at exactly $2.00/$10.00; the earlier $5.00/$30.00 overstated Sol.
 GPT_LUNA_RATE_IN = 0.20   # gpt-5.6-luna -- budget tier (~matches Haiku 4.5's cost profile)
 GPT_LUNA_RATE_OUT = 1.20
 GPT_TERRA_RATE_IN = 2.00  # gpt-5.6-terra -- mid tier (~matches Sonnet 5)
 GPT_TERRA_RATE_OUT = 12.00
-GPT_SOL_RATE_IN = 5.00    # gpt-5.6-sol -- flagship tier (~matches Opus 5); promotional pricing
-GPT_SOL_RATE_OUT = 30.00
+GPT_SOL_RATE_IN = 4.00    # gpt-5.6-sol -- flagship tier; promotional pricing (see above)
+GPT_SOL_RATE_OUT = 20.00
 
 
 # --------------------------------------------------------------------------

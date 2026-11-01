@@ -2674,9 +2674,9 @@ budget-tracked run.
 | Anthropic small | `claude-haiku-4-5` | $1.00 | $5.00 | High — unchanged since May 2026 |
 | Anthropic mid | `claude-sonnet-5` | $2.00 | $10.00 | High — verified live (`claude-api` skill), price *cut* vs sonnet-4 |
 | Anthropic flagship | `claude-opus-5` | $5.00 | $25.00 | High — verified live; supersedes an unverified $15/$75 May-2026 placeholder that was never used |
-| OpenAI small | `gpt-5.6-luna` | $0.20 | $1.20 | Medium — cross-confirmed web search hitting `developers.openai.com`, not a direct fetch |
-| OpenAI mid | `gpt-5.6-terra` | $2.00 | $12.00 | Medium — same |
-| OpenAI flagship | `gpt-5.6-sol` | $5.00 | $30.00 | Medium — same; **promotional pricing through 2026-11-21** |
+| OpenAI small | `gpt-5.6-luna` | $0.20 | $1.20 | High — `developers.openai.com/api/docs/pricing`, fetched 2026-11-01 |
+| OpenAI mid | `gpt-5.6-terra` | $2.00 | $12.00 | High — same |
+| OpenAI flagship | `gpt-5.6-sol` | $4.00 | $20.00 | High — same, and the 2026-11-01 Flex charges on the OpenAI cost dashboard match the recorded tokens at exactly half these rates; **promotional, "available at least through November 21, 2026"**.  Was $5.00 / $30.00 until 2026-11-01, which overstated Sol by about a third |
 
 `results_analysis/plot_batch_size_quality_vs_cost.py` has its own separate,
 deliberately-un-synced copy of the legacy rates (it regenerates a chart
