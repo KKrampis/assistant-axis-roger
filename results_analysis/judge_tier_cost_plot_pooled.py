@@ -12,6 +12,13 @@ claude-sonnet-4) whose judge caches predate usage.json tracking: their rhos
 come from the gpt/ and sonnet/ subdirs of the original axis directories and
 their costs are ESTIMATED from the same token/pricing model as the dry-run.
 
+Coverage rule: the plot's headline "N axes" is the largest number of axes any
+model was judged on.  A model judged on fewer axes than that is NOT plotted
+(its mean rho is over a different, usually easier, subset and is not
+comparable); the models left out are named in the title and on stderr.
+--min_axes N lowers the bar, e.g. --min_axes 60 keeps a legacy judge that
+is missing one axis, and --min_axes 1 shows everything as before.
+
 Usage:
     # After running judge_tier_cost_eval.py on 18+ axes:
     uv run python results_analysis/judge_tier_cost_plot_pooled.py \\
@@ -188,7 +195,19 @@ def aggregate(per_model: Dict[str, List[dict]]) -> Dict[str, dict]:
     return agg
 
 
-def plot(agg: Dict[str, dict], slot: int, n_total_axes: int, output_path: Path) -> None:
+def split_by_coverage(agg: Dict[str, dict], min_axes: int) -> Tuple[Dict[str, dict], Dict[str, dict]]:
+    """Split aggregated models into (plotted, excluded) by axis coverage.
+
+    A model enters the plot only if it was judged on at least ``min_axes``
+    axes.  The excluded models are returned so the plot can say they exist.
+    """
+    kept = {m: d for m, d in agg.items() if d["n_axes"] >= min_axes}
+    excluded = {m: d for m, d in agg.items() if d["n_axes"] < min_axes}
+    return kept, excluded
+
+
+def plot(agg: Dict[str, dict], slot: int, n_total_axes: int, output_path: Path,
+         excluded: Optional[Dict[str, dict]] = None) -> None:
     fig, ax = plt.subplots(figsize=(11, 8))
 
     model_list = sorted(agg.items(), key=lambda kv: kv[1]["mean_cost"])
@@ -238,12 +257,16 @@ def plot(agg: Dict[str, dict], slot: int, n_total_axes: int, output_path: Path) 
 
     ax.set_xlabel("Mean cost per axis (USD, descriptions mode)")
     ax.set_ylabel("Mean quality = 1 / (1 − ρ̄)")
-    ax.set_title(
+    title = (
         f"Pooled judge-tier Pareto: {n_total_axes} axes, slot {slot}  "
         f"[◆ = Pareto-optimal, ● = dominated]\n"
-        f"Filled = measured cost (usage.json)  Hollow = estimated (legacy tiers)",
-        fontsize=11,
+        f"Filled = measured cost (usage.json)  Hollow = estimated (legacy tiers)"
     )
+    if excluded:
+        names = ", ".join(f"{m} ({d['n_axes']})"
+                          for m, d in sorted(excluded.items(), key=lambda kv: -kv[1]["n_axes"]))
+        title += f"\nNot shown, judged on fewer than {n_total_axes} axes: {names}"
+    ax.set_title(title, fontsize=11)
     ax.grid(True, alpha=0.3)
 
     provider_handles = [
@@ -290,6 +313,10 @@ def main() -> None:
     parser.add_argument("--slot", type=int, default=6)
     parser.add_argument("--no_legacy", action="store_true",
                         help="Skip legacy model overlay entirely")
+    parser.add_argument("--min_axes", type=int, default=None,
+                        help="Plot only models judged on at least this many axes. Default: the "
+                             "headline axis count (the most any model has), so every plotted "
+                             "model covers the same axes; --min_axes 1 shows everything.")
     parser.add_argument("--output", type=str, required=True)
     args = parser.parse_args()
 
@@ -343,7 +370,16 @@ def main() -> None:
               file=sys.stderr)
 
     n_total = max(len(v) for v in per_model.values())
-    plot(agg, args.slot, n_total, Path(args.output))
+    min_axes = args.min_axes if args.min_axes is not None else n_total
+    agg, excluded = split_by_coverage(agg, min_axes)
+    if excluded:
+        print(f"Not plotted (judged on fewer than {min_axes} axes): "
+              + ", ".join(f"{m} (n_axes={d['n_axes']})" for m, d in sorted(excluded.items())),
+              file=sys.stderr)
+    if not agg:
+        print(f"ERROR: no model has {min_axes} axes; lower --min_axes.", file=sys.stderr)
+        sys.exit(1)
+    plot(agg, args.slot, n_total, Path(args.output), excluded=excluded)
 
 
 if __name__ == "__main__":
