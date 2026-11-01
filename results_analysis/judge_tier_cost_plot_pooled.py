@@ -290,6 +290,11 @@ def main() -> None:
     parser.add_argument("--slot", type=int, default=6)
     parser.add_argument("--no_legacy", action="store_true",
                         help="Skip legacy model overlay entirely")
+    parser.add_argument("--min_axes", type=int, default=None,
+                        help="Exclude models evaluated on fewer than this many axes. "
+                             "Use to avoid mixing low-n points (e.g. n=2) with high-n "
+                             "points (e.g. n=61) on the same Pareto plot, since rhos "
+                             "are not comparable across different axis sets.")
     parser.add_argument("--output", type=str, required=True)
     args = parser.parse_args()
 
@@ -334,6 +339,15 @@ def main() -> None:
         sys.exit(1)
 
     agg = aggregate(per_model)
+
+    if args.min_axes is not None:
+        excluded = {m: d for m, d in agg.items() if d["n_axes"] < args.min_axes}
+        agg = {m: d for m, d in agg.items() if d["n_axes"] >= args.min_axes}
+        if excluded:
+            print(f"\nExcluded (n_axes < {args.min_axes}):", file=sys.stderr)
+            for m, d in sorted(excluded.items(), key=lambda kv: kv[1]["n_axes"]):
+                print(f"  {m:30s}  n_axes={d['n_axes']}  mean_rho={d['mean_rho']:.4f}",
+                      file=sys.stderr)
 
     print(f"\nAggregated results ({args.slot=}):", file=sys.stderr)
     for model, d in sorted(agg.items(), key=lambda kv: -kv[1]["mean_rho"]):
