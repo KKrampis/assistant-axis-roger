@@ -185,7 +185,6 @@ from results_analysis.judge_tier_cost_plot_pooled import (  # noqa: E402
     PRICE_BASES,
     PRICE_BASIS_LABEL,
     PROVIDER_COLOR,
-    cap_summary,
     cell_max_tokens,
     estimate_cost,
     load_measured_cost,
@@ -1222,8 +1221,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print(f"\nWrote {json_path}")
 
     subtitle = (f"soft_K: K={args.soft_K} (augmented pool, poles held out); soft_shear: L={args.shear_L} "
-                f"({args.ca_kind} goal/no-goal); cost at {PRICE_BASIS_LABEL[args.price_basis]}\n"
-                + cap_summary({m: caps[m] for m in models}))
+                f"({args.ca_kind} goal/no-goal); cost at {PRICE_BASIS_LABEL[args.price_basis]}")
     if excluded:
         subtitle += "\nnot compared (judged on fewer axes): " + ", ".join(f"{m} ({k})" for m, k in excluded.items())
     png_path = output_dir / f"{OUTPUT_STEM}.png"

@@ -407,8 +407,7 @@ def plot(agg: Dict[str, dict], slot: int, n_total_axes: int, output_path: Path,
     title = (
         f"Pooled judge-tier Pareto: {n_total_axes} axes, slot {slot}  "
         f"[◆ = Pareto-optimal, ● = dominated]\n"
-        f"Filled = measured cost (usage.json)  Hollow = estimated (legacy tiers)\n"
-        + cap_summary({m: d.get("max_tokens") or {None} for m, d in agg.items()})
+        f"Filled = measured cost (usage.json)  Hollow = estimated (legacy tiers)"
     )
     if excluded:
         names = ", ".join(f"{m} ({d['n_axes']})"
