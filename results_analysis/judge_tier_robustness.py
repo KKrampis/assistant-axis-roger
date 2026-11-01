@@ -929,7 +929,7 @@ def render_figure(out_png: Path, models_by_rho: Sequence[str], variants: Sequenc
                    markersize=8, label="hollow = estimated cost"),
         plt.Line2D([0], [0], linestyle="--", color="#555555", label="Pareto frontier"),
     ]
-    title = (f"Judge ranking under {n_v} projection variants: {n_axes_total} axes, "
+    title = (f"Judge ranking under {n_v} projection variants, DESCRIPTION judging: {n_axes_total} axes, "
              f"{n_m} judges (default {default_key})")
     fig.suptitle(title + "\n" + subtitle, fontsize=12, y=1 - 0.12 / fig_h, va="top")
     y_b = pan_top + 0.42 / fig_h
@@ -998,6 +998,8 @@ def build_parser() -> argparse.ArgumentParser:
                         "by default since 2026-11-01 (Roger).")
     p.add_argument("--min_axes", type=int, default=None,
                    help="Compare only models with at least this many axes (default: the most any model has).")
+    p.add_argument("--include_models", nargs="+", default=[], metavar="CELL",
+                   help="Compare only these cell directory names (an allow-list; applied before --exclude_models).")
     p.add_argument("--exclude_models", nargs="+", default=[], metavar="CELL",
                    help="Cell directory names to leave out (e.g. claude-haiku-4-5 at T=1, superseded by "
                         "claude-haiku-4-5@t0).")
@@ -1051,6 +1053,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     cells, skipped = load_cells(axes, experiments_dir, tier_eval_dir, kinds_for_name,
                                 args.price_basis, inputs, include_legacy=args.legacy)
+    if args.include_models:
+        for m in args.include_models:
+            if m not in cells:
+                log(f"  NOTE: --include_models {m}: no such cell")
+        for m in [m for m in cells if m not in args.include_models]:
+            del cells[m]
     left_out = [m for m in args.exclude_models if cells.pop(m, None) is not None]
     for m in args.exclude_models:
         if m not in left_out:

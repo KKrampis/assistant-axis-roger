@@ -28,11 +28,14 @@ REPO = Path(__file__).resolve().parents[2]
 # The fake judges answer by entity: the score each entity gets on every axis.
 SCORES = {"calm": 2, "bold": -1, "shy": 3, "kind": 0, "pilot|R": -3}
 ENTITIES = sorted(SCORES)
-_NAME_RE = re.compile(r"to score\n\n\*\*(.+?)\*\*: ")
+_NAME_RE = re.compile(r"to score\n\n\*\*(.+?)\*\*: |to place is (.+?): ")
 
 
 def reply_for(prompt: str):
-    name = _NAME_RE.search(prompt).group(1)
+    m = _NAME_RE.search(prompt)
+    name = m.group(1) or m.group(2)
+    if name not in SCORES:      # the contemporary rubrics show a collision key without its suffix
+        name = next(k for k in SCORES if k.split("|")[0] == name)
     return f"It leans one way.\nSCORE: {SCORES[name]}", name
 
 
@@ -41,8 +44,17 @@ def reply_for(prompt: str):
 CUT_TEXT = "It leans 2 ways, and on balance the"
 
 
+_BATCH_ITEM_RE = re.compile(r"^(\d+)\. (.+?) \((?:role|trait)\): ", flags=re.MULTILINE)
+
+
 def capped_reply(prompt: str, cap: int, needs: dict):
     """``(text, cut, name)``: the reply is cut when the entity needs more than ``cap`` tokens."""
+    if "Place each of these" in prompt:                       # a batched prompt: one line per entity
+        lines = []
+        for k, shown in _BATCH_ITEM_RE.findall(prompt):
+            key = next(x for x in SCORES if x.split("|")[0] == shown)
+            lines.append(f"{k}. It leans.  SCORE: {SCORES[key] * 10}")
+        return "\n".join(lines), False, "batch"
     text, name = reply_for(prompt)
     if cap < needs.get(name, 0):
         return CUT_TEXT, True, name
@@ -1251,3 +1263,114 @@ def test_progress_lines(world, monkeypatch, caplog):
     caplog.set_level("INFO")
     assert _run(world, "gpt-4.1-mini", extra=["--transport", "realtime", "--max_in_flight", "1"]) == 0
     assert re.search(r"\[gpt-4\.1-mini\] progress: \d+/10 judged this run; in flight [01]", caplog.text)
+
+
+# ---------------------------------------------------------------------------
+# Rubric variants (--rubric, 2026-11-01)
+# ---------------------------------------------------------------------------
+
+def test_rubric_needs_a_cell_label(world, monkeypatch, capsys):
+    with pytest.raises(SystemExit):
+        _run(world, "gpt-4.1-mini", extra=["--transport", "realtime", "--rubric", "c2"])
+    assert "needs a --cell_label" in capsys.readouterr().err
+
+
+def test_contemporary_rubric_run_records_its_rubric(world, monkeypatch):
+    std = FakeOpenAI()
+    _openai(monkeypatch, std=std)
+    assert _run(world, "gpt-4.1-mini", extra=["--transport", "realtime", "--rubric", "c2", "--cell_label", "@c2"]) == 0
+    sent = std.calls[0]["messages"][0]["content"]
+    assert "relative position matters a great deal" in sent and "SCORE: <integer from -10 to +10>" in sent
+    scores, usage, d = _cell(world, "alpha_vs_beta", "gpt-4.1-mini@c2")
+    assert scores["result"] == {e: SCORES[e] for e in ENTITIES}
+    assert scores["_provenance"]["rubric"] == "c2" and scores["_provenance"]["rubric_version"] == "c2"
+    assert not (world.exp / "alpha_vs_beta_tier_eval" / "gpt-4.1-mini").exists()
+
+
+def test_v3fix_names_the_poles_by_their_own_type(world, monkeypatch):
+    std = FakeOpenAI()
+    _openai(monkeypatch, std=std)
+    assert _run(world, "gpt-4.1-mini", extra=["--transport", "realtime", "--rubric", "v3fix", "--cell_label", "@v3fix"]) == 0
+    role_prompt = next(c["messages"][0]["content"] for c in std.calls
+                       if "## Role to score" in c["messages"][0]["content"] and "[traits]" in c["messages"][0]["content"])
+    assert "For reference, traits that score near -3 include:" in role_prompt
+    assert "## Role to score" in role_prompt
+
+
+def test_strict_parser_of_the_contemporary_rubrics():
+    from results_analysis import judge_tier_rubrics as jr
+    p = jr.get("c4").parse
+    assert p("Leans toward decisive.\nSCORE: +4") == 4 and p("SCORE: -10") == -10
+    assert p("SCORE: 11") is None and p("SCORE: 2\nSCORE: 3") is None and p("it is 2") is None
+    assert jr.get("v3").parse("no marker, but 2") == 2          # v3 keeps its fallback, for comparability
+
+
+# ---------------------------------------------------------------------------
+# Batched judging (--entities_per_call, 2026-11-01)
+# ---------------------------------------------------------------------------
+
+def test_batch_parser():
+    from results_analysis import judge_tier_rubrics as jr
+    p = jr.get("b5").parse_batch
+    text = "1. Leans a bit.  SCORE: 12\n**2.** Strongly.  SCORE: -80\n3) odd SCORE: 150\n4. twice SCORE: 1\n4. again SCORE: 2"
+    assert p(text, 5) == {1: 12, 2: -80, 3: None, 4: None, 5: None}
+    assert p("", 2) == {1: None, 2: None}
+    # Haiku 5.5's layout: the score on the line after the reasoning, blank lines between items
+    haiku = "1. pluralist: Treats views as equal.\nSCORE: 20\n\n2. hoarder (trait): Defensive.\nSCORE: 35\n\n3. tree: Rooted.\nSCORE: 4"
+    assert p(haiku, 3) == {1: 20, 2: 35, 3: 4}
+
+
+def test_batched_judging_scores_every_entity_and_shares_the_charge(world, monkeypatch):
+    std = FakeOpenAI()
+    _openai(monkeypatch, std=std)
+    assert _run(world, "gpt-4.1-mini", extra=["--transport", "realtime", "--rubric", "b5", "--cell_label", "@b5s1",
+                                             "--entities_per_call", "3"]) == 0
+    assert len(std.calls) == 4                                  # two axes x ceil(5/3) calls
+    sent = std.calls[0]["messages"][0]["content"]
+    assert "Place each of these 3 roles and traits" in sent and sent.count("SCORE: <integer") == 1
+    scores, usage, d = _cell(world, "alpha_vs_beta", "gpt-4.1-mini@b5s1")
+    assert scores["result"] == {e: SCORES[e] * 10 for e in ENTITIES}
+    assert scores["_provenance"]["entities_per_call"] == 3 and scores["_provenance"]["shuffle_seed"] == 0
+    assert usage["n_calls"] == 2                                 # the cell is charged per call, not per entity
+    import gzip
+    recs = [json.loads(x) for x in gzip.decompress((d / ev.ANSWERS_ARCHIVE).read_bytes()).splitlines()]
+    answers = [r for r in recs if r["kind"] == "answer"]
+    assert len(answers) == 5 and sum(1 for r in answers if r["charges"]) == 2 and all(r["batch"] for r in answers)
+
+
+def test_batched_judging_needs_live_transport_and_a_batch_rubric(world, capsys):
+    with pytest.raises(SystemExit):
+        _run(world, "gpt-4.1-mini", extra=["--transport", "batch", "--rubric", "b5", "--cell_label", "@b", "--entities_per_call", "3"])
+    assert "runs live only" in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        _run(world, "gpt-4.1-mini", extra=["--transport", "realtime", "--rubric", "c5", "--cell_label", "@c", "--entities_per_call", "3"])
+    assert "batch form" in capsys.readouterr().err
+
+
+def test_shuffle_seed_changes_the_batch_mates(world, monkeypatch):
+    sent = {}
+    for seed in (1, 2):
+        std = FakeOpenAI()
+        _openai(monkeypatch, std=std)
+        assert _run(world, "gpt-4.1-mini", extra=["--transport", "realtime", "--rubric", "b5", "--cell_label", f"@b5s{seed}",
+                                                 "--entities_per_call", "2", "--shuffle_seed", str(seed)]) == 0
+        sent[seed] = [c["messages"][0]["content"] for c in std.calls]
+    assert sent[1] != sent[2]
+
+
+def test_batched_answers_resume_with_the_batch_parser(world, monkeypatch):
+    """A stop after one batched call, then a rerun: the saved ten-line reply is parsed per entity
+    (2026-11-01: the resume parsed it with the single-entity parser and every resumed entity came
+    back as missing)."""
+    std = FakeOpenAI(prompt_tokens=1_000_000, completion_tokens=0)
+    _openai(monkeypatch, std=std)
+    assert _run(world, "gpt-4.1-mini", extra=["--transport", "realtime", "--rubric", "b5", "--cell_label", "@b5s1",
+                                             "--entities_per_call", "3", "--budget_usd", "0", "--max_in_flight", "1"]) == 2
+    assert len(std.calls) == 1
+    std2 = FakeOpenAI()
+    _openai(monkeypatch, std=std2)
+    assert _run(world, "gpt-4.1-mini", extra=["--transport", "realtime", "--rubric", "b5", "--cell_label", "@b5s1",
+                                             "--entities_per_call", "3"]) == 0
+    assert len(std2.calls) == 3                                  # the first batch's three entities were not re-asked
+    scores, usage, d = _cell(world, "alpha_vs_beta", "gpt-4.1-mini@b5s1")
+    assert scores["result"] == {e: SCORES[e] * 10 for e in ENTITIES}

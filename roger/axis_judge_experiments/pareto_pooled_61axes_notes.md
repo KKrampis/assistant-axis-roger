@@ -1,6 +1,6 @@
 # Judge-Tier Pareto Analysis — 61 Axes
 
-**Plot:** [`pareto_pooled_61axes.png`](./pareto_pooled_61axes.png)
+**Plots:** [`pareto_pooled_61axes.png`](./pareto_pooled_61axes.png) (nine judges, old rubric); [`pareto_pooled_61axes_rubrics.png`](./pareto_pooled_61axes_rubrics.png) (four judges, old rubric against the new method; update 2 below)
 **Robustness check:** [`judge_tier_robustness_61axes.png`](./judge_tier_robustness_61axes.png), numbers in [`judge_tier_robustness_61axes.json`](./judge_tier_robustness_61axes.json); with the superseded runs too, [`judge_tier_robustness_61axes_all.json`](./judge_tier_robustness_61axes_all.json) ([`.png`](./judge_tier_robustness_61axes_all.png))
 
 ## Update, 2026-11-01: every judge on all 61 axes under one set of settings
@@ -130,6 +130,120 @@ uv run python results_analysis/judge_tier_cost_plot_pooled.py --experiments_dir 
     --exclude_models claude-haiku-4-5 gpt-5.6-luna gpt-5.6-terra \
     --output roger/axis_judge_experiments/pareto_pooled_61axes.png
 # the "all" file: the same robustness command without --exclude_models
+```
+
+## Update 2, 2026-11-01 (evening): the rubric, not the model, set the old frontier
+
+**Plot:** [`pareto_pooled_61axes_rubrics.png`](./pareto_pooled_61axes_rubrics.png)
+(each judge twice: old rubric, and the new method, joined by an arrow).
+**Robustness check:** [`judge_tier_robustness_61axes_rubrics.png`](./judge_tier_robustness_61axes_rubrics.png),
+numbers in [`judge_tier_robustness_61axes_rubrics.json`](./judge_tier_robustness_61axes_rubrics.json).
+**Tuning record:** [`pareto_pooled_dev30_rubric_tuning.png`](./pareto_pooled_dev30_rubric_tuning.png)
+(every variant per judge on the 30 development axes), numbers in
+[`judge_tier_robustness_dev30_rubric_tuning.json`](./judge_tier_robustness_dev30_rubric_tuning.json).
+
+**Why this was done.**  Under the old rubric gpt-4.1-mini led every newer
+judge by 0.04 to 0.13 in ρ, in all 12 projection variants.  The reason turned
+out to be the rubric: it is a 2023-style judge prompt whose 0 row ("neutral,
+ambiguous, or does not map onto this axis") newer models take literally.  They
+answered 0 for 52% to 70% of entities against gpt-4.1-mini's 32%, and across
+judges the share of zeros tracked lower ρ (Pearson −0.85): a 0 ties every entity
+the judge would not place, while the activation projection orders them all.
+Roger's hypothesis, from the RP-judging rubric work, was that a rubric tuned
+for gpt-4.1-mini under-serves current models.  So: keep the old rubric as the
+baseline, write contemporary rubrics, tune them on the three cheapest current
+judges, and plot old against new for the four judges at the cheap end of the
+frontier (Opus 5 and GPT-5.6 Sol dropped).
+
+**What was tried** ([`judge_tier_rubrics.py`](../../results_analysis/judge_tier_rubrics.py),
+`--rubric`; tuned on a seeded 30/31 split of the 61 axes,
+[`tier_eval_axes_dev30.tsv`](../../scripts/tier_eval_axes_dev30.tsv) and
+[`tier_eval_axes_holdout31.tsv`](../../scripts/tier_eval_axes_holdout31.tsv)):
+
+- **v3fix**, the old rubric with its reference line naming the poles by their
+  own type: no difference (0.6053 against a 0.6053 repeat run; run-to-run noise
+  at T=0 is 0.001).  The old rubric stays as the baseline, unchanged.
+- **c1 to c7**, contemporary single-entity rubrics: the score's purpose stated
+  (a rank among several hundred entities, compared with an independent
+  measurement; relative position and small differences matter), a standard
+  for indirect cases, 0 only for balanced entities, reasoning before the
+  score, a strict parser.  Every one lifted the three newer judges by 0.09 to
+  0.18 and took their zeros to 1% to 6%.  A finer scale (−100..+100, c5)
+  helped a little; a condensed prompt (c7) was cheapest but cost GPT-6 Luna
+  0.03; "a few words" of reasoning (c6) made Haiku write more, not less.
+- **c8 and c10**, the percentile: ask for the entity's percentile among all
+  the roles and traits on the axis, which is what a rank correlation
+  measures.  Best for both Lunas (Luna 0.662 against c5's 0.633), worst for
+  Haiku 5.5 (0.595 against 0.619): judging alone, Haiku parks 59% of its
+  scores at about 40 or 60.  c9, a calibrated 0 ("about one entity in ten"),
+  was no better than c5.
+- **b10, batched judging**: ten entities of one axis per call, in a seeded
+  shuffle, each line a short sentence and a percentile score; each entity
+  judged in two different random batches (`--shuffle_seed 1` and `2`) and the
+  two scores averaged.  This won for every judge.  The crosstalk between
+  batch-mates is real (between-shuffle agreement 0.82 to 0.86) and the second
+  shuffle averages it out; one shuffle alone already beats every single-entity
+  rubric.  Haiku needs a 1,500-token reply cap for ten entities (it writes
+  about 60 tokens per entity; a 600 cap cut 40% of its replies, those runs
+  are under `_tier_eval_discarded/`).
+
+**The result** (ρ: mean Spearman correlation over the 61 axes at slot 6,
+layer 25, raw; cost per axis at list price from the tokens billed, so the
+new method's longer prompt and two calls per entity are already in it):
+
+| judge | old rubric | new method | development 30 | held-out 31 | cost per axis, old → new |
+|---|---|---|---|---|---|
+| gpt-5.6-luna, reasoning off | 0.547 | **0.725** | 0.697 | 0.751 | $0.073 → $0.047 |
+| gpt-4.1-mini, T=0 | 0.605 | **0.720** | 0.698 | 0.742 | $0.130 → $0.084 |
+| claude-haiku-5-5, thinking off | 0.544 | **0.716** | 0.684 | 0.746 | $0.070 → $0.048 |
+| gpt-6-luna, reasoning off | 0.478 | **0.708** | 0.676 | 0.739 | $0.033 → $0.021 |
+
+- **Every judge gains 0.11 to 0.23 in ρ and costs 35% to 40% less.**  The
+  held-out axes, untouched during tuning, gain as much as the development
+  axes (they are easier axes: the old rubric scores higher there too).
+- **The four judges now sit within 0.017 of one another**, so the choice is
+  about price.  GPT-5.6 Luna and GPT-6 Luna are on the frontier in all 12
+  projection variants; gpt-4.1-mini is dominated in 11 and Haiku in all 12.
+  GPT-6 Luna, last under the old rubric, is within 0.017 of the best at
+  $0.021 per axis.  Kendall τ against the default variant runs from 0.786 to
+  1.000.  Luna's lead over gpt-4.1-mini holds in 82% of bootstrap draws at
+  the default variant (0.48 to 1.00 across variants).
+- **gpt-4.1-mini's old lead was the rubric.**  Under the new method it is
+  0.005 behind Luna at nearly twice the price, so its retirement on
+  2027-01-14 costs nothing.
+
+**Caveats.**  This is description judging only; instruction and response
+judging are the next cross-checks (Roger's strategy: tune on the cheapest,
+then confirm the pattern on the dearer modes).  The judges other than
+gpt-4.1-mini run at their default temperature, one sample per call.  The
+batched runs on Flex lost 4% to 5% of calls to this afternoon's network
+trouble and were resumed to fill the gaps; a resume bug (fixed) emptied the
+Lunas' held-out cells once, and they were rebuilt from the archived replies
+with [`judge_tier_reparse_batched.py`](../../scripts/judge_tier_reparse_batched.py).
+The averaged cells are built by
+[`judge_tier_average_cells.py`](../../scripts/judge_tier_average_cells.py).
+The old rubric still shows a collision key with its kind suffix
+("amateur|R") on 38 axes; kept for this comparison, to go afterwards (noted
+in AGENT_NOTES).
+
+**Reproduce** (from the repository root; the corpus checked out at 1448a84c):
+
+```bash
+# one judge, both shuffles, all 61 axes (Haiku: --transport realtime --max_tokens 1500; Lunas: flex, 600)
+for s in 1 2; do uv run python results_analysis/judge_tier_cost_eval.py --axes_file scripts/tier_eval_axes.tsv \
+    --instructions_dir /tmp/corpus_2026-05-24/data --judge_model gpt-6-luna --rubric b10 --cell_label @b10s$s \
+    --entities_per_call 10 --shuffle_seed $s --max_tokens 600 --transport flex; done
+uv run python scripts/judge_tier_average_cells.py gpt-6-luna@b10x2 gpt-6-luna@b10s1 gpt-6-luna@b10s2 \
+    --instructions_dir /tmp/corpus_2026-05-24/data
+# the check and the plot
+uv run python results_analysis/judge_tier_robustness.py --axes_file scripts/tier_eval_axes.tsv --output_dir /tmp/r61 \
+    --include_models gpt-4.1-mini gpt-4.1-mini@b10x2 claude-haiku-5-5 claude-haiku-5-5@b10x2 \
+      gpt-5.6-luna@none gpt-5.6-luna@none@b10x2 gpt-6-luna gpt-6-luna@b10x2
+uv run python results_analysis/judge_tier_cost_plot_pooled.py --experiments_dir roger/axis_judge_experiments \
+    --robustness_json /tmp/r61/judge_tier_robustness.json --include_models <the same eight> \
+    --links gpt-4.1-mini:gpt-4.1-mini@b10x2 claude-haiku-5-5:claude-haiku-5-5@b10x2 \
+      gpt-5.6-luna@none:gpt-5.6-luna@none@b10x2 gpt-6-luna:gpt-6-luna@b10x2 \
+    --output roger/axis_judge_experiments/pareto_pooled_61axes_rubrics.png
 ```
 
 ---

@@ -2922,6 +2922,68 @@ point.
   "default reasoning"), and gpt-4.1-mini is marked as retiring on 2027-01-14.
   The May 2026 legacy cells enter only with `--legacy`.
 
+**Rubric variants and batched judging** (`--rubric`, `--entities_per_call`;
+2026-11-01, Roger's rubric tuning).  The v3 descriptions rubric is a 2023-style
+judge prompt whose 0 row ("neutral, ambiguous, or does not map onto this
+axis") the newer models take literally: 52-70% zeros against gpt-4.1-mini's
+32%, and across judges the share of zeros tracks lower ρ (a 0 ties every
+entity the judge would not place, while the projection orders them all).
+[`judge_tier_rubrics.py`](./judge_tier_rubrics.py) holds the variants, each
+with its own prompt builder and parser, recorded in every cell's provenance
+(`rubric`, `rubric_version`):
+
+- `v3` (default): the 2026-04-20 rubric, unchanged, so existing cells stay
+  comparable.  It shows a collision key with its kind suffix ("amateur|R")
+  on the 38 suffix-keyed axes; the judges cope.  **Remove that once the
+  old-versus-new comparison is finished** (Roger, 2026-11-01: keep it only
+  for compatibility): render through `shown_name` as the other variants do,
+  under a new version label.  `v3fix` names the poles by their own type
+  (no measurable difference: 0.6053 against a 0.6053 repeat run).
+- `c1` to `c7`: contemporary rubrics.  They say what the score is for (a
+  rank among several hundred entities, compared with an independent
+  measurement; relative position and small differences matter), give a
+  standard for indirect cases (typical behaviour, values, associations),
+  keep 0 for balanced entities only and ask for the lean otherwise, keep
+  reasoning before the score, and read the score strictly (exactly one
+  `SCORE: <int>` in range).  They differ in scale (-3..+3, -10..+10,
+  -100..+100), reasoning length and prompt length.
+- `c8`, `c10`: ask for the entity's **percentile among all the roles and
+  traits on the axis** (0..100), which is what a rank correlation measures.
+  `c10` drops c8's "most percentiles sit between 20 and 80" hint, which Haiku
+  5.5 took as a prior (59% of its scores at about 40 or 60).  `c9`: a
+  calibrated 0 (about one entity in ten), no better than c5.
+- `b5`, `b10`: batch forms (`--entities_per_call N`, `--shuffle_seed S`):
+  N entities of one axis per call in a seeded shuffle, one line each in the
+  reply, so the judge has a comparison frame and the rubric is shared (input
+  cost per entity about a third at N=10).  Live and Flex transports only.
+  Judging each entity under two seeds measures the crosstalk between
+  batch-mates (between-seed agreement about 0.85), and averaging the two
+  beats single-entity judging at lower cost.  Raise `--max_tokens` (600 for
+  N=10): the 300 default cuts some ten-line replies.
+
+**Result (2026-11-01, 61 axes, slot 6 layer 25 raw):** batched percentile
+judging with two shuffles averaged (`b10`, `--entities_per_call 10`, cells
+`<judge>@b10x2` from `scripts/judge_tier_average_cells.py`) lifts every judge
+by 0.11 to 0.23 ρ at 35% to 40% lower cost: gpt-5.6-luna 0.547 → 0.725,
+gpt-4.1-mini 0.605 → 0.720, claude-haiku-5-5 0.544 → 0.716, gpt-6-luna 0.478
+→ 0.708; the held-out 31 axes gain as much as the 30 tuning axes.  Plot:
+[`pareto_pooled_61axes_rubrics.png`](../roger/axis_judge_experiments/pareto_pooled_61axes_rubrics.png);
+account in update 2 of
+[`pareto_pooled_61axes_notes.md`](../roger/axis_judge_experiments/pareto_pooled_61axes_notes.md).
+Batched cells judged live can be re-scored from their archived replies with
+`scripts/judge_tier_reparse_batched.py` (no API calls), as was done after the
+parser learnt Haiku's layout and after a resume bug.
+
+A non-default rubric needs its own `--cell_label` (`@c8`, stacked as
+`@none@c8` for Luna with reasoning off), so its cells sit beside the v3
+cells.  Tuning used the seeded 30/31 split
+[`scripts/tier_eval_axes_dev30.tsv`](../scripts/tier_eval_axes_dev30.tsv) /
+[`tier_eval_axes_holdout31.tsv`](../scripts/tier_eval_axes_holdout31.tsv).
+`--batch_chunk_requests` (default 10,000; 2,500 is safer under load) sizes
+batch submissions: three 10,000-request Anthropic submissions and one OpenAI
+one hung and dropped on 2026-11-01 while Flex runs saturated the connection;
+a rerun collects the batches already in flight and submits the rest.
+
 [`judge_tier_robustness.py`](./judge_tier_robustness.py) asks whether the
 choice of judge depends on which projection the scores are compared with.  It
 recomputes every judge's ρ, axis by axis, against 12 projection variants:

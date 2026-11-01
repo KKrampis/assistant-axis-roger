@@ -161,6 +161,10 @@ def test_display_names_spell_out_settings_and_notes():
     assert display_name("claude-haiku-5-5") == "claude-haiku-5-5"
     assert display_name("claude-opus-5") == "claude-opus-5 (effort low)"
     assert display_name("gpt-5.6-luna") == "gpt-5.6-luna (default reasoning)"
+    assert display_name("gpt-5.6-luna@none@c2") == "gpt-5.6-luna (no reasoning, rubric c2)"
+    assert display_name("gpt-4.1-mini@v3fix") == "gpt-4.1-mini (rubric v3fix, retires 2027-01-14)"
+    assert display_name("claude-haiku-5-5@b10x2") == "claude-haiku-5-5 (batched rubric b10, 2 shuffles averaged)"
+    assert display_name("gpt-6-luna@b10s1") == "gpt-6-luna (batched rubric b10, shuffle 1)"
     assert display_name("gpt-4.1-mini (May)") == "gpt-4.1-mini (May)"
 
 
@@ -174,3 +178,29 @@ def test_exclude_models_leaves_a_cell_out_and_says_so(tmp_path: Path) -> None:
     assert r.returncode == 0, r.stderr
     assert "partial" not in r.stderr.split("Aggregated results")[1].split("Wrote")[0]
     assert "--exclude_models nosuch: no such cell" in r.stderr and out.exists()
+
+
+def test_links_draw_between_plotted_cells(tmp_path: Path) -> None:
+    _fixture(tmp_path)
+    env = {"MPLBACKEND": "Agg", "PATH": "/usr/bin:/bin"}
+    out = tmp_path / "links.png"
+    r = subprocess.run([sys.executable, str(SCRIPT), "--experiments_dir", str(tmp_path), "--slot", "6",
+                        "--min_axes", "1", "--links", "full:partial", "full:nosuch", "--output", str(out)],
+                       capture_output=True, text=True, env=env)
+    assert r.returncode == 0, r.stderr
+    assert "--links full:nosuch: not both plotted" in r.stderr and out.exists()
+    r2 = subprocess.run([sys.executable, str(SCRIPT), "--experiments_dir", str(tmp_path), "--slot", "6",
+                         "--links", "bad", "--output", str(out)], capture_output=True, text=True, env=env)
+    assert r2.returncode != 0 and "expected OLD:NEW" in r2.stderr
+
+
+def test_include_models_is_an_allow_list(tmp_path: Path) -> None:
+    _fixture(tmp_path)
+    env = {"MPLBACKEND": "Agg", "PATH": "/usr/bin:/bin"}
+    out = tmp_path / "inc.png"
+    r = subprocess.run([sys.executable, str(SCRIPT), "--experiments_dir", str(tmp_path), "--slot", "6",
+                        "--include_models", "full", "nosuch", "--output", str(out)],
+                       capture_output=True, text=True, env=env)
+    assert r.returncode == 0, r.stderr
+    agg = r.stderr.split("Aggregated results")[1]
+    assert "full" in agg and "partial" not in agg and "--include_models nosuch: no such cell" in r.stderr

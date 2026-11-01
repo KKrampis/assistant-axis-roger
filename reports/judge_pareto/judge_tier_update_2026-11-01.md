@@ -222,15 +222,67 @@ half price):
 
 The stalled Flex runs also lost about $9 of answers held in memory.
 
+## 3b. Same day, later: the rubric was the frontier
+
+The strong gpt-4.1-mini point above turned out to be the rubric's doing, not
+the model's.  The v3 descriptions rubric is a 2023-style judge prompt whose 0
+row ("neutral, ambiguous, or does not map onto this axis") newer models take
+literally: they answered 0 for 52% to 70% of entities against gpt-4.1-mini's
+32%, and a 0 ties every entity the judge would not place while the projection
+orders them all.  Roger had seen the same with the RP-judging rubric: a prompt
+that suits gpt-4.1-mini under-serves current models, and a rewrite lets them
+overtake it.
+
+So the four judges at the cheap end of the frontier (gpt-4.1-mini, Haiku 5.5,
+GPT-5.6 Luna, GPT-6 Luna; Opus 5 and Sol dropped) were judged again with
+contemporary rubrics, tuned on 30 of the 61 axes and confirmed on the other
+31.  The winner was not a wording but a method: **ask for the entity's
+percentile among all the roles and traits on the axis, judge ten entities
+per call, and average two random batch orders** (`--rubric b10
+--entities_per_call 10 --shuffle_seed 1|2`, cells `<judge>@b10x2`).  Every
+judge gained 0.11 to 0.23 in ρ at 35% to 40% lower cost, the gain was as large
+on the held-out axes, and the four now sit within 0.017 of one another:
+
+| judge | old rubric | new method | cost per axis, old → new |
+|---|---|---|---|
+| gpt-5.6-luna, reasoning off | 0.547 | **0.725** | $0.073 → $0.047 |
+| gpt-4.1-mini, T=0 | 0.605 | **0.720** | $0.130 → $0.084 |
+| claude-haiku-5-5, thinking off | 0.544 | **0.716** | $0.070 → $0.048 |
+| gpt-6-luna, reasoning off | 0.478 | **0.708** | $0.033 → $0.021 |
+
+The plot with each judge's old and new points joined:
+[`pareto_pooled_61axes_rubrics.png`](../../roger/axis_judge_experiments/pareto_pooled_61axes_rubrics.png);
+the tuning record, every variant per judge:
+[`pareto_pooled_dev30_rubric_tuning.png`](../../roger/axis_judge_experiments/pareto_pooled_dev30_rubric_tuning.png);
+the full account, with the variants that lost and why, in update 2 of
+[`pareto_pooled_61axes_notes.md`](../../roger/axis_judge_experiments/pareto_pooled_61axes_notes.md).
+The rubrics are in
+[`results_analysis/judge_tier_rubrics.py`](../../results_analysis/judge_tier_rubrics.py);
+the README section "Rubric variants and batched judging" explains the
+options.  Two tools go with batched cells:
+[`scripts/judge_tier_average_cells.py`](../../scripts/judge_tier_average_cells.py)
+(the two shuffles into one cell) and
+[`scripts/judge_tier_reparse_batched.py`](../../scripts/judge_tier_reparse_batched.py)
+(re-score a batched cell from its archived replies, no API calls).
+
+Two practical lessons from the day: keep Flex to about four processes at a
+time (eight, with an OS download in the background, dropped every connection
+at once), and give batched replies room (`--max_tokens 1500` for Haiku 5.5,
+which writes about 60 tokens per entity).
+
 ## 4. Open questions
 
-- **Was gpt-4.1-mini helped by the vectors?**  In the April-May extraction,
-  pipeline step 3 judged every response with gpt-4.1-mini, and each pole
-  vector is the mean activation over the responses it scored 3.  The filter
-  kept 89% of trait and 81% of role responses.  Roger and Claude are
-  rebuilding the vectors without that filter and rerunning the 12-variant
-  check; a later update will report it.  The October extraction, judged by
-  gpt-5.6-luna, is a second test.
+- **Was gpt-4.1-mini helped by the vectors?**  No, as far as the step-3
+  filter goes.  In the April-May extraction, pipeline step 3 judged every
+  response with gpt-4.1-mini, and each pole vector is the mean activation
+  over the responses it scored 3.  Rebuilding every vector from all 500
+  responses left the ranking, the frontier and gpt-4.1-mini's lead unchanged
+  (mean ρ moved by less than 0.005;
+  [`judge_tier_robustness_61axes_filtered_vs_unfiltered.txt`](../../roger/axis_judge_experiments/judge_tier_robustness_61axes_filtered_vs_unfiltered.txt)).
+  A side finding: on axes whose poles lost most responses to the filter
+  (dominant/submissive, harmless/harmful) every judge agrees better with the
+  unfiltered vectors, most at slot 0, which may mean the persona is in the
+  activations even when the response refuses it; a TODO in AGENT_NOTES.
 - **The 20-axis set is selected:** 18 of its axes were the highest-ρ axes of
   an earlier sweep judged by gpt-4.1-mini and Sonnet.  The 61-axis set is
   every axis with cached projections.

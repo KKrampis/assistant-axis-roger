@@ -132,6 +132,8 @@ import logging
 import os
 import re
 import sys
+import math
+import random
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -151,6 +153,7 @@ from results_analysis.axis_judge_correlation import (  # noqa: E402
     parse_signed_score,
 )
 from results_analysis import judge_tier_transport as tt  # noqa: E402
+from results_analysis import judge_tier_rubrics as jr  # noqa: E402
 from assistant_axis.judge import RateLimiter, provider_for_model, warn_if_low_parse_rate  # noqa: E402
 from assistant_axis.judge_pricing import BATCH_SUFFIX, MultiModelUsage, price_for_model  # noqa: E402
 from assistant_axis.entity_id import parse_entity_id  # noqa: E402
@@ -178,6 +181,8 @@ DEFAULT_BATCH_FALLBACK_MAX = 2000
 #: The judge's reply cap (--max_tokens); 200 until 2026-11-01 (Roger, 2026-11-01:
 #: "200 is clearly too low for safety").
 DEFAULT_MAX_TOKENS = 300
+#: --batch_chunk_requests: requests per batch submission (the runners' own default).
+DEFAULT_BATCH_CHUNK_REQUESTS = 10_000
 #: Live and Flex calls: at most this many requests in flight per model
 #: (--max_in_flight).  Before 2026-11-01 every request of every axis was handed
 #: to the HTTP client at once; with 35,214 per model the client's connection
@@ -356,6 +361,19 @@ def load_axis(job: AxisJob, instructions_dir: Path, slots: str = "all", limit: O
 #: off beside ``claude-opus-5`` (low effort), so cells made under different
 #: settings never overwrite or resume into each other.  Set in main_async.
 CELL_LABEL = ""
+#: The rubric of this run (--rubric, judge_tier_rubrics.RUBRICS); v3 unless set.  Set in main_async.
+RUBRIC: "jr.RubricSpec" = jr.RUBRICS["v3"]
+#: Batched judging of this run (--entities_per_call, --shuffle_seed); set in main_async.
+BATCHING = {"n": 1, "seed": 0}
+
+
+def build_prompt(job: "AxisJob", etype: str, name: str, desc: str) -> str:
+    """The judge prompt of this run's rubric for one entity of ``job``."""
+    return RUBRIC.build(job.axis_spec, job.pair_type, etype, name, desc)
+
+
+def parse_score(text: Optional[str]) -> Optional[float]:
+    return RUBRIC.parse(text)
 
 
 def cell_name(model: str) -> str:
@@ -452,6 +470,9 @@ class RunContext:
     budget_hit: bool = False
     max_in_flight: int = DEFAULT_MAX_IN_FLIGHT
     stall_s: float = DEFAULT_STALL_MINUTES * 60
+    batch_chunk_requests: int = DEFAULT_BATCH_CHUNK_REQUESTS
+    entities_per_call: int = 1      # batched judging (--entities_per_call); live and Flex only
+    shuffle_seed: int = 0
     live_pending: int = 0           # live or Flex requests not yet finished, all models
     last_progress: float = field(default_factory=time.monotonic)
     stalled: bool = False
@@ -474,10 +495,14 @@ class RunContext:
         return True
 
 
-def record(mrun: ModelRun, cell: Cell, name: str, reply: Any) -> None:
+_UNSET = object()
+
+
+def record(mrun: ModelRun, cell: Cell, name: str, reply: Any, score: Any = _UNSET) -> None:
     """Record one reply: its text, None (a failed call or a refusal), or a
     :class:`judge_tier_transport.Truncated` (cut at max_tokens), which scores
-    None without being parsed and is listed in the cell's provenance."""
+    None without being parsed and is listed in the cell's provenance.  With
+    ``score`` given (batched judging), the reply is not parsed again."""
     mrun.attempted += 1
     if isinstance(reply, tt.Truncated):
         cell.scores[name] = None
@@ -487,7 +512,7 @@ def record(mrun: ModelRun, cell: Cell, name: str, reply: Any) -> None:
                        f"scored as missing")
         return
     cell.truncated.discard(name)
-    score = parse_signed_score(reply) if reply else None
+    score = (parse_score(reply) if reply else None) if score is _UNSET else score
     cell.scores[name] = score
     if score is None:
         logger.warning(f"{mrun.model}: unparseable/empty response for {name!r} ({cell.job.axis_dir})")
@@ -502,11 +527,12 @@ def write_cell(cell: Cell, mrun: ModelRun, max_tokens: int) -> None:
     d = cell_dir(job, model)
     d.mkdir(parents=True, exist_ok=True)
     scores = cell.parsed_scores()
-    provenance = {"judge_model": model, "rubric_version": RUBRIC_VERSION,
+    provenance = {"judge_model": model, "rubric_version": RUBRIC.version, "rubric": RUBRIC.name,
                   "projections_file": str(job.projections_file),
                   "transport": mrun.transport, "transport_reason": mrun.transport_reason,
                   "request_settings": mrun.settings, "max_tokens": max_tokens,
-                  "cell_label": CELL_LABEL, "truncated": sorted(cell.truncated)}
+                  "cell_label": CELL_LABEL, "truncated": sorted(cell.truncated),
+                  "entities_per_call": BATCHING["n"], "shuffle_seed": BATCHING["seed"]}
     atomic_write_text(json.dumps({"result": scores, "_provenance": provenance}, indent=2),
                       d / "scores_descriptions.json", logger_obj=logger)
     correlations = compute_correlations(
@@ -540,7 +566,7 @@ def write_partial_cell(cell: Cell, mrun: ModelRun, max_tokens: int) -> None:
     job, model = cell.job, mrun.model
     d = cell_dir(job, model)
     d.mkdir(parents=True, exist_ok=True)
-    provenance = {"judge_model": model, "rubric_version": RUBRIC_VERSION,
+    provenance = {"judge_model": model, "rubric_version": RUBRIC.version, "rubric": RUBRIC.name,
                   "projections_file": str(job.projections_file), "transport": mrun.transport,
                   "request_settings": mrun.settings, "max_tokens": max_tokens, "complete": False,
                   "n_attempted": len(cell.scores), "n_entities": len(cell.expected),
@@ -566,7 +592,7 @@ class CheckpointMismatchError(RuntimeError):
 
 def checkpoint_header(mrun: "ModelRun", max_tokens: int) -> Dict[str, Any]:
     return {"kind": "header", "version": CHECKPOINT_VERSION, "judge_model": mrun.model, "cell_label": CELL_LABEL,
-            "rubric_version": RUBRIC_VERSION, "request_settings": mrun.settings, "max_tokens": max_tokens}
+            "rubric_version": RUBRIC.version, "request_settings": mrun.settings, "max_tokens": max_tokens}
 
 
 def prompt_digest(prompt: str) -> str:
@@ -634,10 +660,18 @@ def resume_cell(cell: Cell, mrun: "ModelRun", header: Dict[str, Any]) -> int:
         if name not in cell.expected or name in cell.scores:
             continue
         etype, desc = descs[name]
-        if rec.get("prompt") != prompt_digest(build_static_prompt(cell.job.axis_spec, etype, name, desc)):
+        if not rec.get("batch") and rec.get("prompt") != prompt_digest(build_prompt(cell.job, etype, name, desc)):
             stale += 1
             continue
-        restore(cell, name, rec.get("reply"), bool(rec.get("truncated")))
+        if rec.get("batch"):
+            # a batched reply: this entity's line, by its position in the batch
+            batch = rec["batch"]
+            parsed = ({} if rec.get("truncated") or not rec.get("reply") or RUBRIC.parse_batch is None
+                      else RUBRIC.parse_batch(rec["reply"], len(batch)))
+            restore_score(cell, name, parsed.get(batch.index(name) + 1) if parsed and name in batch else None,
+                          bool(rec.get("truncated")))
+        else:
+            restore(cell, name, rec.get("reply"), bool(rec.get("truncated")))
         for key, pt, ct in rec.get("charges") or []:
             cell.usage.charge(key, pt, ct)
         taken += 1
@@ -648,6 +682,16 @@ def resume_cell(cell: Cell, mrun: "ModelRun", header: Dict[str, Any]) -> int:
     return taken
 
 
+def restore_score(cell: Cell, name: str, score: Optional[float], truncated: bool) -> None:
+    """A saved batched answer back into its cell, already parsed."""
+    if truncated:
+        cell.scores[name] = None
+        cell.truncated.add(name)
+        return
+    cell.truncated.discard(name)
+    cell.scores[name] = score
+
+
 def restore(cell: Cell, name: str, text: Optional[str], truncated: bool) -> None:
     """A saved answer back into its cell, scored as :func:`record` scores it."""
     if truncated:
@@ -655,11 +699,11 @@ def restore(cell: Cell, name: str, text: Optional[str], truncated: bool) -> None
         cell.truncated.add(name)
         return
     cell.truncated.discard(name)
-    cell.scores[name] = parse_signed_score(text) if text else None
+    cell.scores[name] = parse_score(text) if text else None
 
 
 def append_answer(cell: Cell, model: str, header: Dict[str, Any], name: str, reply: Any,
-                  charges: List[List[Any]], prompt: str) -> None:
+                  charges: List[List[Any]], prompt: str, batch: Optional[List[str]] = None) -> None:
     """Save one billed answer to the cell's answer log as soon as it arrives
     (the header first, when the log is new).  Calls that failed without a
     charge are not saved, so a rerun asks them again."""
@@ -668,7 +712,7 @@ def append_answer(cell: Cell, model: str, header: Dict[str, Any], name: str, rep
     path = d / ANSWERS_PARTIAL
     truncated = isinstance(reply, tt.Truncated)
     rec = {"kind": "answer", "name": name, "reply": reply.text if truncated else reply, "truncated": truncated,
-           "charges": charges, "prompt": prompt_digest(prompt),
+           "charges": charges, "prompt": prompt_digest(prompt), **({"batch": batch} if batch else {}),
            "at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")}
     lines = [] if path.exists() else [json.dumps(header, sort_keys=True)]
     lines.append(json.dumps(rec, sort_keys=True))
@@ -764,7 +808,21 @@ async def run_live(ctx: RunContext, mrun: ModelRun, todo: List[AxisJob], *, tier
             write_cell(cell, mrun, ctx.max_tokens)
     items = [(i, etype, name, desc) for i, job in enumerate(todo) for etype, name, desc in job.entities
              if not cells[i].written and name not in cells[i].scores]
-    if mrun.resumed:
+    n_per = ctx.entities_per_call
+    if n_per > 1:
+        # groups of n_per entities of one axis, in a seeded shuffle: the batch-mates are random, and
+        # another --shuffle_seed gives every entity different ones
+        groups: List[Tuple[int, List[Tuple[str, str, str]]]] = []
+        for i in sorted({it[0] for it in items}):
+            ents = [it[1:] for it in items if it[0] == i]
+            random.Random(ctx.shuffle_seed * 1_000_003 + i).shuffle(ents)
+            groups += [(i, ents[k:k + n_per]) for k in range(0, len(ents), n_per)]
+        if mrun.resumed:
+            logger.info(f"[{model}] {mrun.resumed} answers taken from the answer logs of earlier runs")
+        logger.info(f"[{model}] batched judging: {len(items)} entities in {len(groups)} calls of up to {n_per}, "
+                    f"shuffle seed {ctx.shuffle_seed}")
+        items = groups
+    elif mrun.resumed:
         logger.info(f"[{model}] {mrun.resumed} answers taken from the answer logs of earlier runs; "
                     f"{len(items)} requests left")
     mrun.to_judge += len(items)
@@ -775,11 +833,16 @@ async def run_live(ctx: RunContext, mrun: ModelRun, todo: List[AxisJob], *, tier
     def gate() -> bool:
         return bool(fatal) or ctx.over_budget()
 
-    async def one(item: Tuple[int, str, str, str], *, probing: bool = False) -> None:
+    async def one(item: Tuple[int, Any, Any, Any], *, probing: bool = False) -> None:
         nonlocal unfinished
-        i, etype, name, desc = item
-        cell = cells[i]
-        prompt = build_static_prompt(cell.job.axis_spec, etype, name, desc)
+        if n_per > 1:
+            i, group = item[0], item[1]
+            cell = cells[i]
+            prompt = RUBRIC.build_batch(cell.job.axis_spec, cell.job.pair_type, group)
+        else:
+            i, etype, name, desc = item
+            cell = cells[i]
+            prompt = build_prompt(cell.job, etype, name, desc)
         charge = _Charge(cell.usage, mrun.usage, ctx.run_usage)
         mrun.in_flight += 1
         try:
@@ -800,9 +863,19 @@ async def run_live(ctx: RunContext, mrun: ModelRun, todo: List[AxisJob], *, tier
             ctx.live_pending -= 1
         if text is tt.SKIPPED:
             return
-        if charge.charges:
-            append_answer(cell, model, header, name, text, charge.charges, prompt)
-        record(mrun, cell, name, text)
+        if n_per > 1:
+            names = [g[1] for g in group]
+            scores = ({} if isinstance(text, tt.Truncated) or not text
+                      else RUBRIC.parse_batch(text, len(group)))
+            for k, (_etype, gname, _desc) in enumerate(group, 1):
+                if charge.charges:
+                    append_answer(cell, model, header, gname, text, charge.charges if k == 1 else [], prompt,
+                                  batch=names)
+                record(mrun, cell, gname, text, score=scores.get(k) if scores else None)
+        else:
+            if charge.charges:
+                append_answer(cell, model, header, name, text, charge.charges, prompt)
+            record(mrun, cell, name, text)
         ctx.note_answer()
         if cell.complete and not cell.written:
             write_cell(cell, mrun, ctx.max_tokens)
@@ -905,7 +978,7 @@ def inflight_batches(work: Path) -> int:
 
 def batch_settings(ctx: RunContext, mrun: ModelRun) -> Dict[str, Any]:
     return {"model": mrun.model, "max_tokens": ctx.max_tokens, "request_settings": mrun.settings,
-            "rubric_version": RUBRIC_VERSION, "instructions_dir": str(Path(ctx.instructions_dir).resolve())}
+            "rubric_version": RUBRIC.version, "instructions_dir": str(Path(ctx.instructions_dir).resolve())}
 
 
 async def run_batch(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob]) -> None:
@@ -1072,9 +1145,12 @@ async def run_batch(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob]) -> Non
         amap.settings = settings_now
         amap.save()   # before the submission, so a rerun can route what it collects
         chunks = runner.write_chunks(
-            (cid, tt.request_for(model, build_static_prompt(cells[idx].job.axis_spec, etype, name, desc),
-                                 ctx.max_tokens, mrun.settings))
-            for cid, idx, etype, name, desc in pending())
+            ((cid, tt.request_for(model, build_prompt(cells[idx].job, etype, name, desc),
+                                  ctx.max_tokens, mrun.settings))
+             for cid, idx, etype, name, desc in pending()),
+            # the runner's own default unless --batch_chunk_requests says otherwise
+            **({"max_requests": ctx.batch_chunk_requests} if ctx.batch_chunk_requests != DEFAULT_BATCH_CHUNK_REQUESTS
+               else {}))
         logger.info(f"[{model}] batch: {n_pending} requests in {len(chunks)} chunk(s) for "
                     f"{sum(1 for i in current if not cells[i].written)} axes")
         unanswered.update(await runner.run(chunks, on_result, flush))
@@ -1270,7 +1346,7 @@ class BatchReply:
     def legacy_score(self) -> Optional[int]:
         """The score this script recorded for the reply before 2026-11-01
         (a cut reply parsed like any other)."""
-        return None if self.refused or not self.text else parse_signed_score(self.text)
+        return None if self.refused or not self.text else parse_score(self.text)
 
 
 def _get(obj: Any, name: str, default: Any = None) -> Any:
@@ -1755,7 +1831,7 @@ async def repair_model(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob], *, 
 
     async def one(rc: RepairCell, name: str) -> None:
         etype, desc = next((t, ds) for t, n, ds in rc.job.entities if n == name)
-        prompt = build_static_prompt(rc.job.axis_spec, etype, name, desc)
+        prompt = build_prompt(rc.job, etype, name, desc)
         this_call = MultiModelUsage()
         try:
             reply = await tt.call_model(model, prompt, ctx.max_tokens, rate_limiter,
@@ -1775,7 +1851,7 @@ async def repair_model(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob], *, 
             rc.answers[name] = reply
             logger.warning(f"[{model}] {rc.job.axis_dir}: {name!r} cut again at max_tokens {ctx.max_tokens}")
             return
-        score = parse_signed_score(reply) if reply else None
+        score = parse_score(reply) if reply else None
         rc.answers[name] = score
         if score is not None:
             mrun.parsed += 1
@@ -1882,6 +1958,12 @@ def build_parser() -> argparse.ArgumentParser:
                              "A reply cut at the cap is scored as missing, never parsed, and listed under "
                              "'truncated' in the cell's provenance; --repair_truncated re-asks such replies "
                              "at a higher cap.")
+    parser.add_argument("--rubric", choices=list(jr.RUBRICS), default="v3",
+                        help="The judge prompt (results_analysis/judge_tier_rubrics.py): v3 (default, the "
+                             "2026-04-20 descriptions rubric), v3fix (v3 with the poles named by their own type), "
+                             "c1-c4 (contemporary rubrics: the score's purpose stated, 0 only for balanced "
+                             "entities, -3..+3 or -10..+10, one or two sentences of reasoning).  Give a "
+                             "non-default rubric its own --cell_label; the rubric is recorded in each cell.")
     parser.add_argument("--cell_label", type=str, default="",
                         help="Suffix for this run's cell directories, e.g. @t0 or @nothink: cells go to "
                              "<axis>_tier_eval/<model><label>/ (and batches to _tier_eval_batches/<model><label>/), "
@@ -1905,6 +1987,17 @@ def build_parser() -> argparse.ArgumentParser:
                              "new requests once this run's measured spend passes this.  A batch is submitted "
                              "whole; --dry_run is its control.  Cells left incomplete are written as "
                              "*.partial.json (no usage.json), and the run exits 2.")
+    parser.add_argument("--batch_chunk_requests", type=int, default=DEFAULT_BATCH_CHUNK_REQUESTS,
+                        help="Requests per batch submission (default 10,000).  A 10,000-request Anthropic "
+                             "submission (about 15 MB in one call) hung for 20 minutes and dropped three times on "
+                             "2026-11-01 while Flex runs saturated the connection; 2,500 is safer then.")
+    parser.add_argument("--entities_per_call", type=int, default=1,
+                        help="Batched judging: this many entities of one axis per call, in a seeded shuffle "
+                             "(--shuffle_seed), with a rubric that has a batch form (b5).  Live and Flex "
+                             "transports only.  Default 1: one entity per call.")
+    parser.add_argument("--shuffle_seed", type=int, default=0,
+                        help="Seed of the batch shuffle (--entities_per_call); another seed gives every entity "
+                             "different batch-mates, which measures the crosstalk.")
     parser.add_argument("--batch_poll_seconds", type=float, default=60.0,
                         help="Seconds between status checks of batches in flight")
     parser.add_argument("--batch_fallback_max", type=int, default=DEFAULT_BATCH_FALLBACK_MAX,
@@ -1949,6 +2042,8 @@ def build_jobs(args: argparse.Namespace, parser: argparse.ArgumentParser) -> Lis
 
 
 def dry_run_report(jobs: List[AxisJob], runs: List[ModelRun], skipped_axes: List[AxisJob]) -> None:
+    print(f"\nRubric: {RUBRIC.name} ({RUBRIC.summary}); cell label {CELL_LABEL or '(none)'}"
+          + (f"; {BATCHING['n']} entities per call, shuffle seed {BATCHING['seed']}" if BATCHING["n"] > 1 else ""))
     print(f"\n{len(jobs)} axes" + (f" ({len(skipped_axes)} more skipped: no projections.json)"
                                   if skipped_axes else ""))
     for i, job in enumerate(jobs):
@@ -1961,8 +2056,12 @@ def dry_run_report(jobs: List[AxisJob], runs: List[ModelRun], skipped_axes: List
         todo = [job for job in jobs if not cell_done(job, model)]
         n_saved = sum(saved_answers(job, model) for job in todo)
         n_calls = sum(len(job.entities) for job in todo) - n_saved
+        per_call = BATCHING["n"]
+        if per_call > 1:
+            n_calls = sum(math.ceil((len(job.entities) - saved_answers(job, model)) / per_call) for job in todo)
         rate_in, rate_out = price_for_model(tt.price_key(model, choice.transport))
-        est = n_calls * (EST_IN_PER_ENTITY * rate_in + EST_OUT_PER_ENTITY * rate_out) / 1e6
+        est = n_calls * ((EST_IN_PER_ENTITY + 150 * (per_call - 1)) * rate_in
+                         + EST_OUT_PER_ENTITY * per_call * rate_out) / 1e6
         total += est
         print(f"{model:22s} provider={provider_for_model(model):9s} transport={choice.transport}"
               f"{' (probe)' if choice.probe else '':8s} rate=${rate_in:.3f}/${rate_out:.3f} per 1M  "
@@ -1982,8 +2081,20 @@ def dry_run_report(jobs: List[AxisJob], runs: List[ModelRun], skipped_axes: List
 async def main_async(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    global CELL_LABEL
+    global CELL_LABEL, RUBRIC
     CELL_LABEL = args.cell_label or ""
+    RUBRIC = jr.get(args.rubric)
+    BATCHING["n"], BATCHING["seed"] = max(1, args.entities_per_call), args.shuffle_seed
+    if args.entities_per_call > 1:
+        if RUBRIC.build_batch is None:
+            parser.error(f"--entities_per_call needs a rubric with a batch form (b5, b10), not {args.rubric}")
+        if args.transport not in ("flex", "realtime"):
+            parser.error("--entities_per_call runs live only: --transport flex or realtime")
+        if not CELL_LABEL:
+            parser.error("--entities_per_call needs a --cell_label (e.g. @b5s1)")
+    if args.rubric != "v3" and not CELL_LABEL:
+        parser.error(f"--rubric {args.rubric} needs a --cell_label (e.g. @{args.rubric}), so its cells do not "
+                     f"mix with the v3 cells")
     if CELL_LABEL and not re.fullmatch(r"[@A-Za-z0-9._-]+", CELL_LABEL):
         parser.error(f"--cell_label {CELL_LABEL!r}: letters, digits and @ . _ - only")
     jobs = build_jobs(args, parser)
@@ -2060,7 +2171,9 @@ async def main_async(argv: Optional[Sequence[str]] = None) -> int:
                      max_tokens=args.max_tokens, requests_per_second=args.requests_per_second,
                      budget_usd=args.budget_usd, batch_poll_seconds=args.batch_poll_seconds,
                      batch_fallback_max=args.batch_fallback_max, slots=args.slots, limit=args.limit,
-                     max_in_flight=max(1, args.max_in_flight), stall_s=max(0.0, args.stall_minutes) * 60)
+                     max_in_flight=max(1, args.max_in_flight), stall_s=max(0.0, args.stall_minutes) * 60,
+                     batch_chunk_requests=max(1, args.batch_chunk_requests),
+                     entities_per_call=max(1, args.entities_per_call), shuffle_seed=args.shuffle_seed)
     global STALL_RESTARTS
     STALL_RESTARTS = max(0, args.stall_restarts)
     if os.environ.get(RESTART_ENV):

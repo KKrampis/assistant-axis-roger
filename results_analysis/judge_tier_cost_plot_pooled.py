@@ -44,6 +44,7 @@ Usage:
 
 import argparse
 import json
+import re
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -386,18 +387,53 @@ UNLABELED_SETTINGS = {"claude-opus-5": "effort low", "claude-sonnet-5": "effort 
                       "gpt-5.6-sol": "default reasoning"}
 
 
+#: Further label tokens (labels stack: ``gpt-5.6-luna@none@c2``): rubric variants of
+#: judge_tier_rubrics.py and repeat runs.
+LABEL_TOKEN_TEXT = {"v3fix": "rubric v3fix", "rep2": "repeat run"}
+
+
+def _label_text(token: str) -> str:
+    if f"@{token}" in CELL_LABEL_TEXT:
+        return CELL_LABEL_TEXT[f"@{token}"]
+    if token in LABEL_TOKEN_TEXT:
+        return LABEL_TOKEN_TEXT[token]
+    if re.fullmatch(r"c\d+", token):
+        return f"rubric {token}"
+    m = re.fullmatch(r"b(\d+)x(\d+)", token)        # b10x2: batched rubric b10, two shuffles averaged
+    if m:
+        return f"batched rubric b{m.group(1)}, {m.group(2)} shuffles averaged"
+    m = re.fullmatch(r"b(\d+)s(\d+)", token)        # b10s1: batched rubric b10, shuffle seed 1
+    if m:
+        return f"batched rubric b{m.group(1)}, shuffle {m.group(2)}"
+    return f"@{token}"
+
+
 def display_name(cell: str) -> str:
     """A cell directory name as plots show it: ``gpt-5.6-luna@none`` ->
-    ``gpt-5.6-luna (no reasoning)``, ``gpt-4.1-mini`` -> ``gpt-4.1-mini
-    (retires 2027-01-14)``; other names unchanged."""
-    model, sep, label = cell.partition("@")
-    if sep:
-        notes = [CELL_LABEL_TEXT.get(f"@{label}", f"@{label}")]
+    ``gpt-5.6-luna (no reasoning)``, ``gpt-5.6-luna@none@c2`` -> ``gpt-5.6-luna
+    (no reasoning, rubric c2)``, ``gpt-4.1-mini`` -> ``gpt-4.1-mini (retires
+    2027-01-14)``; other names unchanged."""
+    model, *labels = cell.split("@")
+    if labels:
+        notes = [_label_text(t) for t in labels]
     else:
         notes = [UNLABELED_SETTINGS[model]] if model in UNLABELED_SETTINGS else []
     if model in MODEL_NOTES:
         notes.append(MODEL_NOTES[model])
     return f"{model} ({', '.join(notes)})" if notes else model
+
+
+def keep_models(per_model: Dict[str, Any], names: Sequence[str]) -> List[str]:
+    """Keep only the cells named in ``names`` (--include_models); returns the names removed."""
+    if not names:
+        return []
+    for m in names:
+        if m not in per_model:
+            print(f"  NOTE: --include_models {m}: no such cell", file=sys.stderr)
+    dropped = [m for m in per_model if m not in names]
+    for m in dropped:
+        del per_model[m]
+    return dropped
 
 
 def drop_models(per_model: Dict[str, Any], names: Sequence[str]) -> List[str]:
@@ -489,7 +525,7 @@ PRICE_BASIS_LABEL = {
 
 def plot(agg: Dict[str, dict], slot: int, n_total_axes: int, output_path: Path,
          excluded: Optional[Dict[str, dict]] = None, price_basis: str = "list",
-         rho_note: str = "", left_out: Sequence[str] = ()) -> None:
+         rho_note: str = "", left_out: Sequence[str] = (), links: Sequence[Tuple[str, str]] = ()) -> None:
     fig, ax = plt.subplots(figsize=(11, 8))
 
     model_list = sorted(agg.items(), key=lambda kv: kv[1]["mean_cost"])
@@ -534,12 +570,21 @@ def plot(agg: Dict[str, dict], slot: int, n_total_axes: int, output_path: Path,
         pts.append((cost, quality))
         labels.append(f"{display_name(model)}\nρ={d['mean_rho']:.3f}  {price}/axis{cost_note}")
         bold.append(is_pareto)
+    # Arrows between named cells (--links): a judge's old-rubric point to its new-rubric point.
+    pos = {model: (costs[i], qualities[i]) for i, (model, _) in enumerate(model_list)}
+    for a, b in links:
+        if a in pos and b in pos:
+            ax.annotate("", xy=pos[b], xytext=pos[a], zorder=3,
+                        arrowprops=dict(arrowstyle="->", color="#555555", lw=1.1, alpha=0.75,
+                                        shrinkA=9, shrinkB=9))
+        else:
+            print(f"  NOTE: --links {a}:{b}: not both plotted", file=sys.stderr)
     fig.tight_layout()
     place_labels(ax, pts, labels, bold, fontsize=9)
 
     ax.set_xlabel(f"Mean cost per axis (USD at {PRICE_BASIS_LABEL[price_basis]}, log scale; descriptions mode)")
     ax.set_ylabel("Mean quality = 1 / (1 − ρ̄)")
-    title = (f"Pooled judge-tier Pareto: {n_total_axes} axes, slot {slot}  "
+    title = (f"Judge-tier Pareto, DESCRIPTION judging: {n_total_axes} axes, slot {slot}  "
              f"[◆ = Pareto-optimal (bold label), ● = dominated]")
     if price_basis == "list":
         title += "\nCost at real-time list price; Flex and Batch are half price for every judge here"
@@ -568,6 +613,9 @@ def plot(agg: Dict[str, dict], slot: int, n_total_axes: int, output_path: Path,
         plt.Line2D([0], [0], linestyle="--", color="black", alpha=0.5,
                    label="Pareto frontier"),
     ]
+    if links:
+        provider_handles.append(plt.Line2D([0], [0], color="#555555", lw=1.1, alpha=0.75,
+                                           label="same judge: old rubric → new rubric"))
     # Room for the labels of the lowest and highest points (a label pushed down by
     # the collision rule used to land on the x-axis title), and the legend in the
     # corner a cost/quality frontier leaves empty (high cost, high quality is
@@ -576,7 +624,7 @@ def plot(agg: Dict[str, dict], slot: int, n_total_axes: int, output_path: Path,
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=150, bbox_inches="tight",
                 metadata=png_metadata(
-                    title=f"Pooled judge-tier Pareto ({n_total_axes} axes, slot {slot})",
+                    title=f"Judge-tier Pareto, description judging ({n_total_axes} axes, slot {slot})",
                     author="Claude",
                     source_text=Path(__file__).read_text(),
                 ))
@@ -626,12 +674,22 @@ def main() -> None:
     parser.add_argument("--robustness_variant", type=str, default="s6_l25_raw",
                         help="Variant key in --robustness_json (default s6_l25_raw: slot 6, layer 25, raw, "
                              "the cells' own projection).")
+    parser.add_argument("--include_models", nargs="+", default=[], metavar="CELL",
+                        help="Plot only these cell directory names (an allow-list; applied before --exclude_models).")
     parser.add_argument("--exclude_models", nargs="+", default=[], metavar="CELL",
                         help="Cell directory names to leave out, e.g. a run superseded by one under "
                              "consistent settings (claude-haiku-4-5, T=1, beside claude-haiku-4-5@t0); named in "
                              "the title.")
+    parser.add_argument("--links", nargs="+", default=[], metavar="OLD:NEW",
+                        help="Pairs of cell names joined by an arrow, e.g. gpt-6-luna:gpt-6-luna@c5 (a judge's "
+                             "old-rubric point to its new-rubric point).")
     parser.add_argument("--output", type=str, required=True)
     args = parser.parse_args()
+    links = []
+    for item in args.links:
+        if item.count(":") != 1:
+            parser.error(f"--links {item!r}: expected OLD:NEW")
+        links.append(tuple(item.split(":")))
 
     if args.experiments_dir:
         exp_dir = Path(args.experiments_dir)
@@ -669,6 +727,7 @@ def main() -> None:
             for model, entries in legacy_data.items():
                 per_model[model].extend(entries)
 
+    keep_models(per_model, args.include_models)
     left_out = drop_models(per_model, args.exclude_models)
     # Coverage is judged on the cells themselves: the robustness JSON holds only the models it compared.
     n_axes_raw = {m: len(v) for m, v in per_model.items() if v}
@@ -708,7 +767,7 @@ def main() -> None:
     rho_note = (f"rho from {Path(args.robustness_json).name}, variant {args.robustness_variant} "
                 f"(collision names dropped on bare-keyed axes)") if args.robustness_json else ""
     plot(agg, args.slot, n_total, Path(args.output), excluded=excluded, price_basis=args.price_basis,
-         rho_note=rho_note, left_out=left_out)
+         rho_note=rho_note, left_out=left_out, links=links)
 
 
 if __name__ == "__main__":

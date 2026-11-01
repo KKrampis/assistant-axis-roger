@@ -1,0 +1,33 @@
+Mean rho, filtered -> unfiltered, by variant (rows: default ranking on filtered vectors)
+judge                         s0_l25_raw   s0_l25_softK2   s0_l25_shear3      s0_l49_raw   s0_l49_softK2   s0_l49_shear3      s6_l25_raw   s6_l25_softK2   s6_l25_shear3      s6_l49_raw   s6_l49_softK2   s6_l49_shear3
+claude-opus-5             0.467>0.472  0.576>0.576  0.549>0.545  0.543>0.544  0.592>0.591  0.552>0.548  0.622>0.623  0.624>0.625  0.623>0.620  0.560>0.558  0.589>0.584  0.584>0.579
+gpt-4.1-mini              0.471>0.476  0.560>0.563  0.530>0.527  0.539>0.541  0.579>0.581  0.525>0.523  0.605>0.606  0.606>0.606  0.617>0.615  0.547>0.544  0.566>0.561  0.568>0.561
+claude-haiku-4-5@t0       0.434>0.436  0.520>0.521  0.499>0.495  0.493>0.494  0.534>0.534  0.491>0.489  0.561>0.561  0.560>0.560  0.564>0.562  0.511>0.508  0.526>0.521  0.529>0.523
+claude-sonnet-5           0.415>0.421  0.514>0.514  0.493>0.489  0.483>0.485  0.524>0.523  0.497>0.493  0.551>0.552  0.553>0.553  0.554>0.553  0.494>0.493  0.523>0.520  0.522>0.518
+gpt-5.6-terra@none        0.417>0.421  0.506>0.507  0.491>0.486  0.481>0.481  0.517>0.516  0.494>0.489  0.550>0.551  0.543>0.544  0.554>0.552  0.493>0.490  0.510>0.506  0.523>0.518
+gpt-5.6-luna@none         0.416>0.420  0.505>0.505  0.487>0.482  0.478>0.479  0.515>0.514  0.487>0.482  0.547>0.548  0.544>0.545  0.550>0.549  0.494>0.491  0.511>0.508  0.518>0.513
+claude-haiku-5-5          0.416>0.420  0.507>0.508  0.485>0.482  0.478>0.480  0.518>0.518  0.488>0.484  0.544>0.545  0.540>0.541  0.547>0.546  0.494>0.493  0.510>0.507  0.518>0.514
+gpt-5.4-mini              0.402>0.406  0.475>0.477  0.453>0.450  0.457>0.458  0.485>0.485  0.452>0.450  0.514>0.515  0.507>0.508  0.520>0.519  0.468>0.466  0.478>0.474  0.491>0.486
+gpt-6-luna                0.365>0.367  0.446>0.445  0.427>0.423  0.422>0.421  0.453>0.452  0.430>0.425  0.478>0.478  0.475>0.476  0.480>0.479  0.432>0.430  0.449>0.446  0.457>0.454
+
+Default ranking, unfiltered: ['claude-opus-5', 'gpt-4.1-mini', 'claude-haiku-4-5@t0', 'claude-sonnet-5', 'gpt-5.6-terra@none', 'gpt-5.6-luna@none', 'claude-haiku-5-5', 'gpt-5.4-mini', 'gpt-6-luna']
+Frontier counts, unfiltered: {'claude-haiku-4-5@t0': 0, 'claude-haiku-5-5': 12, 'claude-opus-5': 11, 'claude-sonnet-5': 0, 'gpt-4.1-mini': 12, 'gpt-5.4-mini': 0, 'gpt-5.6-luna@none': 5, 'gpt-5.6-terra@none': 0, 'gpt-6-luna': 12}
+Bootstrap unfiltered: P(claude-opus-5 ahead of gpt-4.1-mini) default 0.994, range 0.360-1.000
+
+gpt-4.1-mini's lead over the best judge other than Opus, filtered -> unfiltered:
+  s0_l25_raw +0.037>+0.039, s0_l25_softK2 +0.040>+0.042, s0_l25_shear3 +0.030>+0.032, s0_l49_raw +0.046>+0.048, s0_l49_softK2 +0.045>+0.047, s0_l49_shear3 +0.028>+0.030, s6_l25_raw +0.045>+0.045, s6_l25_softK2 +0.047>+0.046, s6_l25_shear3 +0.053>+0.053, s6_l49_raw +0.036>+0.036, s6_l49_softK2 +0.041>+0.040, s6_l49_shear3 +0.039>+0.038
+
+Axis direction shift (slot 6, layer 25): cosine(filtered, unfiltered) of pos - neg
+  median 0.9972, min 0.9192; axes below 0.99: 12, below 0.95: 3
+  most-moved axes: cosine | d rho gpt-4.1-mini | mean d rho of the other judges (excl. Opus)
+  dependable_vs_undependable               0.9192  +0.026  +0.027
+  dominant_vs_submissive                   0.9363  +0.039  +0.033
+  harmless_vs_harmful                      0.9500  +0.000  +0.000
+  truthful_vs_deceitful                    0.9519  -0.010  -0.011
+  fragile_vs_resilient                     0.9589  +0.003  +0.015
+  benign_vs_malicious                      0.9760  -0.009  -0.009
+  honest_vs_dishonest                      0.9801  +0.006  +0.003
+  aligned_artificial_intelligence_vs_paperclip_maximizer 0.9804  -0.011  -0.008
+  curious_vs_incurious                     0.9813  +0.005  +0.001
+  careless_vs_conscientious                0.9836  +0.012  +0.014
+  correlation across axes of (1 - cosine) with gpt-4.1-mini's relative change: -0.012
