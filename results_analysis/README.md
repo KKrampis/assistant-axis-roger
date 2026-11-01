@@ -2727,7 +2727,33 @@ default `roger/axis_judge_experiments`). An axis whose
 modes, so a rerun judges only what is missing. The dry run prints each
 axis's entity count and, per model, the transport, the number of calls and
 the estimated cost at that transport's price (coarse token model: 470 in /
-80 out per entity).
+80 out per entity), less the answers saved by earlier runs.
+
+**Saved answers, the in-flight limit and the stall restart** (2026-11-01,
+after a Flex run for four models held nine hours of answers only in memory
+and never finished; the cause was every request handed to the HTTP client
+at once, whose connection pool then spent a full core on bookkeeping):
+
+- Every billed live or Flex answer is appended, as it arrives, to the cell's
+  `answers.partial.jsonl`: a header (model, cell label, rubric version,
+  request settings, `max_tokens`), then one line per answer with the entity,
+  the reply text, whether it was cut at the cap, its charges and a digest of
+  the exact prompt.  A rerun by any transport, batch included, takes every
+  saved answer to the same prompt instead of asking again (its charges go
+  into the cell's `usage.json`, not into the run's `--budget_usd`), and
+  refuses a log written under other settings (exit 1, naming the file and
+  the difference).  A call that failed without a charge is not saved and is
+  asked again.  When the cell is written the log is kept as
+  `answers.jsonl.gz` and removed.  So a run can be stopped at any moment and
+  rerun, losing at most the requests in flight.
+- Live and Flex requests go axis by axis, at most `--max_in_flight` (default
+  200) per model at a time, so cells complete as the run goes.
+- A progress line per model every five minutes: judged so far this run,
+  answers resumed, in flight, Flex fallbacks, cells written, cost.
+- No answer for `--stall_minutes` (default 30) while live or Flex requests
+  remain: the run stops and starts itself again with the same arguments
+  (`os.execv`, same process and log), up to `--stall_restarts` (default 3)
+  times; exit status 3 when none is left.  Batch waits do not count.
 
 **Transports** (`--transport`, default `auto`; 2026-11-01). The pieces are
 copied from the main checkout's pipeline step 3:
@@ -2739,7 +2765,7 @@ capability table, Flex retry-then-fallback loop) and the two batch runners
 
 | transport | how | usage key | chosen by `auto` for |
 |---|---|---|---|
-| `flex` | OpenAI Flex processing: all requests for all axes at once through the rate limiter (`--requests_per_second`, default 10), client timeout 900 s and 8 retries; a request Flex keeps failing is retried every 30 s for 10 minutes, then sent once to the standard tier | `<model>:flex` (batch price); fallbacks `<model>` | OpenAI models `MODEL_CAPABILITIES` lists as taking Flex (gpt-5.6-luna); untested OpenAI models with a **probe**: the first request alone, and an HTTP 400 refusing the service tier switches the model to batch for the run (that request goes into the batch) |
+| `flex` | OpenAI Flex processing through the rate limiter (`--requests_per_second`, default 10), at most `--max_in_flight` in flight; a request Flex keeps failing is retried every 30 s until 10 minutes after it was first sent, then sent once to the standard tier.  Each Flex attempt goes with no SDK retries and a timeout of the time left (at least 60 s), so the 10 minutes hold; before 2026-11-01 the client's 900 s timeout and 8 retries could hold a request for over two hours | `<model>:flex` (batch price); fallbacks `<model>` | OpenAI models `MODEL_CAPABILITIES` lists as taking Flex (gpt-5.6-luna); untested OpenAI models with a **probe**: the first request alone, and an HTTP 400 refusing the service tier switches the model to batch for the run (that request goes into the batch) |
 | `batch` | OpenAI Batch API or Anthropic Message Batches: one submission per model for all the axes being run, custom ids `a<axis index>\|<entity>`; each cell written as soon as its axis is complete; requests a batch never answered sent in real time on the standard tier (up to `--batch_fallback_max`, default 2000) | `<model>:batch` (half price); remainder `<model>` | Anthropic models; OpenAI models listed as refusing Flex (gpt-4.1-mini) |
 | `realtime` | every request in real time through the rate limiter (the behaviour before 2026-11-01) | `<model>` | never (explicit override) |
 

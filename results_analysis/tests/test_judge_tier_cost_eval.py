@@ -1028,3 +1028,226 @@ def test_repair_dry_run_makes_no_calls(world, monkeypatch, capsys):
     assert re.search(r"est\. cost \$0\.000\d", out) and "no judge calls made" in out
     with pytest.raises(SystemExit):
         _run(world, "claude-haiku-5-5", extra=["--repair_truncated", "--limit", "3", "--dry_run"])
+
+
+# ---------------------------------------------------------------------------
+# Saved answers, the in-flight limit, the stall restart (2026-11-01)
+# ---------------------------------------------------------------------------
+
+def _log(world, axis_dir, model):
+    return world.exp / f"{axis_dir}_tier_eval" / model / ev.ANSWERS_PARTIAL
+
+
+def _stop_after_one(world, monkeypatch, model="gpt-4.1-mini", extra=()):
+    """A first run stopped by the budget after exactly one answer (a run killed early)."""
+    std = FakeOpenAI(prompt_tokens=1_000_000, completion_tokens=0)
+    _openai(monkeypatch, std=std)
+    assert _run(world, model, extra=["--transport", "realtime", "--budget_usd", "0", "--max_in_flight", "1",
+                                     *extra]) == 2
+    assert len(std.calls) == 1
+    return std
+
+
+def test_a_rerun_resumes_the_saved_answers(world, monkeypatch, capsys):
+    _stop_after_one(world, monkeypatch)
+    log = _log(world, "alpha_vs_beta", "gpt-4.1-mini")
+    lines = [json.loads(x) for x in log.read_text().splitlines()]
+    assert lines[0]["kind"] == "header" and lines[0]["max_tokens"] == ev.DEFAULT_MAX_TOKENS
+    assert [x["name"] for x in lines[1:]] == [ENTITIES[0]]
+    assert lines[1]["charges"] == [["gpt-4.1-mini", 1_000_000, 0]] and len(lines[1]["prompt"]) == 16
+
+    std = FakeOpenAI(prompt_tokens=1_000_000, completion_tokens=0)
+    _openai(monkeypatch, std=std)
+    assert _run(world, "gpt-4.1-mini", extra=["--transport", "realtime"]) == 0
+    assert len(std.calls) == 2 * len(ENTITIES) - 1                # the saved answer is not asked again
+    scores, usage, d = _cell(world, "alpha_vs_beta", "gpt-4.1-mini")
+    assert scores["result"] == {e: SCORES[e] for e in ENTITIES}
+    assert usage["n_calls"] == len(ENTITIES)                       # the first run's charge included
+    assert not log.exists()
+    import gzip
+    archived = [json.loads(x) for x in gzip.decompress((d / ev.ANSWERS_ARCHIVE).read_bytes()).splitlines()]
+    assert sorted(x["name"] for x in archived if x["kind"] == "answer") == ENTITIES
+    assert "resumed 1" in capsys.readouterr().out
+
+
+def test_a_log_from_other_settings_is_refused(world, monkeypatch, caplog):
+    _stop_after_one(world, monkeypatch)
+    std = FakeOpenAI()
+    _openai(monkeypatch, std=std)
+    assert _run(world, "gpt-4.1-mini", extra=["--transport", "realtime", "--max_tokens", "250"]) == 1
+    assert not std.calls
+    assert "max_tokens: 300 there, 250 now" in caplog.text
+
+
+def test_an_answer_to_another_prompt_is_asked_again(world, monkeypatch, caplog):
+    _stop_after_one(world, monkeypatch)
+    _describe(world.data, "traits", ENTITIES[0])
+    (world.data / "traits" / "instructions" / f"{ENTITIES[0]}.json").write_text(
+        json.dumps({"description": "Rewritten since."}))
+    std = FakeOpenAI()
+    _openai(monkeypatch, std=std)
+    assert _run(world, "gpt-4.1-mini", extra=["--transport", "realtime"]) == 0
+    assert len(std.calls) == 2 * len(ENTITIES)
+    assert "1 saved answers replied to another prompt" in caplog.text
+
+
+def test_a_torn_last_line_is_skipped_and_not_glued_to_the_next(world, monkeypatch):
+    _stop_after_one(world, monkeypatch)
+    log = _log(world, "alpha_vs_beta", "gpt-4.1-mini")
+    with open(log, "a") as f:
+        f.write('{"kind": "answer", "name": "bo')                   # a run killed mid-write
+    std = FakeOpenAI()
+    calls = {"n": 0}
+    real = std._create
+
+    async def stop_after_two(**kw):                                 # the second run stops too
+        calls["n"] += 1
+        if calls["n"] > 2:
+            raise HTTPError(429, "You have no credits remaining", code="credit_balance_exhausted")
+        return await real(**kw)
+    std.chat.completions.create = stop_after_two
+    _openai(monkeypatch, std=std)
+    assert _run(world, "gpt-4.1-mini", extra=["--transport", "realtime", "--max_in_flight", "1"]) == 1
+    header, answers = ev.read_answer_log(log)
+    assert header is not None and sorted(answers) == sorted(ENTITIES[:3])
+
+
+def test_batch_takes_the_saved_answers(world, monkeypatch):
+    _stop_after_one(world, monkeypatch)
+    client = FakeOpenAI()
+    _openai(monkeypatch, std=client)
+    assert _run(world, "gpt-4.1-mini", extra=["--transport", "batch"]) == 0
+    requested = [x["custom_id"] for x in client.batch_lines(0)]
+    assert len(requested) == 2 * len(ENTITIES) - 1 and f"a0|{ENTITIES[0]}" not in requested
+    scores, usage, d = _cell(world, "alpha_vs_beta", "gpt-4.1-mini")
+    assert len(scores["result"]) == len(ENTITIES) and usage["n_calls"] == len(ENTITIES)
+    assert not (d / ev.ANSWERS_PARTIAL).exists() and (d / ev.ANSWERS_ARCHIVE).exists()
+
+
+def test_dry_run_counts_the_saved_answers(world, monkeypatch, capsys):
+    _stop_after_one(world, monkeypatch)
+    capsys.readouterr()
+    assert _run(world, "gpt-4.1-mini", extra=["--transport", "realtime", "--dry_run"]) == 0
+    out = capsys.readouterr().out
+    assert f"~{2 * len(ENTITIES) - 1:,} calls" in out and "1 answers saved by earlier runs" in out
+
+
+class SlowOpenAI(FakeOpenAI):
+    """Each reply takes a moment; counts the requests in flight at once."""
+
+    def __init__(self, delay=0.01, **kw):
+        super().__init__(**kw)
+        self.delay, self.now, self.peak = delay, 0, 0
+
+    async def _create(self, **kw):
+        self.now += 1
+        self.peak = max(self.peak, self.now)
+        try:
+            await asyncio.sleep(self.delay)
+            return await super()._create(**kw)
+        finally:
+            self.now -= 1
+
+
+def test_at_most_max_in_flight_requests(world, monkeypatch):
+    slow = SlowOpenAI()
+    _openai(monkeypatch, std=slow)
+    assert _run(world, "gpt-4.1-mini", extra=["--transport", "realtime", "--max_in_flight", "3"]) == 0
+    assert slow.peak == 3 and len(slow.calls) == 2 * len(ENTITIES)
+
+
+def test_flex_attempts_are_bounded_by_the_time_left(monkeypatch):
+    seen = []
+
+    class WithOptions:
+        def with_options(self, **kw):
+            seen.append(kw)
+            return self
+    t0 = time.monotonic()
+    tt.flex_attempt_client(WithOptions(), t0)
+    tt.flex_attempt_client(WithOptions(), t0 - 590)                  # ten seconds left: the minimum
+    assert seen[0]["max_retries"] == 0 and 599 <= seen[0]["timeout"] <= 600
+    assert seen[1]["timeout"] == tt.FLEX_MIN_ATTEMPT_S
+    bare = object()
+    assert tt.flex_attempt_client(bare, t0) is bare                  # a fake without with_options
+
+
+def test_flex_clock_starts_at_the_first_send(monkeypatch):
+    """Time spent waiting for the rate limiter does not count toward the fallback."""
+    monkeypatch.setattr(tt, "FLEX_RETRY_SLEEP_S", 0.0)
+    monkeypatch.setattr(tt, "FLEX_FALLBACK_AFTER_S", 0.2)
+
+    class SlowLimiter:
+        first = True
+
+        async def acquire(self):
+            if self.first:
+                self.first = False
+                await asyncio.sleep(0.3)                               # queued longer than the fallback
+
+    flex = FakeOpenAI(flex_error=ConnectionError("overloaded"), flex_fail_times=1)
+    std, stats = FakeOpenAI(), tt.CallStats()
+    text = asyncio.run(tt.call_openai(flex, "to score\n\n**calm**: x", "gpt-5.6-luna", 200, SlowLimiter(),
+                                      MultiModelUsage(), service_tier="flex", fallback_client=std, stats=stats))
+    assert text.endswith("SCORE: 2") and len(flex.calls) == 2 and not std.calls and stats.flex_fallbacks == 0
+
+
+class HangingOpenAI(FakeOpenAI):
+    """Answers the first ``answer`` requests, then never again (a stuck client)."""
+
+    def __init__(self, answer, **kw):
+        super().__init__(**kw)
+        self.answer = answer
+
+    async def _create(self, **kw):
+        if len(self.calls) >= self.answer:
+            self.calls.append(kw)
+            await asyncio.sleep(3600)
+        return await super()._create(**kw)
+
+
+def test_a_stall_stops_the_run_with_the_answers_saved(world, monkeypatch, caplog):
+    stuck = HangingOpenAI(answer=2)
+    _openai(monkeypatch, std=stuck)
+    t0 = time.monotonic()
+    code = _run(world, "gpt-4.1-mini", extra=["--transport", "realtime", "--max_in_flight", "1",
+                                             "--stall_minutes", "0.005", "--stall_restarts", "0"])
+    assert code == ev.EXIT_STALLED and time.monotonic() - t0 < 30
+    _, answers = ev.read_answer_log(_log(world, "alpha_vs_beta", "gpt-4.1-mini"))
+    assert sorted(answers) == sorted(ENTITIES[:2])
+    assert "no answer for 0.0 min" in caplog.text
+
+    std = FakeOpenAI()                                               # the restart finishes the job
+    _openai(monkeypatch, std=std)
+    assert _run(world, "gpt-4.1-mini", extra=["--transport", "realtime"]) == 0
+    assert len(std.calls) == 2 * len(ENTITIES) - 2
+
+
+def test_a_batch_wait_is_not_a_stall(world, monkeypatch):
+    monkeypatch.setattr(AnthropicBatchRunner, "poll_seconds", 0, raising=False)
+    client = FakeAnthropic()
+    monkeypatch.setattr(ev, "make_anthropic_client", lambda: client)
+    ctx = ev.RunContext(instructions_dir=world.data, batch_root=world.exp, max_tokens=300, requests_per_second=10,
+                        stall_s=0.01)
+    assert ctx.live_pending == 0           # nothing live: the watchdog never fires however long a batch takes
+
+
+def test_restart_after_a_stall(monkeypatch):
+    calls = []
+    monkeypatch.setattr(ev.os, "execv", lambda exe, argv: calls.append((exe, argv)))
+    monkeypatch.setattr(ev, "STALL_RESTARTS", 2)
+    monkeypatch.delenv(ev.RESTART_ENV, raising=False)
+    ev.restart_after_stall()
+    assert len(calls) == 1 and calls[0][1][1:] == ev.sys.argv and ev.os.environ[ev.RESTART_ENV] == "1"
+    ev.restart_after_stall()
+    assert len(calls) == 2 and ev.os.environ[ev.RESTART_ENV] == "2"
+    ev.restart_after_stall()                                         # no restart left
+    assert len(calls) == 2
+
+
+def test_progress_lines(world, monkeypatch, caplog):
+    monkeypatch.setattr(ev, "PROGRESS_EVERY_S", 0.01)
+    _openai(monkeypatch, std=SlowOpenAI(delay=0.02))
+    caplog.set_level("INFO")
+    assert _run(world, "gpt-4.1-mini", extra=["--transport", "realtime", "--max_in_flight", "1"]) == 0
+    assert re.search(r"\[gpt-4\.1-mini\] progress: \d+/10 judged this run; in flight [01]", caplog.text)

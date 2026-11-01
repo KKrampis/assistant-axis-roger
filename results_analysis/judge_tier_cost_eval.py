@@ -78,6 +78,23 @@ alone.
 Resume rule: an axis whose <output_dir>/<model>/usage.json exists is skipped
 for that model (in both modes), so a rerun only judges what is missing.
 
+Saved answers (2026-11-01, after a Flex run held nine hours of answers only in
+memory): every billed live or Flex answer is appended, as it arrives, to its
+cell's answers.partial.jsonl (a header with the model, cell label, rubric
+version, request settings and reply cap, then one line per answer: entity,
+reply text, cut at the cap or not, charges, a digest of the exact prompt).  A
+rerun, by any transport, takes every saved answer to the same prompt instead
+of asking again (and its charges into the cell's usage.json, not into this
+run's budget), and refuses a log written under other settings.  Calls that
+failed without a charge are not saved and are asked again.  When the cell is
+written, the log is kept compressed as answers.jsonl.gz and removed.  So a run
+can be stopped at any moment and rerun losing at most the requests in flight.
+
+Live and Flex calls go axis by axis, at most --max_in_flight (200) at a time; a
+progress line per model every five minutes; and when no answer arrives for
+--stall_minutes (30) while requests remain, the run stops and starts itself
+again (--stall_restarts, 3), resuming from the saved answers.
+
 Usage:
     # All 61 axes, one or more models, preview cost (zero API calls, nothing written):
     uv run python results_analysis/judge_tier_cost_eval.py \\
@@ -103,16 +120,19 @@ Usage:
 Drop --dry_run to actually run it.  scripts/run_tier_eval.sh wraps the
 axes-file form with the corpus check.  Each --judge_model may be repeated;
 models run concurrently.  Exit status: 0 done, 1 a model failed (or a key is
-missing), 2 --budget_usd stopped the run.
+missing), 2 --budget_usd stopped the run, 3 it stalled and no restart was left.
 """
 
 import argparse
 import asyncio
+import gzip
+import hashlib
 import json
 import logging
 import os
 import re
 import sys
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -134,7 +154,7 @@ from results_analysis import judge_tier_transport as tt  # noqa: E402
 from assistant_axis.judge import RateLimiter, provider_for_model, warn_if_low_parse_rate  # noqa: E402
 from assistant_axis.judge_pricing import BATCH_SUFFIX, MultiModelUsage, price_for_model  # noqa: E402
 from assistant_axis.entity_id import parse_entity_id  # noqa: E402
-from assistant_axis.atomic_io import atomic_write_text  # noqa: E402
+from assistant_axis.atomic_io import atomic_write_bytes, atomic_write_text  # noqa: E402
 from assistant_axis.openai_batch import OpenAIBatchRunner  # noqa: E402
 from assistant_axis.anthropic_batch import AnthropicBatchRunner  # noqa: E402
 
@@ -158,6 +178,28 @@ DEFAULT_BATCH_FALLBACK_MAX = 2000
 #: The judge's reply cap (--max_tokens); 200 until 2026-11-01 (Roger, 2026-11-01:
 #: "200 is clearly too low for safety").
 DEFAULT_MAX_TOKENS = 300
+#: Live and Flex calls: at most this many requests in flight per model
+#: (--max_in_flight).  Before 2026-11-01 every request of every axis was handed
+#: to the HTTP client at once; with 35,214 per model the client's connection
+#: pool spent all its time on bookkeeping (each event walks the whole queue
+#: against every connection), the process sat at 100% of a core for nine hours,
+#: and almost nothing was sent.
+DEFAULT_MAX_IN_FLIGHT = 200
+#: A progress line per model this often, while live or Flex requests remain.
+PROGRESS_EVERY_S = 300.0
+#: No answer for this long while live or Flex requests remain: stop and restart
+#: (--stall_minutes, --stall_restarts).  Every answer is on disk by then.
+DEFAULT_STALL_MINUTES = 30.0
+DEFAULT_STALL_RESTARTS = 3
+EXIT_STALLED = 3
+#: The environment variable that counts restarts after a stall across execs.
+RESTART_ENV = "JUDGE_TIER_EVAL_STALL_RESTARTS"
+#: Per-cell answer log (see "Saved answers" in the docstring).
+ANSWERS_PARTIAL = "answers.partial.jsonl"
+ANSWERS_ARCHIVE = "answers.jsonl.gz"
+CHECKPOINT_VERSION = 1
+#: Header fields an answer log must share with the run that resumes it.
+CHECKPOINT_KEYS = ("version", "judge_model", "cell_label", "rubric_version", "request_settings", "max_tokens")
 
 
 def load_pole_description(instructions_dir: Path, pair_type: str, name: str) -> str:
@@ -370,6 +412,9 @@ class ModelRun:
     cells_partial: int = 0
     cells_incomplete: int = 0
     left_for_rerun: int = 0
+    resumed: int = 0        # answers taken from the answer logs of earlier runs
+    to_judge: int = 0       # live or Flex requests this run set out to send
+    in_flight: int = 0
     error: Optional[BaseException] = None
 
     def __post_init__(self) -> None:
@@ -378,12 +423,16 @@ class ModelRun:
 
 
 class _Charge:
-    """Charges one call to several trackers (the cell's, the model's, the run's)."""
+    """Charges one call to several trackers (the cell's, the model's, the run's)
+    and keeps the charges, ``[key, prompt_tokens, completion_tokens]``, for the
+    answer log."""
 
     def __init__(self, *trackers: MultiModelUsage):
         self.trackers = trackers
+        self.charges: List[List[Any]] = []
 
     def charge(self, key: str, prompt_tokens: int, completion_tokens: int) -> None:
+        self.charges.append([key, int(prompt_tokens), int(completion_tokens)])
         for t in self.trackers:
             t.charge(key, prompt_tokens, completion_tokens)
 
@@ -401,6 +450,19 @@ class RunContext:
     limit: Optional[int] = None
     run_usage: MultiModelUsage = field(default_factory=MultiModelUsage)
     budget_hit: bool = False
+    max_in_flight: int = DEFAULT_MAX_IN_FLIGHT
+    stall_s: float = DEFAULT_STALL_MINUTES * 60
+    live_pending: int = 0           # live or Flex requests not yet finished, all models
+    last_progress: float = field(default_factory=time.monotonic)
+    stalled: bool = False
+
+    def add_pending(self, n: int) -> None:
+        if n > 0 and self.live_pending == 0:
+            self.last_progress = time.monotonic()   # the stall clock starts with the work
+        self.live_pending += n
+
+    def note_answer(self) -> None:
+        self.last_progress = time.monotonic()
 
     def over_budget(self) -> bool:
         if self.budget_usd is None or self.run_usage.total_cost_usd <= self.budget_usd:
@@ -454,8 +516,13 @@ def write_cell(cell: Cell, mrun: ModelRun, max_tokens: int) -> None:
         excluded_set=set(job.axis_spec.exclusions),
     )
     atomic_write_text(json.dumps(correlations, indent=2), d / "correlations.json", logger_obj=logger)
+    log = d / ANSWERS_PARTIAL
+    if log.exists():
+        # the raw replies stay, compressed; the log itself goes once usage.json is written
+        atomic_write_bytes(gzip.compress(log.read_bytes()), d / ANSWERS_ARCHIVE, logger_obj=logger)
     atomic_write_text(json.dumps(cell.usage.as_dict(), indent=2, sort_keys=True), d / "usage.json",
                       logger_obj=logger)
+    log.unlink(missing_ok=True)
     cell.written = True
     mrun.cells_written += 1
     logger.info(f"[{model}] {job.axis_dir}: scored {len(scores)}/{len(cell.expected)}"
@@ -487,6 +554,154 @@ def write_partial_cell(cell: Cell, mrun: ModelRun, max_tokens: int) -> None:
     mrun.cells_partial += 1
     logger.warning(f"[{model}] {job.axis_dir}: incomplete ({len(cell.scores)}/{len(cell.expected)} attempted); "
                    f"written as {d / 'scores_descriptions.partial.json'}, no usage.json")
+
+
+# ---------------------------------------------------------------------------
+# Saved answers: the per-cell answer log (2026-11-01)
+# ---------------------------------------------------------------------------
+
+class CheckpointMismatchError(RuntimeError):
+    """An answer log written under other settings than this run's."""
+
+
+def checkpoint_header(mrun: "ModelRun", max_tokens: int) -> Dict[str, Any]:
+    return {"kind": "header", "version": CHECKPOINT_VERSION, "judge_model": mrun.model, "cell_label": CELL_LABEL,
+            "rubric_version": RUBRIC_VERSION, "request_settings": mrun.settings, "max_tokens": max_tokens}
+
+
+def prompt_digest(prompt: str) -> str:
+    """Identifies the exact prompt an answer replied to (corpus text and rubric included)."""
+    return hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:16]
+
+
+def read_answer_log(path: Path) -> Tuple[Optional[Dict[str, Any]], Dict[str, Dict[str, Any]]]:
+    """``(header, answers by entity)`` of an answer log; an unreadable line (a
+    run stopped while writing it) is skipped, and a later answer for an entity
+    replaces an earlier one."""
+    header: Optional[Dict[str, Any]] = None
+    answers: Dict[str, Dict[str, Any]] = {}
+    if not path.exists():
+        return None, answers
+    with open(path, encoding="utf-8") as f:
+        for n, line in enumerate(f, 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except ValueError:
+                logger.warning(f"{path}:{n}: unreadable line skipped (a run stopped while writing it?)")
+                continue
+            if rec.get("kind") == "header":
+                header = header or rec
+            elif rec.get("kind") == "answer" and isinstance(rec.get("name"), str):
+                answers[rec["name"]] = rec
+    return header, answers
+
+
+def resume_cell(cell: Cell, mrun: "ModelRun", header: Dict[str, Any]) -> int:
+    """Fill ``cell`` from its answer log: every saved answer to the very prompt
+    this run would send, with its charges in the cell's usage (not this run's,
+    which the budget counts).  Entities already scored (batch results) are
+    left alone.  Returns the number taken."""
+    path = cell_dir(cell.job, mrun.model) / ANSWERS_PARTIAL
+    if not path.exists():
+        return 0
+    last = b"\n"
+    with open(path, "rb") as f:
+        if f.seek(0, os.SEEK_END):
+            f.seek(-1, os.SEEK_END)
+            last = f.read(1)
+    if last != b"\n":
+        with open(path, "a", encoding="utf-8") as f:
+            f.write("\n")   # a torn last line must not swallow the next answer
+    found, answers = read_answer_log(path)
+    if not answers:
+        return 0
+    if found is None:
+        raise CheckpointMismatchError(f"{path}: no header line, so its settings are unknown: move it aside to "
+                                      f"judge {cell.job.axis_dir} afresh")
+    diffs = {k: (found.get(k), header.get(k)) for k in CHECKPOINT_KEYS if found.get(k) != header.get(k)}
+    if diffs:
+        raise CheckpointMismatchError(
+            f"{path} was written under other settings than this run's ("
+            + "; ".join(f"{k}: {a!r} there, {b!r} now" for k, (a, b) in diffs.items())
+            + "): rerun with those settings to finish it, use another --cell_label, or move the file aside "
+              f"to judge {cell.job.axis_dir} afresh")
+    descs = {name: (etype, desc) for etype, name, desc in cell.job.entities}
+    taken = stale = 0
+    for name, rec in answers.items():
+        if name not in cell.expected or name in cell.scores:
+            continue
+        etype, desc = descs[name]
+        if rec.get("prompt") != prompt_digest(build_static_prompt(cell.job.axis_spec, etype, name, desc)):
+            stale += 1
+            continue
+        restore(cell, name, rec.get("reply"), bool(rec.get("truncated")))
+        for key, pt, ct in rec.get("charges") or []:
+            cell.usage.charge(key, pt, ct)
+        taken += 1
+    if stale:
+        logger.warning(f"{path}: {stale} saved answers replied to another prompt (corpus or rubric text "
+                       f"changed): judged again")
+    mrun.resumed += taken
+    return taken
+
+
+def restore(cell: Cell, name: str, text: Optional[str], truncated: bool) -> None:
+    """A saved answer back into its cell, scored as :func:`record` scores it."""
+    if truncated:
+        cell.scores[name] = None
+        cell.truncated.add(name)
+        return
+    cell.truncated.discard(name)
+    cell.scores[name] = parse_signed_score(text) if text else None
+
+
+def append_answer(cell: Cell, model: str, header: Dict[str, Any], name: str, reply: Any,
+                  charges: List[List[Any]], prompt: str) -> None:
+    """Save one billed answer to the cell's answer log as soon as it arrives
+    (the header first, when the log is new).  Calls that failed without a
+    charge are not saved, so a rerun asks them again."""
+    d = cell_dir(cell.job, model)
+    d.mkdir(parents=True, exist_ok=True)
+    path = d / ANSWERS_PARTIAL
+    truncated = isinstance(reply, tt.Truncated)
+    rec = {"kind": "answer", "name": name, "reply": reply.text if truncated else reply, "truncated": truncated,
+           "charges": charges, "prompt": prompt_digest(prompt),
+           "at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")}
+    lines = [] if path.exists() else [json.dumps(header, sort_keys=True)]
+    lines.append(json.dumps(rec, sort_keys=True))
+    with open(path, "a", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+        f.flush()
+
+
+def saved_answers(job: AxisJob, model: str) -> int:
+    """How many entities of ``job`` the cell's answer log holds an answer for
+    (for the dry run; the run itself also checks settings and prompts)."""
+    _, answers = read_answer_log(cell_dir(job, model) / ANSWERS_PARTIAL)
+    names = {name for _, name, _ in job.entities}
+    return sum(1 for name in answers if name in names)
+
+
+async def run_bounded(worker, items: Sequence[Any], limit: int) -> None:
+    """``await worker(item)`` for every item, at most ``limit`` at a time, in
+    order.  The first exception stops the rest and is raised as it is."""
+    if not items:
+        return
+    it = iter(items)
+
+    async def lane() -> None:
+        for item in it:   # a shared iterator: each lane takes the next item
+            await worker(item)
+
+    try:
+        async with asyncio.TaskGroup() as tg:
+            for _ in range(max(1, min(limit, len(items)))):
+                tg.create_task(lane())
+    except BaseExceptionGroup as eg:
+        raise eg.exceptions[0]
 
 
 # ---------------------------------------------------------------------------
@@ -528,9 +743,12 @@ def key_name(model: str) -> str:
 async def run_live(ctx: RunContext, mrun: ModelRun, todo: List[AxisJob], *, tier: Optional[str],
                    probe: bool = False) -> bool:
     """Judge every entity of ``todo`` in real time (``tier`` None) or on Flex,
-    all axes at once through the rate limiter, writing each cell as soon as
-    its axis is complete.  With ``probe``, the first request goes alone and a
-    service-tier refusal returns False before anything else is sent."""
+    axis by axis with at most ``ctx.max_in_flight`` requests in flight,
+    writing each cell as soon as its axis is complete.  Every billed answer is
+    saved to its cell's answer log as it arrives, and answers an earlier run
+    saved are taken from there instead of asked again.  With ``probe``, the
+    first request goes alone and a service-tier refusal returns False before
+    anything else is sent."""
     model = mrun.model
     rate_limiter = RateLimiter(ctx.requests_per_second)
     if provider_for_model(model) == "anthropic":
@@ -538,20 +756,34 @@ async def run_live(ctx: RunContext, mrun: ModelRun, todo: List[AxisJob], *, tier
     else:
         client = make_openai_client(tier)
         fallback = make_openai_client(None) if tier == "flex" else None
+    header = checkpoint_header(mrun, ctx.max_tokens)
     cells = {i: Cell(i, job, expected={name for _, name, _ in job.entities}) for i, job in enumerate(todo)}
-    items = [(i, etype, name, desc) for i, job in enumerate(todo) for etype, name, desc in job.entities]
+    for cell in cells.values():
+        resume_cell(cell, mrun, header)
+        if cell.complete and not cell.written:
+            write_cell(cell, mrun, ctx.max_tokens)
+    items = [(i, etype, name, desc) for i, job in enumerate(todo) for etype, name, desc in job.entities
+             if not cells[i].written and name not in cells[i].scores]
+    if mrun.resumed:
+        logger.info(f"[{model}] {mrun.resumed} answers taken from the answer logs of earlier runs; "
+                    f"{len(items)} requests left")
+    mrun.to_judge += len(items)
+    ctx.add_pending(len(items))
+    unfinished = len(items)
     fatal: List[BaseException] = []
 
     def gate() -> bool:
         return bool(fatal) or ctx.over_budget()
 
     async def one(item: Tuple[int, str, str, str], *, probing: bool = False) -> None:
+        nonlocal unfinished
         i, etype, name, desc = item
         cell = cells[i]
         prompt = build_static_prompt(cell.job.axis_spec, etype, name, desc)
+        charge = _Charge(cell.usage, mrun.usage, ctx.run_usage)
+        mrun.in_flight += 1
         try:
-            text = await tt.call_model(model, prompt, ctx.max_tokens, rate_limiter,
-                                       _Charge(cell.usage, mrun.usage, ctx.run_usage), client=client,
+            text = await tt.call_model(model, prompt, ctx.max_tokens, rate_limiter, charge, client=client,
                                        settings=mrun.settings, service_tier=tier, fallback_client=fallback,
                                        stats=mrun.stats, gate=gate)
         except tt.FlexRefusedError as e:
@@ -562,26 +794,36 @@ async def run_live(ctx: RunContext, mrun: ModelRun, todo: List[AxisJob], *, tier
         except tt.JudgeRequestError as e:
             fatal.append(e)
             return
+        finally:
+            mrun.in_flight -= 1
+            unfinished -= 1
+            ctx.live_pending -= 1
         if text is tt.SKIPPED:
             return
+        if charge.charges:
+            append_answer(cell, model, header, name, text, charge.charges, prompt)
         record(mrun, cell, name, text)
+        ctx.note_answer()
         if cell.complete and not cell.written:
             write_cell(cell, mrun, ctx.max_tokens)
 
-    if probe and items:
-        first, items = items[0], items[1:]
-        try:
-            await one(first, probing=True)
-        except tt.FlexRefusedError as e:
-            logger.warning(f"[{model}] probe: OpenAI refused Flex processing ({e}); judging {model} through "
-                           f"the Batch API for this run.  Add {model!r}: {{'flex': False}} to "
-                           f"MODEL_CAPABILITIES in results_analysis/judge_tier_transport.py")
-            return False
-        if not fatal:
-            mrun.transport_reason += "; the probe was answered on Flex"
-            logger.info(f"[{model}] probe: Flex accepted; add {model!r}: {{'flex': True}} to MODEL_CAPABILITIES "
-                        f"in results_analysis/judge_tier_transport.py")
-    await asyncio.gather(*(one(it) for it in items))
+    try:
+        if probe and items:
+            first, items = items[0], items[1:]
+            try:
+                await one(first, probing=True)
+            except tt.FlexRefusedError as e:
+                logger.warning(f"[{model}] probe: OpenAI refused Flex processing ({e}); judging {model} through "
+                               f"the Batch API for this run.  Add {model!r}: {{'flex': False}} to "
+                               f"MODEL_CAPABILITIES in results_analysis/judge_tier_transport.py")
+                return False
+            if not fatal:
+                mrun.transport_reason += "; the probe was answered on Flex"
+                logger.info(f"[{model}] probe: Flex accepted; add {model!r}: {{'flex': True}} to "
+                            f"MODEL_CAPABILITIES in results_analysis/judge_tier_transport.py")
+        await run_bounded(one, items, ctx.max_in_flight)
+    finally:
+        ctx.live_pending -= unfinished   # requests never sent (a refused probe, a cancelled run)
     if fatal:
         raise fatal[0]
     for cell in cells.values():
@@ -712,6 +954,7 @@ async def run_batch(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob]) -> Non
 
     cells: Dict[int, Cell] = {}
     dead: Set[int] = set()   # axes already done: results for them are dropped
+    header = checkpoint_header(mrun, ctx.max_tokens)
 
     def new_cell(idx: int, job: AxisJob) -> Cell:
         cell = Cell(idx, job, expected={name for _, name, _ in job.entities})
@@ -721,6 +964,9 @@ async def run_batch(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob]) -> Non
             cell.scores = {k: (None if v is None else int(v)) for k, v in data.get("scores", {}).items()}
             cell.truncated = set(data.get("truncated") or [])
             cell.usage = MultiModelUsage.from_dict(data.get("usage") or {})
+        # answers a live or Flex run saved are not asked again (they are not in collected/, and a
+        # result for the same entity from a batch already counts)
+        resume_cell(cell, mrun, header)
         return cell
 
     current: List[int] = []
@@ -839,21 +1085,43 @@ async def run_batch(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob]) -> Non
     if unanswered and len(unanswered) <= ctx.batch_fallback_max:
         logger.info(f"[{model}] judging {len(unanswered)} requests no batch answered in real time")
         rate_limiter = RateLimiter(ctx.requests_per_second)
+        remainder = sorted(unanswered.items())
+        mrun.to_judge += len(remainder)
+        ctx.add_pending(len(remainder))
+        unfinished = len(remainder)
 
-        async def one(cid: str, request: Dict[str, Any]) -> None:
+        async def one(entry: Tuple[str, Dict[str, Any]]) -> None:
+            nonlocal unfinished
+            cid, request = entry
             idx, name = split_custom_id(cid)
-            cell = cell_for(idx)
-            if cell is None or cell.written:
-                return
-            text = await tt.call_model(model, tt.prompt_of_request(request), ctx.max_tokens, rate_limiter,
-                                       _Charge(cell.usage, mrun.usage, ctx.run_usage), client=client,
-                                       settings=mrun.settings, stats=mrun.stats, gate=ctx.over_budget)
+            try:
+                cell = cell_for(idx)
+                if cell is None or cell.written or name in cell.scores:
+                    return
+                prompt = tt.prompt_of_request(request)
+                charge = _Charge(cell.usage, mrun.usage, ctx.run_usage)
+                mrun.in_flight += 1
+                try:
+                    text = await tt.call_model(model, prompt, ctx.max_tokens, rate_limiter, charge,
+                                               client=client, settings=mrun.settings, stats=mrun.stats,
+                                               gate=ctx.over_budget)
+                finally:
+                    mrun.in_flight -= 1
+            finally:
+                unfinished -= 1
+                ctx.live_pending -= 1
             if text is tt.SKIPPED:
                 return
+            if charge.charges:
+                append_answer(cell, model, header, name, text, charge.charges, prompt)
             record(mrun, cell, name, text)
+            ctx.note_answer()
             touched.add(idx)
 
-        await asyncio.gather(*(one(cid, req) for cid, req in sorted(unanswered.items())))
+        try:
+            await run_bounded(one, remainder, ctx.max_in_flight)
+        finally:
+            ctx.live_pending -= unfinished
         flush()
     elif unanswered:
         mrun.left_for_rerun += len(unanswered)
@@ -907,6 +1175,8 @@ def summarise(mrun: ModelRun) -> str:
     s = mrun.stats
     parts = [f"{mrun.model}: transport={mrun.transport}", f"parsed {mrun.parsed}/{mrun.attempted}",
              f"truncated {s.truncated}", f"cells written {mrun.cells_written}"]
+    if mrun.resumed:
+        parts.append(f"resumed {mrun.resumed}")
     if mrun.cells_partial:
         parts.append(f"partial {mrun.cells_partial}")
     if mrun.cells_incomplete:
@@ -919,6 +1189,55 @@ def summarise(mrun: ModelRun) -> str:
             parts.append(f"{label} {n}")
     parts.append(f"cost ${mrun.usage.total_cost_usd:.4f}")
     return "  ".join(parts)
+
+
+async def report_progress(ctx: RunContext, runs: List[ModelRun], every: float) -> None:
+    """A progress line per model with live or Flex work, every ``every`` seconds."""
+    while True:
+        await asyncio.sleep(every)
+        for m in runs:
+            if not m.to_judge:
+                continue
+            logger.info(f"[{m.model}] progress: {m.attempted}/{m.to_judge} judged this run"
+                        + (f" ({m.resumed} more from the answer logs)" if m.resumed else "")
+                        + f"; in flight {m.in_flight}; Flex fallbacks {m.stats.flex_fallbacks}; "
+                          f"cells written {m.cells_written}; this run's cost ${m.usage.total_cost_usd:.2f}")
+
+
+async def watch_for_stall(ctx: RunContext, work: "asyncio.Future[Any]") -> None:
+    """Cancel ``work`` when no answer has arrived for ``ctx.stall_s`` while live
+    or Flex requests remain (batch waits do not count).  Every answer is in an
+    answer log by then, so a restart loses nothing."""
+    while not work.done():
+        await asyncio.sleep(min(60.0, max(0.05, ctx.stall_s / 10)))
+        if ctx.live_pending > 0 and time.monotonic() - ctx.last_progress > ctx.stall_s:
+            ctx.stalled = True
+            logger.error(f"no answer for {ctx.stall_s / 60:.1f} min with {ctx.live_pending} requests still to "
+                         f"judge: stopping (every answer so far is saved in the cells' {ANSWERS_PARTIAL})")
+            work.cancel()
+            return
+
+
+#: --stall_restarts of this run; read by main() after a stall.
+STALL_RESTARTS = DEFAULT_STALL_RESTARTS
+
+
+def restart_after_stall() -> None:
+    """Start this script again with the same arguments (os.execv: same process,
+    same log), at most STALL_RESTARTS times in a row (counted in RESTART_ENV);
+    returns only when no restart is left."""
+    used = int(os.environ.get(RESTART_ENV) or 0)
+    if used >= STALL_RESTARTS:
+        logger.error(f"stalled after {used} restart(s) (--stall_restarts {STALL_RESTARTS}): giving up; a rerun "
+                     f"resumes from the saved answers")
+        return
+    os.environ[RESTART_ENV] = str(used + 1)
+    logger.warning(f"restarting after the stall ({used + 1} of {STALL_RESTARTS}); the saved answers are resumed")
+    for h in logging.getLogger().handlers:
+        h.flush()
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os.execv(sys.executable, [sys.executable, *sys.argv])
 
 
 # ---------------------------------------------------------------------------
@@ -1569,6 +1888,18 @@ def build_parser() -> argparse.ArgumentParser:
                              "so a rerun under other settings sits beside the earlier cells instead of "
                              "overwriting them or being skipped as done.")
     parser.add_argument("--requests_per_second", type=int, default=10)
+    parser.add_argument("--max_in_flight", type=int, default=DEFAULT_MAX_IN_FLIGHT,
+                        help=f"Live and Flex calls: at most this many requests in flight per model (default "
+                             f"{DEFAULT_MAX_IN_FLIGHT}), sent axis by axis.  Handing the HTTP client every request at "
+                             "once stalled a 35,000-request run for nine hours on 2026-11-01.")
+    parser.add_argument("--stall_minutes", type=float, default=DEFAULT_STALL_MINUTES,
+                        help=f"No answer for this many minutes while live or Flex requests remain (default "
+                             f"{DEFAULT_STALL_MINUTES:g}; batch waits do not count): stop, and restart up to "
+                             "--stall_restarts times; every answer is already saved, so nothing is lost.  0 turns "
+                             f"the check off.  Exit status {EXIT_STALLED} when no restart is left.")
+    parser.add_argument("--stall_restarts", type=int, default=DEFAULT_STALL_RESTARTS,
+                        help=f"Restarts after a stall before giving up (default {DEFAULT_STALL_RESTARTS}; 0 stops "
+                             f"at the first stall)")
     parser.add_argument("--budget_usd", type=float, default=None,
                         help="Real-time and Flex calls (a batch's real-time remainder included): stop issuing "
                              "new requests once this run's measured spend passes this.  A batch is submitted "
@@ -1628,7 +1959,8 @@ def dry_run_report(jobs: List[AxisJob], runs: List[ModelRun], skipped_axes: List
     for mrun in runs:
         model, choice = mrun.model, mrun.choice
         todo = [job for job in jobs if not cell_done(job, model)]
-        n_calls = sum(len(job.entities) for job in todo)
+        n_saved = sum(saved_answers(job, model) for job in todo)
+        n_calls = sum(len(job.entities) for job in todo) - n_saved
         rate_in, rate_out = price_for_model(tt.price_key(model, choice.transport))
         est = n_calls * (EST_IN_PER_ENTITY * rate_in + EST_OUT_PER_ENTITY * rate_out) / 1e6
         total += est
@@ -1636,6 +1968,8 @@ def dry_run_report(jobs: List[AxisJob], runs: List[ModelRun], skipped_axes: List
               f"{' (probe)' if choice.probe else '':8s} rate=${rate_in:.3f}/${rate_out:.3f} per 1M  "
               f"axes {len(todo)}/{len(jobs)}  ~{n_calls:,} calls  est.cost=${est:.2f}")
         print(f"{'':22s} why: {choice.reason}")
+        if n_saved:
+            print(f"{'':22s} {n_saved:,} answers saved by earlier runs are resumed (not counted above)")
         print(f"{'':22s} request settings: {json.dumps(mrun.settings)}")
         if choice.transport == "flex":
             print(f"{'':22s} (Flex at batch prices; a request sent to the standard tier after "
@@ -1725,11 +2059,30 @@ async def main_async(argv: Optional[Sequence[str]] = None) -> int:
                      batch_root=Path(args.experiments_dir) / BATCH_DIRNAME,
                      max_tokens=args.max_tokens, requests_per_second=args.requests_per_second,
                      budget_usd=args.budget_usd, batch_poll_seconds=args.batch_poll_seconds,
-                     batch_fallback_max=args.batch_fallback_max, slots=args.slots, limit=args.limit)
+                     batch_fallback_max=args.batch_fallback_max, slots=args.slots, limit=args.limit,
+                     max_in_flight=max(1, args.max_in_flight), stall_s=max(0.0, args.stall_minutes) * 60)
+    global STALL_RESTARTS
+    STALL_RESTARTS = max(0, args.stall_restarts)
+    if os.environ.get(RESTART_ENV):
+        logger.warning(f"restart {os.environ[RESTART_ENV]} of {STALL_RESTARTS} after a stall: resuming from the "
+                       f"saved answers")
     if args.budget_usd is not None and any(m.choice.transport == "batch" for m in runs):
         logger.info("--budget_usd does not stop a batch submission (it is submitted whole); it applies to "
                     "real-time and Flex calls, a batch's real-time remainder included")
-    results = await asyncio.gather(*(run_model(ctx, mrun, jobs) for mrun in runs), return_exceptions=True)
+    work = asyncio.ensure_future(asyncio.gather(*(run_model(ctx, mrun, jobs) for mrun in runs),
+                                                return_exceptions=True))
+    helpers = [asyncio.create_task(report_progress(ctx, runs, PROGRESS_EVERY_S))]
+    if ctx.stall_s > 0:
+        helpers.append(asyncio.create_task(watch_for_stall(ctx, work)))
+    try:
+        results = await work
+    except asyncio.CancelledError:
+        if not ctx.stalled:
+            raise
+        results = [None] * len(runs)
+    finally:
+        for h in helpers:
+            h.cancel()
     for mrun, res in zip(runs, results):
         if isinstance(res, BaseException):
             mrun.error = res
@@ -1742,6 +2095,8 @@ async def main_async(argv: Optional[Sequence[str]] = None) -> int:
         warn_if_low_parse_rate(label=f"judge_tier_cost_eval:{mrun.model}", n_ok=mrun.parsed,
                                n_total=mrun.attempted + mrun.left_for_rerun, logger_obj=logger)
     logger.info(ctx.run_usage.log_line())
+    if ctx.stalled:
+        return EXIT_STALLED
     if any(m.error for m in runs):
         return 1
     if ctx.budget_hit:
@@ -1750,7 +2105,10 @@ async def main_async(argv: Optional[Sequence[str]] = None) -> int:
 
 
 def main() -> None:
-    sys.exit(asyncio.run(main_async()))
+    code = asyncio.run(main_async())
+    if code == EXIT_STALLED:
+        restart_after_stall()   # returns only when no restart is left
+    sys.exit(code)
 
 
 if __name__ == "__main__":

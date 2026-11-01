@@ -312,6 +312,13 @@ FLEX_FALLBACK_AFTER_S = 600.0
 FLEX_RETRY_SLEEP_S = 30.0
 FLEX_TIMEOUT_S = 900.0
 FLEX_MAX_RETRIES = 8
+#: Since 2026-11-01 (the stuck Luna/Terra run) the ten minutes hold: the clock
+#: starts when a request is first sent (not when it was queued), and each Flex
+#: attempt goes out with no SDK retries and a timeout of the time left before
+#: the fallback, at least FLEX_MIN_ATTEMPT_S, so that one attempt can no
+#: longer hold a request for FLEX_TIMEOUT_S x (FLEX_MAX_RETRIES + 1), over two
+#: hours.  Between attempts the loop below sleeps FLEX_RETRY_SLEEP_S.
+FLEX_MIN_ATTEMPT_S = 60.0
 
 
 def usage_key(model: str, service_tier: Optional[str] = None) -> str:
@@ -450,6 +457,18 @@ class _Skipped:
 SKIPPED = _Skipped()
 
 
+def flex_attempt_client(client: Any, started: float) -> Any:
+    """``client`` for one Flex attempt: no SDK retries, and a timeout of the
+    time left before :data:`FLEX_FALLBACK_AFTER_S` (at least
+    :data:`FLEX_MIN_ATTEMPT_S`).  A client without ``with_options`` (a test
+    fake) is used as it is."""
+    with_options = getattr(client, "with_options", None)
+    if with_options is None:
+        return client
+    left = FLEX_FALLBACK_AFTER_S - (time.monotonic() - started)
+    return with_options(max_retries=0, timeout=max(left, FLEX_MIN_ATTEMPT_S))
+
+
 async def call_openai(client: Any, prompt: str, model: str, max_tokens: int, rate_limiter: RateLimiter,
                       usage: Any, *, settings: Optional[Dict[str, Any]] = None,
                       service_tier: Optional[str] = None, fallback_client: Any = None,
@@ -463,8 +482,10 @@ async def call_openai(client: Any, prompt: str, model: str, max_tokens: int, rat
     The Flex loop is the main checkout's ``call_judge_single``: a Flex call
     that fails with anything but an HTTP 400 is tried again every
     :data:`FLEX_RETRY_SLEEP_S` until :data:`FLEX_FALLBACK_AFTER_S` has passed
-    since the first attempt, then sent once through ``fallback_client`` with
-    no tier and charged under the plain model name (``stats.flex_fallbacks``).
+    since the first attempt was sent, then sent once through
+    ``fallback_client`` with no tier and charged under the plain model name
+    (``stats.flex_fallbacks``).  Each Flex attempt is bounded by the time left
+    (:func:`flex_attempt_client`).
     An HTTP 400 raises :class:`JudgeRequestError` (:class:`FlexRefusedError`
     when it refuses the service tier), except a content flag, which gives
     None.  ``usage.charge(key, prompt_tokens, completion_tokens)`` is called
@@ -474,17 +495,18 @@ async def call_openai(client: Any, prompt: str, model: str, max_tokens: int, rat
         raise FlexRefusedError(f"OpenAI refuses Flex processing for {model} (MODEL_CAPABILITIES): "
                                f"judge it through the Batch API or in real time")
     body = chat_request_body(prompt, model, max_tokens, settings=settings, service_tier=service_tier)
-    started = time.monotonic()
-    first = True
+    started: Optional[float] = None
     while True:
         await rate_limiter.acquire()
-        if first:
-            first = False
+        if started is None:
+            # the clock starts at the first send, not when the request was queued
+            started = time.monotonic()
             if gate is not None and gate():
                 stats.skipped += 1
                 return SKIPPED
+        sender = flex_attempt_client(client, started) if service_tier == "flex" else client
         try:
-            response = await client.chat.completions.create(**body)
+            response = await sender.chat.completions.create(**body)
             break
         except Exception as e:  # noqa: BLE001 -- classified below
             if is_billing_error(e):
