@@ -127,8 +127,10 @@ def load_measured_cost(usage_path: Path, price_basis: str = "list") -> Optional[
 
 
 #: The reply cap of judge_tier_cost_eval.py runs made before each cell recorded
-#: its own (the script's --max_tokens default; the 20- and 41-axis drivers never
-#: set it).  A reply cut at the cap usually loses its SCORE line and is unscored.
+#: its own: the script's --max_tokens default then (300 since 2026-11-01, when
+#: cells already record theirs; the 20- and 41-axis drivers never set it).  A
+#: reply cut at the cap usually lost its SCORE line and went unscored, or was
+#: scored from a stray number (cut replies score as missing since 2026-11-01).
 TIER_EVAL_DEFAULT_MAX_TOKENS = 200
 
 

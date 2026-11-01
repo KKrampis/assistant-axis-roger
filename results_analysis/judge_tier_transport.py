@@ -379,6 +379,23 @@ def _g(obj: Any, name: str, default: Any = None) -> Any:
     return obj.get(name, default) if isinstance(obj, dict) else getattr(obj, name, default)
 
 
+#: The finish reason of a reply cut at ``max_tokens``: OpenAI's
+#: ``finish_reason``, and what :func:`anthropic_reply` makes of Anthropic's
+#: ``stop_reason == "max_tokens"``.
+CUT_AT_CAP = "length"
+
+
+@dataclass(frozen=True)
+class Truncated:
+    """What the call functions return, instead of the text, for a reply cut at
+    ``max_tokens``.  Such a reply usually lacks its ``SCORE:`` line, and
+    ``parse_signed_score`` would then score it from the first small integer in
+    its reasoning, so it is never parsed: it scores as missing (Roger,
+    2026-11-01; the main checkout's step 3 does the same, ``reject_truncated``).
+    ``text`` is kept for inspection only."""
+    text: Optional[str] = None
+
+
 def anthropic_reply(message: Any) -> Tuple[Optional[str], Optional[str], int, int, bool]:
     """``(text, finish_reason, input_tokens, output_tokens, refused)`` of an
     Anthropic message, an SDK object or a plain dict (a Message Batches
@@ -414,6 +431,7 @@ class CallStats:
     errors: int = 0           # failed calls (network, 5xx...): counted, unparseable
     flex_fallbacks: int = 0   # Flex calls sent to the standard tier after FLEX_FALLBACK_AFTER_S
     skipped: int = 0          # not issued (--budget_usd reached, or a fatal error elsewhere)
+    truncated: int = 0        # replies cut at max_tokens: counted, never parsed (score None)
     refusal_categories: Dict[str, int] = field(default_factory=dict)
 
     def note_refusal(self, model: str, category: Optional[str]) -> None:
@@ -437,9 +455,10 @@ async def call_openai(client: Any, prompt: str, model: str, max_tokens: int, rat
                       service_tier: Optional[str] = None, fallback_client: Any = None,
                       stats: Optional[CallStats] = None,
                       gate: Optional[Callable[[], bool]] = None) -> Any:
-    """One chat-completion judge call: the reply text, None for a failed call,
-    or :data:`SKIPPED` when ``gate()`` (checked once the rate limiter lets the
-    request go, before it is first sent) is True.
+    """One chat-completion judge call: the reply text, a :class:`Truncated` for
+    a reply cut at ``max_tokens`` (``finish_reason == "length"``), None for a
+    failed call, or :data:`SKIPPED` when ``gate()`` (checked once the rate
+    limiter lets the request go, before it is first sent) is True.
 
     The Flex loop is the main checkout's ``call_judge_single``: a Flex call
     that fails with anything but an HTTP 400 is tried again every
@@ -499,9 +518,11 @@ async def call_openai(client: Any, prompt: str, model: str, max_tokens: int, rat
             stats.errors += 1
             logger.error(f"Error calling judge model {model}: {e}")
             return None
-    text, _finish, pt, ct = openai_reply(response)
+    text, finish, pt, ct = openai_reply(response)
     if usage is not None:
         usage.charge(usage_key(model, service_tier), pt, ct)
+    if finish == CUT_AT_CAP:
+        return Truncated(text)
     return text
 
 
@@ -509,9 +530,10 @@ async def call_anthropic(client: Any, prompt: str, model: str, max_tokens: int, 
                          usage: Any, *, settings: Optional[Dict[str, Any]] = None,
                          stats: Optional[CallStats] = None,
                          gate: Optional[Callable[[], bool]] = None) -> Any:
-    """One Messages API judge call: the reply text, None for a failed call (a
-    refusal included, counted in ``stats.refused`` and charged), or
-    :data:`SKIPPED`.  An HTTP 400 raises :class:`JudgeRequestError` unless it
+    """One Messages API judge call: the reply text, a :class:`Truncated` for a
+    reply cut at ``max_tokens`` (``stop_reason == "max_tokens"``), None for a
+    failed call (a refusal included, counted in ``stats.refused`` and charged),
+    or :data:`SKIPPED`.  An HTTP 400 raises :class:`JudgeRequestError` unless it
     flags the prompt's content."""
     stats = stats if stats is not None else CallStats()
     params = anthropic_request_params(prompt, model, max_tokens, settings=settings)
@@ -534,12 +556,14 @@ async def call_anthropic(client: Any, prompt: str, model: str, max_tokens: int, 
         stats.errors += 1
         logger.error(f"Error calling Anthropic judge model {model}: {e}")
         return None
-    text, _finish, n_in, n_out, refused = anthropic_reply(response)
+    text, finish, n_in, n_out, refused = anthropic_reply(response)
     if usage is not None:
         usage.charge(model, n_in, n_out)
     if refused:
         stats.note_refusal(model, _g(_g(response, "stop_details"), "category"))
         return None
+    if finish == CUT_AT_CAP:
+        return Truncated(text)
     return text
 
 
@@ -623,6 +647,7 @@ __all__: List[str] = [
     "accepts_temperature", "accepts_flex", "request_temperature", "content_flag", "is_flex_refusal",
     "SERVICE_TIERS", "FLEX_FALLBACK_AFTER_S", "FLEX_RETRY_SLEEP_S", "FLEX_TIMEOUT_S", "FLEX_MAX_RETRIES",
     "usage_key", "chat_request_body", "anthropic_request_params", "request_for", "prompt_of_request",
-    "anthropic_reply", "openai_reply", "CallStats", "SKIPPED", "call_openai", "call_anthropic",
+    "anthropic_reply", "openai_reply", "CUT_AT_CAP", "Truncated", "CallStats", "SKIPPED", "call_openai",
+    "call_anthropic",
     "call_model", "TRANSPORT_CHOICES", "TransportChoice", "choose_transport", "price_key",
 ]

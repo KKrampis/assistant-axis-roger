@@ -11,11 +11,13 @@ import json
 import re
 import time
 from datetime import datetime, timezone
+from functools import partialmethod
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+from assistant_axis.anthropic_batch import AnthropicBatchRunner
 from assistant_axis.judge import RateLimiter
 from assistant_axis.judge_pricing import MultiModelUsage, price_for_model
 from results_analysis import judge_tier_cost_eval as ev
@@ -34,6 +36,19 @@ def reply_for(prompt: str):
     return f"It leans one way.\nSCORE: {SCORES[name]}", name
 
 
+#: The text of a reply cut at the cap: no SCORE line, but a stray small integer
+#: that parse_signed_score's fallback would take for the score (2).
+CUT_TEXT = "It leans 2 ways, and on balance the"
+
+
+def capped_reply(prompt: str, cap: int, needs: dict):
+    """``(text, cut, name)``: the reply is cut when the entity needs more than ``cap`` tokens."""
+    text, name = reply_for(prompt)
+    if cap < needs.get(name, 0):
+        return CUT_TEXT, True, name
+    return text, False, name
+
+
 class HTTPError(Exception):
     """An SDK error: both SDKs set ``status_code``; OpenAI's also ``param`` and ``code``."""
 
@@ -47,7 +62,8 @@ class FakeOpenAI:
     files and batches (a batch completes at its first retrieve)."""
 
     def __init__(self, *, flex_error=None, flex_fail_times=None, error_names=(), fail_retrieve=False,
-                 prompt_tokens=300, completion_tokens=40):
+                 prompt_tokens=300, completion_tokens=40, needs=None):
+        self.needs = dict(needs or {})     # entity -> tokens its reply needs (cut below that cap)
         self.flex_error, self.flex_fail_times = flex_error, flex_fail_times
         self.error_names, self.fail_retrieve = set(error_names), fail_retrieve
         self.pt, self.ct = prompt_tokens, completion_tokens
@@ -64,8 +80,9 @@ class FakeOpenAI:
                 if self.flex_fail_times is not None:
                     self.flex_fail_times -= 1
                 raise self.flex_error
-        text, _ = reply_for(kw["messages"][0]["content"])
-        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=text), finish_reason="stop")],
+        text, cut, _ = capped_reply(kw["messages"][0]["content"], kw["max_completion_tokens"], self.needs)
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=text),
+                                                        finish_reason="length" if cut else "stop")],
                                usage=SimpleNamespace(prompt_tokens=self.pt, completion_tokens=self.ct))
 
     async def _fcreate(self, file, purpose):
@@ -107,13 +124,14 @@ class FakeOpenAI:
         if b["status"] == "in_progress":
             out = []
             for line in self.lines(b["input"]):
-                text, name = reply_for(line["body"]["messages"][0]["content"])
+                text, cut, name = capped_reply(line["body"]["messages"][0]["content"],
+                                               line["body"]["max_completion_tokens"], self.needs)
                 if name in self.error_names:
                     out.append({"custom_id": line["custom_id"], "error": None,
                                 "response": {"status_code": 500, "body": {"error": {"message": "server"}}}})
                 else:
                     out.append({"custom_id": line["custom_id"], "error": None, "response": {"status_code": 200, "body": {
-                        "choices": [{"message": {"content": text}, "finish_reason": "stop"}],
+                        "choices": [{"message": {"content": text}, "finish_reason": "length" if cut else "stop"}],
                         "usage": {"prompt_tokens": self.pt, "completion_tokens": self.ct}}}})
             ofid = f"file-out-{bid}"
             self.uploaded[ofid] = "\n".join(json.dumps(o) for o in out) + "\n"
@@ -125,23 +143,25 @@ class FakeOpenAI:
 class FakeAnthropic:
     """``anthropic.AsyncAnthropic``: messages.create and messages.batches."""
 
-    def __init__(self, *, refuse_names=(), errored_names=()):
+    def __init__(self, *, refuse_names=(), errored_names=(), needs=None):
         self.refuse_names, self.errored_names = set(refuse_names), set(errored_names)
-        self.calls, self._batches, self.created = [], {}, []
+        self.needs = dict(needs or {})     # entity -> tokens its reply needs (cut below that cap)
+        self.calls, self._batches, self.created, self.results_read = [], {}, [], []
         self.messages = SimpleNamespace(create=self._create, batches=SimpleNamespace(
             create=self._bcreate, retrieve=self._bretrieve, results=self._bresults, list=self._blist))
 
-    def _message(self, prompt):
-        text, name = reply_for(prompt)
+    def _message(self, prompt, cap):
+        text, cut, name = capped_reply(prompt, cap, self.needs)
         if name in self.refuse_names:
             return SimpleNamespace(content=[], stop_reason="refusal", stop_details=SimpleNamespace(category="cyber"),
                                    usage=SimpleNamespace(input_tokens=300, output_tokens=0))
-        return SimpleNamespace(content=[SimpleNamespace(type="text", text=text)], stop_reason="end_turn",
+        return SimpleNamespace(content=[SimpleNamespace(type="text", text=text)],
+                               stop_reason="max_tokens" if cut else "end_turn",
                                stop_details=None, usage=SimpleNamespace(input_tokens=300, output_tokens=40))
 
     async def _create(self, **kw):
         self.calls.append(kw)
-        return self._message(kw["messages"][0]["content"])
+        return self._message(kw["messages"][0]["content"], kw["max_tokens"])
 
     async def _bcreate(self, requests):
         bid = f"msgbatch_{len(self._batches)}"
@@ -149,19 +169,24 @@ class FakeAnthropic:
         self.created.append(bid)
         return SimpleNamespace(id=bid, processing_status="in_progress")
 
+    fail_retrieve_from = None   # batches from this index on fail their status check (a network outage)
+
     async def _bretrieve(self, bid):
+        if self.fail_retrieve_from is not None and self.created.index(bid) >= self.fail_retrieve_from:
+            raise ConnectionError("network unreachable")
         return SimpleNamespace(id=bid, processing_status="ended",
                                request_counts=SimpleNamespace(processing=0, succeeded=0))
 
     async def _bresults(self, bid):
+        self.results_read.append(bid)
         out = []
         for r in self._batches[bid]["requests"]:
             prompt = r["params"]["messages"][0]["content"]
             if reply_for(prompt)[1] in self.errored_names:
                 out.append(SimpleNamespace(custom_id=r["custom_id"], result=SimpleNamespace(type="errored", error=None)))
             else:
-                out.append(SimpleNamespace(custom_id=r["custom_id"],
-                                           result=SimpleNamespace(type="succeeded", message=self._message(prompt))))
+                out.append(SimpleNamespace(custom_id=r["custom_id"], result=SimpleNamespace(
+                    type="succeeded", message=self._message(prompt, r["params"]["max_tokens"]))))
 
         async def gen():
             for x in out:
@@ -277,7 +302,9 @@ def test_transport_selection(luna_untested):
 
 def test_cli_defaults_and_exclusions(world):
     args = ev.build_parser().parse_args(["--axes_file", "x", "--judge_model", "m"])
-    assert (args.max_tokens, args.requests_per_second, args.transport) == (200, 10, "auto")
+    # the cap went from 200 to 300 on 2026-11-01 (Roger: "200 is clearly too low for safety")
+    assert (args.max_tokens, args.requests_per_second, args.transport) == (300, 10, "auto")
+    assert ev.DEFAULT_MAX_TOKENS == 300 and args.repair_truncated is False
     with pytest.raises(SystemExit) as e:
         _run(world, "gpt-4.1-mini", extra=["--pair", "alpha", "beta", "--dry_run"])
     assert e.value.code == 2
@@ -483,12 +510,13 @@ def test_flex_run_writes_cells_with_flex_usage(world, monkeypatch, capsys):
     assert _run(world, "gpt-5.6-luna") == 0
     assert len(flex.calls) == 10 and not std.calls
     assert all(c["service_tier"] == "flex" and "reasoning_effort" not in c and "temperature" not in c
-               and c["max_completion_tokens"] == 200 for c in flex.calls)
+               and c["max_completion_tokens"] == 300 for c in flex.calls)
     for axis_dir in ("alpha_vs_beta", "hero_vs_villain"):
         scores, usage, d = _cell(world, axis_dir, "gpt-5.6-luna")
         assert scores["result"] == SCORES
         prov = scores["_provenance"]
-        assert (prov["transport"], prov["request_settings"], prov["max_tokens"]) == ("flex", {}, 200)
+        assert (prov["transport"], prov["request_settings"], prov["max_tokens"]) == ("flex", {}, 300)
+        assert prov["truncated"] == []
         assert prov["judge_model"] == "gpt-5.6-luna" and prov["rubric_version"]
         assert set(usage["per_model"]) == {"gpt-5.6-luna:flex"} and usage["n_calls"] == 5
         assert usage["total_cost_usd"] > 0
@@ -550,11 +578,11 @@ def test_openai_batch_custom_ids_axis_map_and_realtime_remainder(world, monkeypa
     lines = std.batch_lines(0)
     assert sorted(line["custom_id"] for line in lines) == sorted(f"a{i}|{e}" for i in (0, 1) for e in ENTITIES)
     body = lines[0]["body"]
-    assert body == tt.chat_request_body(body["messages"][0]["content"], "gpt-4.1-mini", 200, settings={})
+    assert body == tt.chat_request_body(body["messages"][0]["content"], "gpt-4.1-mini", 300, settings={})
     work = world.exp / "_tier_eval_batches" / "gpt-4.1-mini"
     amap = json.loads((work / "axis_map.json").read_text())
     assert {k: v["axis_dir"] for k, v in amap["axes"].items()} == {"0": "alpha_vs_beta", "1": "hero_vs_villain"}
-    assert amap["settings"]["max_tokens"] == 200 and amap["settings"]["request_settings"] == {}
+    assert amap["settings"]["max_tokens"] == 300 and amap["settings"]["request_settings"] == {}
     assert not list(world.exp.glob("*_tier_eval/_tier_eval_batches"))
     # the two errored requests ("bold" on both axes) went in real time, on the standard tier
     assert len(std.calls) == 2 and all("service_tier" not in c for c in std.calls)
@@ -687,3 +715,316 @@ def test_dry_run_writes_nothing_and_reports(world, capsys, luna_untested):
     assert re.search(r"gpt-6-luna .*transport=flex \(probe\)", out)
     assert re.search(r"claude-haiku-5-5 .*transport=batch", out)
     assert '"thinking": {"type": "disabled"}' in out
+
+
+# ---------------------------------------------------------------------------
+# Replies cut at the cap (Roger, 2026-11-01: scored as missing, never from a
+# stray number; the cap 300)
+# ---------------------------------------------------------------------------
+
+NEEDS = {"shy": 250, "bold": 1000}      # at cap 200 both are cut; at 300 "shy" fits, "bold" is cut again
+CUT = sorted(NEEDS)
+UNCUT = {k: v for k, v in SCORES.items() if k not in NEEDS}
+AXES2 = ("alpha_vs_beta", "hero_vs_villain")
+
+
+def _anthropic(monkeypatch, **kw):
+    client = FakeAnthropic(**kw)
+    monkeypatch.setattr(ev, "make_anthropic_client", lambda: client)
+    return client
+
+
+def test_default_cap_300_reaches_the_requests(world, monkeypatch):
+    client = _anthropic(monkeypatch)
+    assert _run(world, "claude-haiku-5-5") == 0                   # batch
+    assert all(r["params"]["max_tokens"] == 300 for r in client._batches[client.created[0]]["requests"])
+    std = FakeOpenAI()
+    _openai(monkeypatch, std=std)
+    assert _run(world, "gpt-6-luna", extra=["--transport", "realtime"]) == 0
+    assert std.calls and all(c["max_completion_tokens"] == 300 for c in std.calls)
+    scores, _, _ = _cell(world, "alpha_vs_beta", "gpt-6-luna")
+    assert scores["_provenance"]["max_tokens"] == 300
+
+
+@pytest.mark.parametrize("case", ["openai-realtime", "openai-flex", "openai-flex-fallback", "anthropic-realtime"])
+def test_cut_reply_scores_missing_live(world, monkeypatch, capsys, caplog, case):
+    """A reply cut at the cap scores None and is listed in the provenance, though
+    its text holds a number the parser's fallback would have taken."""
+    assert ev.parse_signed_score(CUT_TEXT) == 2                   # what the old code recorded
+    if case == "anthropic-realtime":
+        client = _anthropic(monkeypatch, needs=NEEDS)
+        model, extra = "claude-haiku-5-5", ["--transport", "realtime"]
+        answered = client.calls
+    else:
+        monkeypatch.setattr(tt, "FLEX_FALLBACK_AFTER_S", 0.0)
+        flex = FakeOpenAI(needs=NEEDS, flex_error=ConnectionError("overloaded") if case.endswith("fallback") else None)
+        std = FakeOpenAI(needs=NEEDS)
+        _openai(monkeypatch, flex=flex, std=std)
+        model = "gpt-5.6-luna"
+        extra = ["--transport", "realtime"] if case == "openai-realtime" else []
+        answered = flex.calls if case == "openai-flex" else std.calls
+    assert _run(world, model, extra=["--max_tokens", "200", *extra]) == 0
+    assert len(answered) == 10
+    for axis_dir in AXES2:
+        scores, _, d = _cell(world, axis_dir, model)
+        assert scores["result"] == UNCUT
+        assert scores["_provenance"]["truncated"] == CUT and scores["_provenance"]["max_tokens"] == 200
+        assert json.loads((d / "correlations.json").read_text())["descriptions"]["0"]["raw"]["n"] == 3
+    out = capsys.readouterr().out
+    assert "parsed 6/10" in out and "truncated 4" in out
+    assert "HIGH FAIL RATE" in caplog.text and "6/10" in caplog.text    # a cut reply is a failure in the parse rate
+
+
+@pytest.mark.parametrize("model", ["gpt-4.1-mini", "claude-haiku-5-5"])
+def test_cut_reply_scores_missing_batch(world, monkeypatch, capsys, model):
+    if model.startswith("claude"):
+        _anthropic(monkeypatch, needs=NEEDS)
+    else:
+        _openai(monkeypatch, std=FakeOpenAI(needs=NEEDS))
+    assert _run(world, model, extra=["--max_tokens", "200"]) == 0
+    for axis_dir in AXES2:
+        scores, _, _ = _cell(world, axis_dir, model)
+        assert scores["result"] == UNCUT
+        assert scores["_provenance"]["truncated"] == CUT and scores["_provenance"]["transport"] == "batch"
+    assert "truncated 4" in capsys.readouterr().out
+
+
+def test_cut_replies_survive_a_stop_between_batches(world, monkeypatch):
+    """Results saved under collected/ between batches keep their truncation list."""
+    client = _anthropic(monkeypatch, needs=NEEDS)
+    monkeypatch.setattr(AnthropicBatchRunner, "write_chunks",
+                        partialmethod(AnthropicBatchRunner.write_chunks, max_requests=3))
+    client.fail_retrieve_from = 1          # a0|bold, a0|calm, a0|kind come back; the rest do not
+    assert _run(world, "claude-haiku-5-5", extra=["--max_tokens", "200"]) == 1
+    saved = json.loads((world.exp / "_tier_eval_batches" / "claude-haiku-5-5" / "collected" / "a0.json").read_text())
+    assert saved["truncated"] == ["bold"] and saved["scores"]["bold"] is None
+    client.fail_retrieve_from = None
+    assert _run(world, "claude-haiku-5-5", extra=["--max_tokens", "200"]) == 0
+    for axis_dir in AXES2:
+        scores, _, _ = _cell(world, axis_dir, "claude-haiku-5-5")
+        assert scores["result"] == UNCUT and scores["_provenance"]["truncated"] == CUT
+
+
+# --- repair ----------------------------------------------------------------
+
+def test_entities_to_reask():
+    assert ev.entities_to_reask({"a", "b"}, [], 200, 300) == (["a", "b"], [])
+    assert ev.entities_to_reask({"a", "b"}, [], 200, 200) == ([], ["a", "b"])     # not above the cell's cap
+    rec = [{"max_tokens": 300, "reasked": ["a", "b"], "still_truncated": ["b"]}]
+    assert ev.entities_to_reask({"a", "b"}, rec, 200, 300) == ([], ["b"])
+    assert ev.entities_to_reask({"a", "b"}, rec, 200, 400) == (["b"], [])
+
+
+def _legacy_record(mrun, cell, name, reply):
+    """record() before 2026-11-01: a cut reply parsed like any other."""
+    text = reply.text if isinstance(reply, tt.Truncated) else reply
+    score = ev.parse_signed_score(text) if text else None
+    cell.scores[name] = score
+    mrun.attempted += 1
+    mrun.parsed += score is not None
+
+
+def _strip_truncation_list(world, model, axes=AXES2):
+    for axis_dir in axes:
+        p = world.exp / f"{axis_dir}_tier_eval" / model / "scores_descriptions.json"
+        data = json.loads(p.read_text())
+        del data["_provenance"]["truncated"]
+        p.write_text(json.dumps(data, indent=2))
+
+
+def _make_legacy(world, monkeypatch, model, extra=()):
+    """Cells as the code before 2026-11-01 wrote them at cap 200: the cut replies
+    scored by the parser's fallback (2), no truncation list in the provenance."""
+    original = ev.record
+    monkeypatch.setattr(ev, "record", _legacy_record)
+    assert _run(world, model, extra=["--max_tokens", "200", *extra]) == 0
+    monkeypatch.setattr(ev, "record", original)
+    _strip_truncation_list(world, model)
+    for axis_dir in AXES2:
+        scores, _, _ = _cell(world, axis_dir, model)
+        assert scores["result"] == {**SCORES, "shy": 2, "bold": 2}
+
+
+def _snapshot(world):
+    return {p: p.read_bytes() for p in world.exp.rglob("*") if p.is_file()}
+
+
+def _check_repaired(world, model, before, *, source, n_reasks_per_cell=2, cost_per_call):
+    """Each cell: "shy" now scored (3), "bold" cut again (None, listed), every
+    other score as it was, correlations recomputed, usage merged, one repair record."""
+    for axis_dir in AXES2:
+        scores, usage, d = _cell(world, axis_dir, model)
+        old_scores, old_usage, _ = before[axis_dir]
+        assert scores["result"] == {**UNCUT, "shy": 3}
+        assert {k: scores["result"][k] for k in UNCUT} == {k: old_scores["result"][k] for k in UNCUT}
+        prov = scores["_provenance"]
+        assert prov["max_tokens"] == 200                                  # the cell's own cap, unchanged
+        [rec] = prov["repairs"]
+        assert (rec["max_tokens"], rec["reasked"], rec["still_truncated"], rec["source"]) == (
+            300, CUT, ["bold"], source)
+        assert datetime.fromisoformat(rec["date"]).tzinfo is not None
+        assert {k: v for k, v in prov.items() if k != "repairs"} == old_scores["_provenance"]
+        proj = ev.load_projections(world.exp / axis_dir / "gpt" / "projections.json", "all")
+        expected = ev.compute_correlations({"descriptions": scores["result"]}, proj, [0, 1],
+                                           {axis_dir.split("_vs_")[0], axis_dir.split("_vs_")[1]})
+        assert json.loads((d / "correlations.json").read_text()) == json.loads(json.dumps(expected))
+        assert expected["descriptions"]["0"]["raw"]["n"] == 4
+        for key, entry in old_usage["per_model"].items():
+            assert usage["per_model"][key] == entry                       # earlier entries kept
+        assert usage["per_model"][model]["n_calls"] == n_reasks_per_cell + old_usage["per_model"].get(
+            model, {}).get("n_calls", 0)
+        assert usage["n_calls"] == old_usage["n_calls"] + n_reasks_per_cell
+        assert usage["total_cost_usd"] == pytest.approx(old_usage["total_cost_usd"]
+                                                        + n_reasks_per_cell * cost_per_call, abs=1e-4)
+
+
+def _cells(world, model):
+    return {axis_dir: _cell(world, axis_dir, model) for axis_dir in AXES2}
+
+
+def test_repair_from_batch_results_rebuilds_the_short_ids(world, monkeypatch, capsys, caplog):
+    """Anthropic: the chunk files are gone once collected, so the short ids are
+    rebuilt (four chunks here) and checked against the cells."""
+    caplog.set_level("INFO")
+    client = _anthropic(monkeypatch, needs=NEEDS)
+    monkeypatch.setattr(AnthropicBatchRunner, "write_chunks",
+                        partialmethod(AnthropicBatchRunner.write_chunks, max_requests=3))
+    _make_legacy(world, monkeypatch, "claude-haiku-5-5")
+    work = world.exp / "_tier_eval_batches" / "claude-haiku-5-5"
+    assert len(json.loads((work / "batch_state.json").read_text())["chunks"]) == 4
+    assert not list((work / "chunks").glob("*.jsonl"))
+    before = _cells(world, "claude-haiku-5-5")
+    capsys.readouterr()
+    assert _run(world, "claude-haiku-5-5", extra=["--repair_truncated", "--max_tokens", "300"]) == 0
+    assert sorted(reply_for(c["messages"][0]["content"])[1] for c in client.calls) == ["bold", "bold", "shy", "shy"]
+    assert all(c["max_tokens"] == 300 and c["thinking"] == {"type": "disabled"} for c in client.calls)
+    assert "rebuilding the order" in caplog.text and "all agree" in caplog.text
+    _check_repaired(world, "claude-haiku-5-5", before, source="batch results",
+                    cost_per_call=(300 * 0.10 + 40 * 0.50) / 1e6)
+    out = capsys.readouterr().out
+    assert "cells repaired 2  entities re-asked 4  now scored 2  still truncated 2" in out
+
+    # A second repair at the same cap re-asks nothing; a higher one re-asks what is still cut.
+    n = len(client.calls)
+    assert _run(world, "claude-haiku-5-5", extra=["--repair_truncated", "--max_tokens", "300"]) == 0
+    assert len(client.calls) == n and "already re-asked" in capsys.readouterr().out
+    assert _run(world, "claude-haiku-5-5", extra=["--repair_truncated", "--max_tokens", "1000"]) == 0
+    assert sorted(reply_for(c["messages"][0]["content"])[1] for c in client.calls[n:]) == ["bold", "bold"]
+    scores, _, _ = _cell(world, "alpha_vs_beta", "claude-haiku-5-5")
+    assert scores["result"] == SCORES
+    assert [(r["max_tokens"], r["reasked"], r["still_truncated"]) for r in scores["_provenance"]["repairs"]] == [
+        (300, CUT, ["bold"]), (1000, ["bold"], [])]
+
+
+def test_repair_from_batch_results_through_chunk_files(world, monkeypatch, caplog):
+    caplog.set_level("INFO")
+    client = _anthropic(monkeypatch, needs=NEEDS)
+    collect = AnthropicBatchRunner._collect
+
+    def keep_chunk(self, rec, *a, **k):
+        saved = Path(rec["path"]).read_bytes()
+        collect(self, rec, *a, **k)
+        Path(rec["path"]).write_bytes(saved)
+    monkeypatch.setattr(AnthropicBatchRunner, "_collect", keep_chunk)
+    _make_legacy(world, monkeypatch, "claude-haiku-5-5")
+    before = _cells(world, "claude-haiku-5-5")
+    assert _run(world, "claude-haiku-5-5", extra=["--repair_truncated", "--max_tokens", "300"]) == 0
+    assert "through the chunk files" in caplog.text
+    assert len(client.calls) == 4
+    _check_repaired(world, "claude-haiku-5-5", before, source="batch results",
+                    cost_per_call=(300 * 0.10 + 40 * 0.50) / 1e6)
+
+
+def test_repair_from_openai_batch_output(world, monkeypatch):
+    std = FakeOpenAI(needs=NEEDS)
+    _openai(monkeypatch, std=std)
+    _make_legacy(world, monkeypatch, "gpt-4.1-mini")
+    before = _cells(world, "gpt-4.1-mini")
+    assert not std.calls
+    assert _run(world, "gpt-4.1-mini", extra=["--repair_truncated", "--max_tokens", "300"]) == 0
+    assert sorted(reply_for(c["messages"][0]["content"])[1] for c in std.calls) == ["bold", "bold", "shy", "shy"]
+    assert all(c["max_completion_tokens"] == 300 and "service_tier" not in c for c in std.calls)
+    _check_repaired(world, "gpt-4.1-mini", before, source="batch results",
+                    cost_per_call=(300 * 0.40 + 40 * 1.60) / 1e6)
+
+
+def test_repair_from_the_provenance_list(world, monkeypatch, capsys):
+    """Cells made since 2026-11-01 list their cut entities; OpenAI re-asks go to
+    the standard tier (usage under the plain model name beside <model>:flex)."""
+    flex, std = FakeOpenAI(needs=NEEDS), FakeOpenAI(needs=NEEDS)
+    _openai(monkeypatch, flex=flex, std=std)
+    assert _run(world, "gpt-5.6-luna", extra=["--max_tokens", "200"]) == 0
+    before = _cells(world, "gpt-5.6-luna")
+    assert all(b[0]["_provenance"]["truncated"] == CUT for b in before.values())
+    assert _run(world, "gpt-5.6-luna", extra=["--repair_truncated", "--max_tokens", "300"]) == 0
+    assert len(flex.calls) == 10 and len(std.calls) == 4
+    assert all(c["max_completion_tokens"] == 300 and "service_tier" not in c for c in std.calls)
+    for axis_dir in AXES2:
+        scores, usage, _ = _cell(world, axis_dir, "gpt-5.6-luna")
+        assert scores["_provenance"]["repairs"][0]["source"] == "provenance"
+        assert scores["_provenance"]["truncated"] == CUT                 # the original run's record, kept
+        assert set(usage["per_model"]) == {"gpt-5.6-luna:flex", "gpt-5.6-luna"}
+    # before: the cut entities were already None, so the old scores are UNCUT
+    for b in before.values():
+        assert b[0]["result"] == UNCUT
+    _check_repaired(world, "gpt-5.6-luna", before, source="provenance",
+                    cost_per_call=(300 * price_for_model("gpt-5.6-luna")[0]
+                                   + 40 * price_for_model("gpt-5.6-luna")[1]) / 1e6)
+
+
+def test_repair_skips_a_cell_with_no_record(world, monkeypatch, capsys):
+    """A real-time cell made before the truncation list existed has no record:
+    reported and left alone, while a cell with a list beside it is repaired."""
+    client = _anthropic(monkeypatch, needs=NEEDS)
+    assert _run(world, "claude-haiku-5-5", extra=["--transport", "realtime", "--max_tokens", "200"]) == 0
+    _strip_truncation_list(world, "claude-haiku-5-5", axes=["alpha_vs_beta"])
+    alpha = world.exp / "alpha_vs_beta_tier_eval" / "claude-haiku-5-5"
+    alpha_before = {p.name: p.read_bytes() for p in alpha.iterdir()}
+    n = len(client.calls)
+    capsys.readouterr()
+    assert _run(world, "claude-haiku-5-5", extra=["--repair_truncated", "--max_tokens", "300"]) == 0
+    out = capsys.readouterr().out
+    assert "alpha_vs_beta: no truncation record" in out
+    assert {p.name: p.read_bytes() for p in alpha.iterdir()} == alpha_before
+    assert len(client.calls) == n + 2                                  # hero_vs_villain's two only
+    scores, _, _ = _cell(world, "hero_vs_villain", "claude-haiku-5-5")
+    assert scores["result"] == {**UNCUT, "shy": 3}
+
+
+def test_repair_refuses_a_batch_record_that_disagrees_with_the_cells(world, monkeypatch, capsys):
+    client = _anthropic(monkeypatch, needs=NEEDS)
+    _make_legacy(world, monkeypatch, "claude-haiku-5-5")
+    p = world.exp / "alpha_vs_beta_tier_eval" / "claude-haiku-5-5" / "scores_descriptions.json"
+    data = json.loads(p.read_text())
+    data["result"]["calm"] = 1                                         # not what the batch answered
+    p.write_text(json.dumps(data, indent=2))
+    before = _snapshot(world)
+    assert _run(world, "claude-haiku-5-5", extra=["--repair_truncated", "--max_tokens", "300"]) == 0
+    assert "disagree with the cells' scores" in capsys.readouterr().out
+    assert not client.calls and _snapshot(world) == before
+
+
+def test_repair_refuses_other_request_settings(world, monkeypatch, capsys):
+    client = _anthropic(monkeypatch, needs=NEEDS)
+    _make_legacy(world, monkeypatch, "claude-haiku-5-5")
+    before = _snapshot(world)
+    assert _run(world, "claude-haiku-5-5", extra=["--repair_truncated", "--max_tokens", "300",
+                                                  "--request_setting", "haiku-5:thinking=null"]) == 0
+    assert "differ from this run's" in capsys.readouterr().out
+    assert not client.calls and _snapshot(world) == before
+
+
+def test_repair_dry_run_makes_no_calls(world, monkeypatch, capsys):
+    client = _anthropic(monkeypatch, needs=NEEDS)
+    _make_legacy(world, monkeypatch, "claude-haiku-5-5")
+    n_batches, before = len(client.created), _snapshot(world)
+    client.results_read.clear()
+    capsys.readouterr()
+    assert _run(world, "claude-haiku-5-5", extra=["--repair_truncated", "--max_tokens", "300", "--dry_run"]) == 0
+    assert not client.calls and len(client.created) == n_batches and _snapshot(world) == before
+    assert client.results_read                                         # batch results are read, not judged
+    out = capsys.readouterr().out
+    assert "2 cell(s) with replies cut at the cap to re-ask, 4 entities, at max_tokens 300" in out
+    assert re.search(r"est\. cost \$0\.000\d", out) and "no judge calls made" in out
+    with pytest.raises(SystemExit):
+        _run(world, "claude-haiku-5-5", extra=["--repair_truncated", "--limit", "3", "--dry_run"])

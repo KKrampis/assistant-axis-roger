@@ -2763,24 +2763,72 @@ nothing for claude-haiku-4-5. New models follow step 3: thinking disabled
 for claude-haiku-5-5, `reasoning_effort` "none" for gpt-6-luna and
 gpt-5.4-mini. The default temperature (1) is not sent (the same sampling).
 `--request_setting [MODEL_FRAGMENT:]key=<json>` (repeatable) overrides the
-table for one run; `null` removes a field. `--max_tokens` stays 200.
+table for one run; `null` removes a field.
+
+**Reply cap** (`--max_tokens`): 300 since 2026-11-01 (Roger: "200 is clearly
+too low for safety"; 200 before). A reply cut at the cap (Anthropic
+`stop_reason: "max_tokens"`, OpenAI `finish_reason: "length"`, as the
+transport reports it) usually loses its `SCORE:` line, and
+`parse_signed_score`'s fallback (the first standalone integer in [-3, 3])
+used to score it silently from a number in its reasoning. Since 2026-11-01 it
+is scored as missing without being parsed (as step 3's `reject_truncated`
+in the main checkout), in every transport, counted in the summary line
+(`truncated N`) and as a failure in the parse rate, and the cell's provenance
+lists such entities under `truncated` (sorted entity keys, empty when none).
+Measured on the Anthropic batches of 2026-11-01 at the old cap: Opus 5 with
+thinking off 70 of 11,484 replies cut (52 came out unscored, 18 scored by the
+fallback); Haiku 4.5 3 of 34,072, at T=0 1 of 35,214; Sonnet 5 7 of 34,072;
+Haiku 5.5 (cap 250) 7 of 35,214.
+
+**Repairing cut replies** (`--repair_truncated`, with the same `--axes_file`,
+`--experiments_dir`, `--instructions_dir`, `--judge_model`, `--cell_label`
+and `--request_setting` as the run that made the cells, and the new
+`--max_tokens`): for each finished cell, re-asks exactly the entities whose
+reply was cut, in real time on the standard tier with the model's request
+settings, and patches the cell. That is the same as rerunning at the higher
+cap, since a cap changes only the replies that reach it. The cut entities come
+from the provenance's `truncated` list, or, for batch cells made before that
+list existed, from the batches' results (`_tier_eval_batches/<model><label>/batch_state.json`:
+Anthropic `messages.batches.results`, available for 29 days; OpenAI's output
+file, which the batch runner deletes once collected, so in practice only the
+Anthropic batches can be read back). The Anthropic runner deletes its chunk
+files on collection too, so the short ids (`r000123`) are mapped back by
+rebuilding the order the requests were written in (the batch axes in
+axis-map order, each axis's entities in load order, chunks in their recorded
+order), and every result is then checked against the score the cell holds
+for it: one disagreement and the model's batch record is refused. A cell with
+neither source (a real-time cell made before 2026-11-01) is reported and left
+alone, as is a cell whose recorded request settings differ from the run's, or
+whose correlations cannot be reproduced from its scores. Only the re-asked
+entities' scores change (a reply cut again scores as missing); the cell's
+`correlations.json` is recomputed as the original write did (its slots, the
+same projections, pole exclusion), the re-asks' usage is merged into
+`usage.json` under the plain model name (earlier entries kept), and the
+provenance gains a `repairs` record (`date`, `max_tokens`, `reasked`,
+`still_truncated`, `source`); `max_tokens` and `truncated` keep the original
+run's values. An entity is re-asked only when the new cap is above the one it
+was last asked at, so a repeated repair re-asks nothing. `--dry_run` lists the
+cells, counts and estimated cost (it reads batch results, makes no judge
+calls). A call that fails leaves its entity as it was, for a rerun.
 
 `--budget_usd` stops a real-time or Flex run (a batch's real-time remainder
 included) from issuing new requests once its measured spend passes the
 figure; a cell left incomplete is written as `scores_descriptions.partial.json`
 and `usage.partial.json` (no `usage.json`, so a rerun judges it again) and
 the run exits 2. A batch is submitted whole: the dry run is its control.
-At the end the script prints, per model, parsed/attempted, Flex fallbacks,
-refusals (an Anthropic `stop_reason: "refusal"` is a counted, unparseable
-call) and cost, and `warn_if_low_parse_rate` logs `*** HIGH FAIL RATE ***`
-below 99%. Models run concurrently. Exit status: 0 done, 1 a model failed
-or a key is missing, 2 the budget stop.
+At the end the script prints, per model, parsed/attempted, replies cut at the
+cap (`truncated`), Flex fallbacks, refusals (an Anthropic
+`stop_reason: "refusal"` is a counted, unparseable call) and cost, and
+`warn_if_low_parse_rate` logs `*** HIGH FAIL RATE ***` below 99%. Models run
+concurrently. Exit status: 0 done, 1 a model failed or a key is missing, 2 the
+budget stop.
 
 Writes `scores_descriptions.json`, `correlations.json` and, last,
 `usage.json` (real measured cost, not estimated) per judge model, in the
 same shape `axis_judge_correlation.py` itself writes;
 `scores_descriptions.json`'s `_provenance` also records `transport`,
-`transport_reason`, `request_settings` and `max_tokens`.
+`transport_reason`, `request_settings`, `max_tokens`, `truncated` (since
+2026-11-01) and, after a repair, `repairs`.
 
 **Scope of what actually gets touched:**
 

@@ -56,6 +56,25 @@ they reproduce the requests this tree's assistant_axis/judge.py sent, so new
 cells extend old ones.  --request_setting [MODEL_FRAGMENT:]key=<json> overrides
 the table for one run.
 
+Reply cap (--max_tokens, default 300 since 2026-11-01, Roger: "200 is clearly
+too low for safety"; 200 before): a reply cut at the cap (Anthropic
+stop_reason "max_tokens", OpenAI finish_reason "length") usually lacks its
+SCORE line, and parse_signed_score's fallback would score it from a stray
+number in its reasoning, so it is scored as missing without being parsed,
+counted in the run summary ("truncated N") and as a failure in the parse rate,
+and listed in the cell's provenance ("truncated", sorted entity keys).
+
+Repair (--repair_truncated, 2026-11-01): for each finished cell of the given
+models and axes, re-ask exactly the entities whose reply was cut at the cap,
+in real time on the standard tier with the model's request settings, at
+--max_tokens (equivalent to rerunning at that cap: a cap changes only the
+replies that reach it), and patch the cell: those scores (a reply cut again
+scores as missing), correlations.json, usage.json (the re-asks under the plain
+model name) and a "repairs" record in the provenance.  The cut entities come
+from the provenance "truncated" list, or for batch cells made before that list
+existed from the batches' results; a cell with neither is reported and left
+alone.
+
 Resume rule: an axis whose <output_dir>/<model>/usage.json exists is skipped
 for that model (in both modes), so a rerun only judges what is missing.
 
@@ -75,6 +94,12 @@ Usage:
         --output_dir roger/axis_judge_experiments/angel_vs_demon_tier_eval \\
         --dry_run
 
+    # Re-ask the replies a run's cells lost at the cap, at 300 tokens (preview first):
+    uv run python results_analysis/judge_tier_cost_eval.py \\
+        --axes_file scripts/tier_eval_axes.tsv \\
+        --instructions_dir /tmp/corpus_2026-05-24/data \\
+        --judge_model claude-sonnet-5 --repair_truncated --max_tokens 300 --dry_run
+
 Drop --dry_run to actually run it.  scripts/run_tier_eval.sh wraps the
 axes-file form with the corpus check.  Each --judge_model may be repeated;
 models run concurrently.  Exit status: 0 done, 1 a model failed (or a key is
@@ -89,6 +114,7 @@ import os
 import re
 import sys
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
@@ -129,6 +155,9 @@ CUSTOM_ID_RE = re.compile(r"[A-Za-z0-9_|-]{1,64}")
 EST_IN_PER_ENTITY = 320 + 150
 EST_OUT_PER_ENTITY = 80
 DEFAULT_BATCH_FALLBACK_MAX = 2000
+#: The judge's reply cap (--max_tokens); 200 until 2026-11-01 (Roger, 2026-11-01:
+#: "200 is clearly too low for safety").
+DEFAULT_MAX_TOKENS = 300
 
 
 def load_pole_description(instructions_dir: Path, pair_type: str, name: str) -> str:
@@ -308,11 +337,13 @@ def cell_done(job: AxisJob, model: str) -> bool:
 @dataclass
 class Cell:
     """One (axis, model) cell being filled: every attempted entity's score (None
-    when unparseable or failed) and the cell's own usage."""
+    when unparseable, failed or cut at the cap), the entities whose reply was
+    cut at max_tokens, and the cell's own usage."""
     idx: int
     job: AxisJob
     expected: Set[str]
     scores: Dict[str, Optional[int]] = field(default_factory=dict)
+    truncated: Set[str] = field(default_factory=set)
     usage: MultiModelUsage = field(default_factory=MultiModelUsage)
     written: bool = False
 
@@ -381,10 +412,21 @@ class RunContext:
         return True
 
 
-def record(mrun: ModelRun, cell: Cell, name: str, text: Optional[str]) -> None:
-    score = parse_signed_score(text) if text else None
-    cell.scores[name] = score
+def record(mrun: ModelRun, cell: Cell, name: str, reply: Any) -> None:
+    """Record one reply: its text, None (a failed call or a refusal), or a
+    :class:`judge_tier_transport.Truncated` (cut at max_tokens), which scores
+    None without being parsed and is listed in the cell's provenance."""
     mrun.attempted += 1
+    if isinstance(reply, tt.Truncated):
+        cell.scores[name] = None
+        cell.truncated.add(name)
+        mrun.stats.truncated += 1
+        logger.warning(f"{mrun.model}: reply for {name!r} ({cell.job.axis_dir}) cut at max_tokens: "
+                       f"scored as missing")
+        return
+    cell.truncated.discard(name)
+    score = parse_signed_score(reply) if reply else None
+    cell.scores[name] = score
     if score is None:
         logger.warning(f"{mrun.model}: unparseable/empty response for {name!r} ({cell.job.axis_dir})")
     else:
@@ -402,7 +444,7 @@ def write_cell(cell: Cell, mrun: ModelRun, max_tokens: int) -> None:
                   "projections_file": str(job.projections_file),
                   "transport": mrun.transport, "transport_reason": mrun.transport_reason,
                   "request_settings": mrun.settings, "max_tokens": max_tokens,
-                  "cell_label": CELL_LABEL}
+                  "cell_label": CELL_LABEL, "truncated": sorted(cell.truncated)}
     atomic_write_text(json.dumps({"result": scores, "_provenance": provenance}, indent=2),
                       d / "scores_descriptions.json", logger_obj=logger)
     correlations = compute_correlations(
@@ -416,7 +458,8 @@ def write_cell(cell: Cell, mrun: ModelRun, max_tokens: int) -> None:
                       logger_obj=logger)
     cell.written = True
     mrun.cells_written += 1
-    logger.info(f"[{model}] {job.axis_dir}: scored {len(scores)}/{len(cell.expected)}; "
+    logger.info(f"[{model}] {job.axis_dir}: scored {len(scores)}/{len(cell.expected)}"
+                f"{f', {len(cell.truncated)} cut at max_tokens' if cell.truncated else ''}; "
                 f"cost ${cell.usage.total_cost_usd:.4f} (see {d / 'usage.json'})")
     for slot, per_metric in correlations["descriptions"].items():
         raw = per_metric["raw"]
@@ -433,7 +476,8 @@ def write_partial_cell(cell: Cell, mrun: ModelRun, max_tokens: int) -> None:
     provenance = {"judge_model": model, "rubric_version": RUBRIC_VERSION,
                   "projections_file": str(job.projections_file), "transport": mrun.transport,
                   "request_settings": mrun.settings, "max_tokens": max_tokens, "complete": False,
-                  "n_attempted": len(cell.scores), "n_entities": len(cell.expected)}
+                  "n_attempted": len(cell.scores), "n_entities": len(cell.expected),
+                  "truncated": sorted(cell.truncated)}
     atomic_write_text(json.dumps({"result": cell.parsed_scores(), "_provenance": provenance}, indent=2),
                       d / "scores_descriptions.partial.json", logger_obj=logger)
     acc = MultiModelUsage.load_or_create(d / "usage.partial.json")
@@ -675,6 +719,7 @@ async def run_batch(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob]) -> Non
         if p.exists():
             data = json.loads(p.read_text())
             cell.scores = {k: (None if v is None else int(v)) for k, v in data.get("scores", {}).items()}
+            cell.truncated = set(data.get("truncated") or [])
             cell.usage = MultiModelUsage.from_dict(data.get("usage") or {})
         return cell
 
@@ -708,14 +753,16 @@ async def run_batch(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob]) -> Non
             return   # unanswered: comes back from runner.run and is sent in real time
         idx, name = split_custom_id(cid)
         if anthropic:
-            text, _finish, n_in, n_out, refused = tt.anthropic_reply(body)
+            text, finish, n_in, n_out, refused = tt.anthropic_reply(body)
             if refused:
                 details = body.get("stop_details") if isinstance(body, dict) else None
                 mrun.stats.note_refusal(model, (details or {}).get("category")
                                         if isinstance(details, dict) else None)
                 text = None
         else:
-            text, _finish, n_in, n_out = tt.openai_reply(body)
+            text, finish, n_in, n_out = tt.openai_reply(body)
+            refused = False
+        reply: Any = tt.Truncated(text) if finish == tt.CUT_AT_CAP and not refused else text
         cell = cell_for(idx)
         if cell is None:
             mrun.usage.charge(batch_key, n_in, n_out)
@@ -724,7 +771,7 @@ async def run_batch(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob]) -> Non
                            f"(its tokens are in this run's total only)")
             return
         _Charge(cell.usage, mrun.usage, ctx.run_usage).charge(batch_key, n_in, n_out)
-        record(mrun, cell, name, text)
+        record(mrun, cell, name, reply)
         touched.add(idx)
 
     def flush() -> None:
@@ -740,7 +787,8 @@ async def run_batch(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob]) -> Non
                 collected_path(idx).unlink(missing_ok=True)
             else:
                 atomic_write_text(json.dumps({"axis": amap.axes.get(idx), "settings": settings_now,
-                                              "scores": cell.scores, "usage": cell.usage.as_dict()},
+                                              "scores": cell.scores, "truncated": sorted(cell.truncated),
+                                              "usage": cell.usage.as_dict()},
                                              indent=2, sort_keys=True) + "\n",
                                   collected_path(idx), logger_obj=logger)
         touched.clear()
@@ -858,7 +906,7 @@ async def run_model(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob]) -> Non
 def summarise(mrun: ModelRun) -> str:
     s = mrun.stats
     parts = [f"{mrun.model}: transport={mrun.transport}", f"parsed {mrun.parsed}/{mrun.attempted}",
-             f"cells written {mrun.cells_written}"]
+             f"truncated {s.truncated}", f"cells written {mrun.cells_written}"]
     if mrun.cells_partial:
         parts.append(f"partial {mrun.cells_partial}")
     if mrun.cells_incomplete:
@@ -871,6 +919,607 @@ def summarise(mrun: ModelRun) -> str:
             parts.append(f"{label} {n}")
     parts.append(f"cost ${mrun.usage.total_cost_usd:.4f}")
     return "  ".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# Repair: re-ask the replies cut at the cap (--repair_truncated, 2026-11-01)
+# ---------------------------------------------------------------------------
+
+SOURCE_PROVENANCE = "provenance"
+SOURCE_BATCH = "batch results"
+_SHORT_ID_RE = re.compile(r"r(\d{6})")
+
+
+class BatchRecordError(RuntimeError):
+    """A model's batch results cannot be tied to its cells (a batch or output
+    file unreadable, or short ids that cannot be mapped back): its cells with
+    no truncation list in their provenance are left alone."""
+
+
+@dataclass
+class BatchReply:
+    """One succeeded batch result, as the repair needs it."""
+    text: Optional[str]
+    finish: Optional[str]
+    refused: bool
+    n_in: int
+
+    @property
+    def cut(self) -> bool:
+        return self.finish == tt.CUT_AT_CAP and not self.refused
+
+    def legacy_score(self) -> Optional[int]:
+        """The score this script recorded for the reply before 2026-11-01
+        (a cut reply parsed like any other)."""
+        return None if self.refused or not self.text else parse_signed_score(self.text)
+
+
+def _get(obj: Any, name: str, default: Any = None) -> Any:
+    return obj.get(name, default) if isinstance(obj, dict) else getattr(obj, name, default)
+
+
+async def _items(x: Any):
+    """Items of a sync or async iterable, or of an awaitable giving one (the
+    SDKs' batch results decoder)."""
+    if asyncio.iscoroutine(x) or isinstance(x, asyncio.Future):
+        x = await x
+    if hasattr(x, "__aiter__"):
+        async for item in x:
+            yield item
+    else:
+        for item in x:
+            yield item
+
+
+def _content_text(content: Any) -> str:
+    """The text of an OpenAI ``files.content`` response."""
+    text = _get(content, "text")
+    if callable(text):
+        text = text()
+    if text is None and hasattr(content, "read"):
+        raw = content.read()
+        text = raw.decode("utf-8") if isinstance(raw, bytes) else raw
+    return text or ""
+
+
+async def _anthropic_batch_replies(client: Any, batch_id: str) -> Tuple[Dict[str, BatchReply], Set[str]]:
+    """``(short id -> reply for the succeeded results, every short id returned)``."""
+    replies: Dict[str, BatchReply] = {}
+    seen: Set[str] = set()
+    async for res in _items(client.messages.batches.results(batch_id)):
+        bcid = str(_get(res, "custom_id"))
+        seen.add(bcid)
+        result = _get(res, "result")
+        if _get(result, "type") != "succeeded":
+            continue
+        text, finish, n_in, _n_out, refused = tt.anthropic_reply(_get(result, "message"))
+        replies[bcid] = BatchReply(text, finish, refused, n_in)
+    return replies, seen
+
+
+async def _openai_batch_replies(client: Any, batch_id: str) -> Dict[str, BatchReply]:
+    """custom id -> reply for the succeeded lines of an OpenAI batch's output file."""
+    batch = await client.batches.retrieve(batch_id)
+    fid = _get(batch, "output_file_id")
+    if not fid:
+        raise BatchRecordError(f"batch {batch_id} has no output file")
+    try:
+        text = _content_text(await client.files.content(fid))
+    except Exception as e:  # noqa: BLE001 -- the runner deletes the file once collected
+        raise BatchRecordError(f"batch {batch_id}: output file {fid} unreadable ({type(e).__name__}: {e}; "
+                               f"the batch runner deletes it once the batch is collected)") from e
+    replies: Dict[str, BatchReply] = {}
+    for line in text.split("\n"):
+        if not line.strip():
+            continue
+        item = json.loads(line)
+        response = item.get("response") or {}
+        if item.get("error") is None and response.get("status_code") == 200:
+            t, finish, pt, _ct = tt.openai_reply(response.get("body") or {})
+            replies[str(item.get("custom_id"))] = BatchReply(t, finish, False, pt)
+    return replies
+
+
+@dataclass
+class RepairCell:
+    job: AxisJob
+    dir: Path
+    data: Dict[str, Any]                  # scores_descriptions.json as read
+    source: str = ""
+    original: Set[str] = field(default_factory=set)   # cut in the cell's own run
+    todo: List[str] = field(default_factory=list)     # to re-ask now
+    est_in: Dict[str, int] = field(default_factory=dict)
+    slots: List[int] = field(default_factory=list)     # as in the cell's correlations.json
+    answers: Dict[str, Any] = field(default_factory=dict)   # entity -> int, None or Truncated
+    usage: MultiModelUsage = field(default_factory=MultiModelUsage)
+
+    @property
+    def prov(self) -> Dict[str, Any]:
+        return self.data.get("_provenance") or {}
+
+
+@dataclass
+class RepairStats:
+    cells_with_todo: int = 0
+    cells_repaired: int = 0
+    reasked: int = 0
+    now_scored: int = 0
+    unscored: int = 0          # answered without a score (unparseable or refused)
+    still_truncated: int = 0
+    failed: int = 0            # no answer (call failed): left as they were, a rerun tries again
+    est_cost: float = 0.0
+
+
+def entities_to_reask(original: Set[str], repairs: Sequence[Dict[str, Any]], cell_cap: int,
+                      cap: int) -> Tuple[List[str], List[str]]:
+    """``(to re-ask, already re-asked at >= cap)`` from the entities cut in the
+    cell's own run and its earlier repair records: an entity is re-asked when
+    it is still cut and ``cap`` is above the cap it was last asked at."""
+    current = set(original)
+    last_cap = {n: cell_cap for n in original}
+    for rec in repairs:
+        for n in rec.get("reasked") or []:
+            current.discard(n)
+            last_cap[n] = int(rec.get("max_tokens") or 0)
+        current.update(rec.get("still_truncated") or [])
+    todo = sorted(n for n in current if cap > last_cap.get(n, cell_cap))
+    return todo, sorted(current - set(todo))
+
+
+def _earlier_reasked(cell_data: Dict[str, Any]) -> Set[str]:
+    return {n for rec in (cell_data.get("_provenance") or {}).get("repairs") or []
+            for n in rec.get("reasked") or []}
+
+
+def _read_cell(job: AxisJob, model: str) -> Optional[Dict[str, Any]]:
+    p = cell_dir(job, model) / "scores_descriptions.json"
+    if not p.exists():
+        return None
+    return json.loads(p.read_text())
+
+
+async def read_batch_record(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob], client: Any,
+                            notes: List[str]) -> Dict[int, Dict[str, BatchReply]]:
+    """The model's batch results by axis index and entity, for every batch its
+    ``batch_state.json`` records, checked against the cells.
+
+    Custom ids are ``a<axis index>|<entity>``.  OpenAI results carry them; the
+    Anthropic runner sent short ids (``r000123``) and maps them back through
+    its chunk files, which it deletes once a batch is collected.  Without a
+    chunk file the short ids are rebuilt from the order the requests were
+    written in: the axes judged in batch in axis-map order, each axis's
+    entities in load order, chunks in their recorded order, as a run (or a
+    rerun that collected the batches in flight first and submitted the rest)
+    writes them.  Either way every result must agree with the cell it maps to
+    (its score as this script recorded it, a cut reply's either that or none),
+    or :class:`BatchRecordError` is raised."""
+    model = mrun.model
+    work = batch_work_dir(ctx, model)
+    state_path = work / "batch_state.json"
+    if not state_path.exists():
+        raise BatchRecordError(f"no {state_path}")
+    chunks = [r for r in json.loads(state_path.read_text()).get("chunks", []) if r.get("batch_id")]
+    if not chunks:
+        raise BatchRecordError(f"{state_path} records no batch")
+    if any(not r.get("collected") for r in chunks):
+        raise BatchRecordError(f"{state_path} records batches not yet collected: finish the run first")
+    amap = AxisMap(work / "axis_map.json")
+    rec_settings = amap.settings or {}
+    if rec_settings.get("model") not in (None, model):
+        raise BatchRecordError(f"{work / 'axis_map.json'} was requested with {rec_settings.get('model')}, "
+                               f"not {model}")
+    recorded_dir = rec_settings.get("instructions_dir")
+    if recorded_dir and Path(recorded_dir).resolve() != Path(ctx.instructions_dir).resolve():
+        notes.append(f"the batches were requested with --instructions_dir {recorded_dir}, this run reads "
+                     f"{ctx.instructions_dir}")
+
+    # The axis map's axes: the repair's own job for an axis it names, else the map's entry.
+    by_name = {(j.axis_dir, j.pos, j.neg, j.pair_type): j for j in jobs}
+    axis_jobs: Dict[int, AxisJob] = {}
+    for idx, entry in amap.axes.items():
+        key = (entry["axis_dir"], entry["pos"], entry["neg"], entry["pair_type"])
+        axis_jobs[idx] = by_name.get(key) or AxisJob.from_map_entry(entry)
+    cells_data = {idx: _read_cell(job, model) for idx, job in axis_jobs.items()}
+    batch_axes = sorted(idx for idx, data in cells_data.items()
+                        if data is not None and (data.get("_provenance") or {}).get("transport") == "batch")
+    loaded: Dict[int, AxisJob] = {}
+
+    def entities_of(idx: int) -> List[str]:
+        if idx not in loaded:
+            job = axis_jobs[idx]
+            loaded[idx] = job if job.entities else load_axis(job, ctx.instructions_dir)
+        return [name for _, name, _ in loaded[idx].entities]
+
+    anthropic = provider_for_model(model) == "anthropic"
+    by_cid: Dict[str, BatchReply] = {}
+    if anthropic:
+        per_chunk = []
+        for rec in chunks:
+            try:
+                replies, seen = await _anthropic_batch_replies(client, rec["batch_id"])
+            except Exception as e:  # noqa: BLE001
+                raise BatchRecordError(f"batch {rec['batch_id']}: results unreadable "
+                                       f"({type(e).__name__}: {e})") from e
+            per_chunk.append((rec, replies, seen))
+        if all(Path(rec["path"]).exists() for rec, _, _ in per_chunk):
+            how = "through the chunk files"
+            for rec, replies, _seen in per_chunk:
+                with open(rec["path"], encoding="utf-8") as f:
+                    lines = [json.loads(x) for x in f if x.strip()]
+                to_cid = {line["batch_custom_id"]: line["custom_id"] for line in lines}
+                for bcid, reply in replies.items():
+                    if bcid not in to_cid:
+                        raise BatchRecordError(f"batch {rec['batch_id']}: result {bcid} is not in {rec['path']}")
+                    by_cid[to_cid[bcid]] = reply
+        else:
+            how = "by rebuilding the order the requests were written in (chunk files deleted at collection)"
+            sequence = [custom_id(idx, name) for idx in batch_axes for name in entities_of(idx)]
+            total = sum(int(rec.get("n_requests") or 0) for rec in chunks)
+            if total != len(sequence):
+                raise BatchRecordError(
+                    f"the chunk files are gone and the {total} requests the batches recorded are not the "
+                    f"{len(sequence)} entities of the {len(batch_axes)} axes judged in batch, so the short ids "
+                    f"cannot be mapped back")
+            offset = 0
+            for rec, replies, seen in per_chunk:
+                n = int(rec.get("n_requests") or 0)
+                ids = sequence[offset:offset + n]
+                if Path(rec["path"]).exists():
+                    with open(rec["path"], encoding="utf-8") as f:
+                        if [json.loads(x)["custom_id"] for x in f if x.strip()] != ids:
+                            raise BatchRecordError(f"{rec['path']} does not hold the requests the rebuilt "
+                                                   f"order gives it")
+                for bcid in seen:
+                    m = _SHORT_ID_RE.fullmatch(bcid)
+                    if m is None or int(m.group(1)) >= n:
+                        raise BatchRecordError(f"batch {rec['batch_id']}: short id {bcid!r} is outside "
+                                               f"r000000..r{n - 1:06d}")
+                for bcid, reply in replies.items():
+                    by_cid[ids[int(bcid[1:])]] = reply
+                offset += n
+    else:
+        how = "by their custom ids"
+        for rec in chunks:
+            by_cid.update(await _openai_batch_replies(client, rec["batch_id"]))
+
+    out: Dict[int, Dict[str, BatchReply]] = {}
+    for cid, reply in by_cid.items():
+        idx, name = split_custom_id(cid)
+        out.setdefault(idx, {})[name] = reply
+
+    # Every result must agree with the cell it maps to.
+    checked = 0
+    mismatches: List[str] = []
+    for idx, replies in out.items():
+        data = cells_data.get(idx)
+        if idx not in batch_axes or data is None:
+            continue
+        result = data.get("result") or {}
+        skip = _earlier_reasked(data)
+        for name, reply in replies.items():
+            if name in skip:
+                continue
+            checked += 1
+            have = result.get(name)
+            ok = have in (reply.legacy_score(), None) if reply.cut else have == reply.legacy_score()
+            if not ok:
+                mismatches.append(f"{axis_jobs[idx].axis_dir}/{name}: cell {have}, batch "
+                                  f"{reply.legacy_score()}")
+    if mismatches:
+        raise BatchRecordError(f"{len(mismatches)} of {checked} batch results, mapped {how}, disagree with "
+                               f"the cells' scores (e.g. {'; '.join(mismatches[:5])}): the record does not "
+                               f"describe these cells")
+    n_cut = sum(r.cut for replies in out.values() for r in replies.values())
+    logger.info(f"[{model}] batch record: {len(by_cid)} results from {len(chunks)} batch(es), mapped {how}; "
+                f"{checked} checked against the cells, all agree; {n_cut} cut at max_tokens")
+    return out
+
+
+def _same_correlations(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
+    """The same entities, scores and n per slot and metric, and rho and p equal
+    to 1e-12 (or both NaN)."""
+    import math
+    try:
+        if set(a) != set(b):
+            return False
+        for mode in a:
+            if set(a[mode]) != set(b[mode]):
+                return False
+            for slot in a[mode]:
+                for metric in ("raw", "whitened"):
+                    x, y = a[mode][slot][metric], b[mode][slot][metric]
+                    if (x["names"], x["scores"], x["n"]) != (y["names"], y["scores"], y["n"]):
+                        return False
+                    for k in ("rho", "p"):
+                        u, v = float(x[k]), float(y[k])
+                        if not ((math.isnan(u) and math.isnan(v)) or abs(u - v) <= 1e-12):
+                            return False
+        return True
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
+def merge_usage_dict(existing: Dict[str, Any], add: MultiModelUsage) -> Dict[str, Any]:
+    """``usage.json`` with ``add`` merged in: entries ``add`` does not touch are
+    kept as they were, touched ones summed (cost from the summed tokens), and
+    the totals recomputed."""
+    merged = MultiModelUsage.from_dict(existing)
+    merged.merge_from(add)
+    out = merged.as_dict()
+    for key, entry in (existing.get("per_model") or {}).items():
+        if key not in add.per_model:
+            out["per_model"][key] = entry
+    return out
+
+
+def patch_cell(rc: RepairCell, mrun: ModelRun, max_tokens: int) -> Tuple[List[str], List[str]]:
+    """Write the re-asked entities' new scores into the cell, recompute its
+    correlations and merge the re-ask usage into usage.json (written last).
+    Returns ``(re-asked, still cut)``."""
+    job, d = rc.job, rc.dir
+    result = dict(rc.data.get("result") or {})
+    reasked = sorted(rc.answers)
+    still = sorted(n for n, a in rc.answers.items() if isinstance(a, tt.Truncated))
+    for name, answer in rc.answers.items():
+        if isinstance(answer, int) and not isinstance(answer, bool):
+            result[name] = answer
+        else:
+            result.pop(name, None)
+    result = {k: result[k] for k in sorted(result)}
+    prov = dict(rc.prov)
+    prov["repairs"] = list(prov.get("repairs") or []) + [{
+        "date": datetime.now(timezone.utc).isoformat(timespec="seconds"), "max_tokens": max_tokens,
+        "reasked": reasked, "still_truncated": still, "source": rc.source}]
+    new_data = dict(rc.data)
+    new_data["result"] = result
+    new_data["_provenance"] = prov
+    correlations = compute_correlations(
+        scores_by_mode={"descriptions": result},
+        projections=job.projections,
+        slots=rc.slots,
+        excluded_set=set(job.axis_spec.exclusions),
+    )
+    usage = merge_usage_dict(json.loads((d / "usage.json").read_text()), rc.usage)
+    atomic_write_text(json.dumps(new_data, indent=2), d / "scores_descriptions.json", logger_obj=logger)
+    atomic_write_text(json.dumps(correlations, indent=2), d / "correlations.json", logger_obj=logger)
+    atomic_write_text(json.dumps(usage, indent=2, sort_keys=True), d / "usage.json", logger_obj=logger)
+    logger.info(f"[{mrun.model}] {job.axis_dir}: repaired {len(reasked)} ({len(reasked) - len(still)} no longer "
+                f"cut, {len(still)} cut again at {max_tokens}); cost ${rc.usage.total_cost_usd:.4f}")
+    return reasked, still
+
+
+def prepare_repair_cell(rc: RepairCell, mrun: ModelRun, ctx: RunContext, notes: List[str]) -> bool:
+    """Load the cell's axis, check the cell can be patched as its original run
+    wrote it (model, request settings, projections, correlations), and work out
+    what to re-ask.  False (with a note) when it cannot."""
+    job, prov, model = rc.job, rc.prov, mrun.model
+    if prov.get("judge_model") not in (None, model):
+        notes.append(f"{job.axis_dir}: judged by {prov.get('judge_model')}, not {model}; left alone")
+        return False
+    if prov.get("request_settings") != mrun.settings:
+        notes.append(f"{job.axis_dir}: recorded request settings {json.dumps(prov.get('request_settings'))} "
+                     f"differ from this run's {json.dumps(mrun.settings)} (pass the run's --request_setting "
+                     f"and --cell_label); left alone")
+        return False
+    cell_cap = int(prov.get("max_tokens") or 0)
+    rc.todo, already = entities_to_reask(rc.original, prov.get("repairs") or [], cell_cap, ctx.max_tokens)
+    if already:
+        notes.append(f"{job.axis_dir}: {len(already)} cut entit{'y' if len(already) == 1 else 'ies'} already "
+                     f"re-asked at max_tokens >= {ctx.max_tokens} ({', '.join(already[:5])})")
+    if not rc.todo:
+        return False
+    if not job.entities:
+        load_axis(job, ctx.instructions_dir)
+    known = {name for _, name, _ in job.entities}
+    gone = [n for n in rc.todo if n not in known]
+    if gone:
+        notes.append(f"{job.axis_dir}: {len(gone)} cut entities have no description under "
+                     f"{ctx.instructions_dir} and are not re-asked: {gone[:5]}")
+        rc.todo = [n for n in rc.todo if n in known]
+    # The correlations are recomputed exactly as the original write did: the
+    # same projections, slots and pole exclusion.  Recomputing them from the
+    # unchanged scores must give the file on disk.
+    try:
+        on_disk = json.loads((rc.dir / "correlations.json").read_text())
+        rc.slots = [int(s) for s in on_disk["descriptions"]]
+    except (OSError, ValueError, KeyError) as e:
+        notes.append(f"{job.axis_dir}: correlations.json unreadable ({e}); left alone")
+        return False
+    all_proj = load_projections(job.projections_file, "all")
+    if any(s not in all_proj for s in rc.slots):
+        notes.append(f"{job.axis_dir}: correlations.json has slots {rc.slots} that {job.projections_file} "
+                     f"lacks; left alone")
+        return False
+    job.projections = {s: all_proj[s] for s in rc.slots}
+    again = compute_correlations(scores_by_mode={"descriptions": rc.data.get("result") or {}},
+                                 projections=job.projections, slots=rc.slots,
+                                 excluded_set=set(job.axis_spec.exclusions))
+    if not _same_correlations(json.loads(json.dumps(again)), on_disk):
+        notes.append(f"{job.axis_dir}: the correlations recomputed from the cell's scores and "
+                     f"{job.projections_file} are not those on disk; left alone")
+        return False
+    return bool(rc.todo)
+
+
+async def repair_model(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob], *, dry_run: bool) -> RepairStats:
+    """--repair_truncated for one model: find each finished cell's entities whose
+    reply was cut at the cap, re-ask them in real time at ``ctx.max_tokens``
+    and patch the cell (dry run: report them and the estimated cost)."""
+    model = mrun.model
+    stats = RepairStats()
+    notes: List[str] = []
+    cells: List[RepairCell] = []
+    need_batch: List[RepairCell] = []
+    for job in jobs:
+        d = cell_dir(job, model)
+        if not cell_done(job, model):
+            notes.append(f"{job.axis_dir}: no finished cell at {d}; skipped")
+            continue
+        data = json.loads((d / "scores_descriptions.json").read_text())
+        rc = RepairCell(job, d, data)
+        prov = rc.prov
+        if "truncated" in prov:
+            rc.source, rc.original = SOURCE_PROVENANCE, set(prov.get("truncated") or [])
+            cells.append(rc)
+        elif prov.get("transport") == "batch":
+            rc.source = SOURCE_BATCH
+            need_batch.append(rc)
+        else:
+            notes.append(f"{job.axis_dir}: no truncation record (made "
+                         f"{'by ' + prov['transport'] if prov.get('transport') else 'by an earlier version of this script'}, "
+                         f"no truncation list in its provenance); left alone")
+
+    client = None
+    if need_batch or not dry_run:
+        client = make_anthropic_client() if provider_for_model(model) == "anthropic" else make_openai_client(None)
+    if need_batch:
+        try:
+            record_ = await read_batch_record(ctx, mrun, jobs, client, notes)
+        except BatchRecordError as e:
+            logger.error(f"[{model}] batch record unusable: {e}")
+            for rc in need_batch:
+                notes.append(f"{rc.job.axis_dir}: no usable truncation record ({e}); left alone")
+            record_ = None
+        if record_ is not None:
+            amap = AxisMap(batch_work_dir(ctx, model) / "axis_map.json")
+            requested = amap.settings or {}
+            for rc in need_batch:
+                if (requested.get("max_tokens"), requested.get("request_settings")) != (
+                        rc.prov.get("max_tokens"), rc.prov.get("request_settings")):
+                    notes.append(f"{rc.job.axis_dir}: the batches were requested with max_tokens "
+                                 f"{requested.get('max_tokens')} and {json.dumps(requested.get('request_settings'))}, "
+                                 f"the cell records {rc.prov.get('max_tokens')} and "
+                                 f"{json.dumps(rc.prov.get('request_settings'))}; left alone")
+                    continue
+                entry = rc.job.map_entry()
+                idx = next((i for i, e in amap.axes.items() if e == entry), None)
+                if idx is None:
+                    idx = next((i for i, e in amap.axes.items()
+                                if (e["axis_dir"], e["pos"], e["neg"], e["pair_type"])
+                                == (rc.job.axis_dir, rc.job.pos, rc.job.neg, rc.job.pair_type)), None)
+                if idx is None or idx not in record_:
+                    notes.append(f"{rc.job.axis_dir}: not in the batch record; left alone")
+                    continue
+                replies = record_[idx]
+                rc.original = {n for n, r in replies.items() if r.cut}
+                rc.est_in = {n: r.n_in for n, r in replies.items() if r.cut}
+                cells.append(rc)
+
+    work_cells = [rc for rc in cells if prepare_repair_cell(rc, mrun, ctx, notes)]
+    rate_in, rate_out = price_for_model(model)
+    for rc in work_cells:
+        stats.cells_with_todo += 1
+        stats.est_cost += sum(rc.est_in.get(n, EST_IN_PER_ENTITY) * rate_in + ctx.max_tokens * rate_out
+                              for n in rc.todo) / 1e6
+    n_todo = sum(len(rc.todo) for rc in work_cells)
+
+    print(f"\n{model}{CELL_LABEL}: {len(work_cells)} cell(s) with replies cut at the cap to re-ask, {n_todo} "
+          f"entities, at max_tokens {ctx.max_tokens}; est. cost ${stats.est_cost:.4f} (real time at "
+          f"${rate_in:.2f}/${rate_out:.2f} per 1M; input as measured where known, output at the cap)")
+    print(f"  {len(cells)} finished cell(s) with a truncation record "
+          f"({sum(rc.source == SOURCE_PROVENANCE for rc in cells)} from their provenance, "
+          f"{sum(rc.source == SOURCE_BATCH for rc in cells)} from batch results), "
+          f"{sum(len(rc.original) for rc in cells)} replies cut in their own runs")
+    for rc in work_cells:
+        print(f"  {rc.job.axis_dir:55s} {len(rc.todo):4d}  (source: {rc.source}; cell cap "
+              f"{rc.prov.get('max_tokens')})  {', '.join(rc.todo[:8])}{' ...' if len(rc.todo) > 8 else ''}")
+    for note in notes:
+        print(f"  note: {note}")
+    if dry_run or not work_cells:
+        return stats
+
+    rate_limiter = RateLimiter(ctx.requests_per_second)
+    fatal: List[BaseException] = []
+
+    def gate() -> bool:
+        return bool(fatal) or ctx.over_budget()
+
+    async def one(rc: RepairCell, name: str) -> None:
+        etype, desc = next((t, ds) for t, n, ds in rc.job.entities if n == name)
+        prompt = build_static_prompt(rc.job.axis_spec, etype, name, desc)
+        this_call = MultiModelUsage()
+        try:
+            reply = await tt.call_model(model, prompt, ctx.max_tokens, rate_limiter,
+                                        _Charge(rc.usage, mrun.usage, ctx.run_usage, this_call), client=client,
+                                        settings=mrun.settings, stats=mrun.stats, gate=gate)
+        except tt.JudgeRequestError as e:
+            fatal.append(e)
+            return
+        if reply is tt.SKIPPED:
+            return
+        if this_call.n_calls == 0:      # no answer (a failed call): left as it was
+            stats.failed += 1
+            return
+        mrun.attempted += 1
+        if isinstance(reply, tt.Truncated):
+            mrun.stats.truncated += 1
+            rc.answers[name] = reply
+            logger.warning(f"[{model}] {rc.job.axis_dir}: {name!r} cut again at max_tokens {ctx.max_tokens}")
+            return
+        score = parse_signed_score(reply) if reply else None
+        rc.answers[name] = score
+        if score is not None:
+            mrun.parsed += 1
+
+    await asyncio.gather(*(one(rc, name) for rc in work_cells for name in rc.todo))
+    for rc in work_cells:
+        if not rc.answers:
+            continue
+        reasked, still = patch_cell(rc, mrun, ctx.max_tokens)
+        stats.cells_repaired += 1
+        stats.reasked += len(reasked)
+        stats.still_truncated += len(still)
+        stats.now_scored += sum(1 for a in rc.answers.values() if isinstance(a, int) and not isinstance(a, bool))
+    stats.unscored = stats.reasked - stats.now_scored - stats.still_truncated
+    if fatal:
+        raise fatal[0]
+    return stats
+
+
+async def repair_main(args: argparse.Namespace, jobs: List[AxisJob], runs: List[ModelRun]) -> int:
+    ctx = RunContext(instructions_dir=Path(args.instructions_dir),
+                     batch_root=Path(args.experiments_dir) / BATCH_DIRNAME,
+                     max_tokens=args.max_tokens, requests_per_second=args.requests_per_second,
+                     budget_usd=args.budget_usd)
+    from dotenv import find_dotenv, load_dotenv
+    load_dotenv(find_dotenv(usecwd=True))
+    if not args.dry_run:
+        missing_keys = sorted({key_name(m.model) for m in runs if not os.getenv(key_name(m.model))})
+        if missing_keys:
+            logger.error(f"{', '.join(missing_keys)} not set (environment or .env): nothing sent")
+            return 1
+    failed = False
+    results: List[Tuple[ModelRun, Optional[RepairStats]]] = []
+    for mrun in runs:
+        try:
+            st = await repair_model(ctx, mrun, jobs, dry_run=args.dry_run)
+        except Exception as e:  # noqa: BLE001 -- reported per model
+            logger.error(f"[{mrun.model}] repair failed: {type(e).__name__}: {e}")
+            mrun.error, st, failed = e, None, True
+        results.append((mrun, st))
+    if args.dry_run:
+        total = sum(st.est_cost for _, st in results if st is not None)
+        print(f"\nTotal estimated cost: ${total:.4f}")
+        print("Dry run only -- no judge calls made, nothing written (batch results were read).")
+        return 1 if failed else 0
+    print("\nRepair summary:")
+    for mrun, st in results:
+        if st is None:
+            print(f"  {mrun.model}{CELL_LABEL}: FAILED: {type(mrun.error).__name__}: {mrun.error}")
+            continue
+        print(f"  {mrun.model}{CELL_LABEL}: cells repaired {st.cells_repaired}  entities re-asked {st.reasked}  "
+              f"now scored {st.now_scored}  still truncated {st.still_truncated}"
+              + (f"  answered without a score {st.unscored}" if st.unscored else "")
+              + (f"  failed calls {st.failed} (left as they were; rerun to retry)" if st.failed else "")
+              + (f"  not issued {mrun.stats.skipped}" if mrun.stats.skipped else "")
+              + f"  cost ${mrun.usage.total_cost_usd:.4f}")
+        if st.reasked or st.failed:
+            warn_if_low_parse_rate(label=f"judge_tier_cost_eval:repair:{mrun.model}{CELL_LABEL}",
+                                   n_ok=st.now_scored, n_total=st.reasked + st.failed, logger_obj=logger)
+    logger.info(ctx.run_usage.log_line())
+    if failed:
+        return 1
+    return 2 if ctx.budget_hit else 0
 
 
 # ---------------------------------------------------------------------------
@@ -909,7 +1558,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--slots", type=str, default="all",
                         help="Comma-separated slot indices, or 'all' (default; matches every "
                              "slot present in the cached projections.json).")
-    parser.add_argument("--max_tokens", type=int, default=200)
+    parser.add_argument("--max_tokens", type=int, default=DEFAULT_MAX_TOKENS,
+                        help=f"The judge's reply cap (default {DEFAULT_MAX_TOKENS}; 200 before 2026-11-01).  "
+                             "A reply cut at the cap is scored as missing, never parsed, and listed under "
+                             "'truncated' in the cell's provenance; --repair_truncated re-asks such replies "
+                             "at a higher cap.")
     parser.add_argument("--cell_label", type=str, default="",
                         help="Suffix for this run's cell directories, e.g. @t0 or @nothink: cells go to "
                              "<axis>_tier_eval/<model><label>/ (and batches to _tier_eval_batches/<model><label>/), "
@@ -933,6 +1586,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--limit", type=int, default=None,
                         help="Only score the first N entities (alphabetical) of each axis. For validating a "
                              "new judge model cheaply before committing to the full corpus.")
+    parser.add_argument("--repair_truncated", action="store_true",
+                        help="Instead of judging, repair finished cells: re-ask in real time (standard tier, the "
+                             "model's request settings as in a normal run, --max_tokens) exactly the entities "
+                             "whose reply was cut at the cap, and patch each cell (those scores, its "
+                             "correlations.json, usage.json, and a 'repairs' record in its provenance).  The "
+                             "cut entities come from the cell's provenance 'truncated' list, or, for a batch "
+                             "cell made before 2026-11-01, from its batches' results "
+                             f"({BATCH_DIRNAME}/<model><label>/batch_state.json); a cell with neither is left "
+                             "alone.  With --dry_run: report the cells, counts and estimated cost (batch results "
+                             "are read; no judge calls).")
     return parser
 
 
@@ -998,16 +1661,33 @@ async def main_async(argv: Optional[Sequence[str]] = None) -> int:
 
     runs: List[ModelRun] = []
     for model in dict.fromkeys(args.judge_model):
-        try:
-            choice = tt.choose_transport(model, args.transport)
-        except (tt.JudgeRequestError, ValueError) as e:
-            parser.error(str(e))
+        if args.repair_truncated:
+            choice = tt.TransportChoice("realtime", False, "--repair_truncated: real time, standard tier")
+        else:
+            try:
+                choice = tt.choose_transport(model, args.transport)
+            except (tt.JudgeRequestError, ValueError) as e:
+                parser.error(str(e))
         runs.append(ModelRun(model=model, settings=tt.judge_request_settings(model, overrides), choice=choice))
+
+    if args.repair_truncated:
+        for flag, value in (("--limit", args.limit), ("--slots", None if args.slots == "all" else args.slots),
+                            ("--transport", None if args.transport == "auto" else args.transport)):
+            if value is not None:
+                parser.error(f"--repair_truncated excludes {flag} (a repair re-asks in real time and keeps "
+                             f"the cell's entities and slots)")
+        for mrun in runs:
+            try:
+                price_for_model(mrun.model)
+            except KeyError as e:
+                parser.error(e.args[0] if e.args else f"no price for {mrun.model!r}")
 
     skipped_axes = [job for job in jobs if not Path(job.projections_file).exists()]
     for job in skipped_axes:
         logger.warning(f"SKIP (no projections.json): {job.axis_dir} ({job.projections_file})")
     jobs = [job for job in jobs if Path(job.projections_file).exists()]
+    if args.repair_truncated:
+        return await repair_main(args, jobs, runs)
     for job in jobs:
         load_axis(job, instructions_dir, args.slots, args.limit)
     if args.limit is not None:
