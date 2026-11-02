@@ -2789,7 +2789,10 @@ charged as output.  A 429 or 5xx is retried eight times with growing sleeps.
 Candidates in the Luna / Haiku 5.5 price class: `gemini-3.1-flash-lite`
 ($0.25 / $1.50) and `gemini-3.5-flash-lite` ($0.30 / $2.50); 2.5 Flash-Lite is
 no longer offered to new users.  A free-tier key is enough for probes, not
-for a run (its daily cap is far below one pass over 30 axes).
+for a quick run: about 15 requests a minute and about 500 a day per model (seen
+2026-11-02), against 870 calls for one pass over 30 axes at N=20.  A 429 naming a
+`PerDay` quota raises `BillingError`, which stops the run; a rerun resumes from the
+saved answers once the quota resets.
 
 **Request settings per model** come from `JUDGE_REQUEST_SETTINGS` in
 [`judge_tier_transport.py`](./judge_tier_transport.py). For the models the
@@ -2996,6 +2999,19 @@ the held-out 31 axes gain as much as the 30 tuning axes.  Plot:
 [`pareto_pooled_61axes_rubrics.png`](../roger/axis_judge_experiments/pareto_pooled_61axes_rubrics.png);
 account in update 2 of
 [`pareto_pooled_61axes_notes.md`](../roger/axis_judge_experiments/pareto_pooled_61axes_notes.md).
+
+**Tuned (2026-11-02): use N=20, two passes, no reasoning** (`--entities_per_call 20`;
+`--max_tokens` 1200 for the Lunas, 3000 for Haiku 5.5).  On 61 axes: gpt-6-luna 0.712 at
+$0.019, gpt-5.6-luna 0.732 at $0.042, and the two judges gpt-5.6-luna + claude-haiku-5-5
+averaged 0.744 at $0.084, which are the frontier in all 12 projection variants; N=5 is
+worse, more passes pay less each, and reasoning effort pays nothing.
+[`scripts/judge_tier_grid_analysis.py`](../scripts/judge_tier_grid_analysis.py) prints
+the grid and draws
+[`judge_tier_grid_dev30.png`](../roger/axis_judge_experiments/judge_tier_grid_dev30/judge_tier_grid_dev30.png);
+[`scripts/judge_tier_compare_arms.py`](../scripts/judge_tier_compare_arms.py) compares any
+arms, blends included, with bootstrap intervals; a blend's cell comes from
+`judge_tier_average_cells.py` with both judges' cells as sources.  Account in update 3 of
+the same notes.
 Batched cells judged live can be re-scored from their archived replies with
 `scripts/judge_tier_reparse_batched.py` (no API calls), as was done after the
 parser learnt Haiku's layout and after a resume bug.

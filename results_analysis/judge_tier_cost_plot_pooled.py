@@ -61,13 +61,15 @@ from assistant_axis.judge_pricing import (
 )
 from assistant_axis.plot_metadata import png_metadata
 
-PROVIDER_COLOR = {"openai": "#7FB069", "anthropic": "#D9636B", "google": "#5B8DEF"}
+PROVIDER_COLOR = {"openai": "#7FB069", "anthropic": "#D9636B", "google": "#5B8DEF", "blend": "#8E6BBF"}
 
 EST_IN_PER_ENTITY = 320 + 150
 EST_OUT_PER_ENTITY = 80
 
 
 def provider_of(model: str) -> str:
+    if "+" in model:                # judges blended: gpt-5.6-luna+claude-haiku-5-5@...
+        return "blend"
     if model.startswith("gemini"):
         return "google"
     return "openai" if model.startswith(("gpt-", "o1-", "o3-", "o4-")) else "anthropic"
@@ -552,7 +554,8 @@ PRICE_BASIS_LABEL = {
 
 def plot(agg: Dict[str, dict], slot: int, n_total_axes: int, output_path: Path,
          excluded: Optional[Dict[str, dict]] = None, price_basis: str = "list",
-         rho_note: str = "", left_out: Sequence[str] = (), links: Sequence[Tuple[str, str]] = ()) -> None:
+         rho_note: str = "", left_out: Sequence[str] = (), links: Sequence[Tuple[str, str]] = (),
+         links_label: str = "same judge: old rubric → new rubric") -> None:
     fig, ax = plt.subplots(figsize=(11, 8))
 
     model_list = sorted(agg.items(), key=lambda kv: kv[1]["mean_cost"])
@@ -646,14 +649,14 @@ def plot(agg: Dict[str, dict], slot: int, n_total_axes: int, output_path: Path,
     if any(d["provider"] == "google" for d in agg.values()):
         provider_handles.insert(2, plt.Line2D([0], [0], marker="o", color="w", markerfacecolor=PROVIDER_COLOR["google"],
                                               markeredgecolor=PROVIDER_COLOR["google"], markersize=10, label="Google"))
+    if any(d["provider"] == "blend" for d in agg.values()):
+        provider_handles.insert(2, plt.Line2D([0], [0], marker="o", color="w", markerfacecolor=PROVIDER_COLOR["blend"],
+                                              markeredgecolor=PROVIDER_COLOR["blend"], markersize=10, label="Blend of judges"))
     if links:
-        provider_handles.append(plt.Line2D([0], [0], color="#555555", lw=1.1, alpha=0.75,
-                                           label="same judge: old rubric → new rubric"))
-    # Room for the labels of the lowest and highest points (a label pushed down by
-    # the collision rule used to land on the x-axis title), and the legend in the
-    # corner a cost/quality frontier leaves empty (high cost, high quality is
-    # rare; low cost, low quality is where cheap judges sit).
-    ax.legend(handles=provider_handles, loc="lower right", fontsize=9)
+        provider_handles.append(plt.Line2D([0], [0], color="#555555", lw=1.1, alpha=0.75, label=links_label))
+    # "best" looks at the point labels too: a fixed corner covered the label of whichever
+    # judge sat there (claude-haiku-4-5 at the lower right, 2026-11-02).
+    ax.legend(handles=provider_handles, loc="best", fontsize=9)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=150, bbox_inches="tight",
                 metadata=png_metadata(
@@ -716,6 +719,8 @@ def main() -> None:
     parser.add_argument("--links", nargs="+", default=[], metavar="OLD:NEW",
                         help="Pairs of cell names joined by an arrow, e.g. gpt-6-luna:gpt-6-luna@c5 (a judge's "
                              "old-rubric point to its new-rubric point).")
+    parser.add_argument("--links_label", default="same judge: old rubric → new rubric",
+                        help="What the arrows mean, for the legend.")
     parser.add_argument("--output", type=str, required=True)
     args = parser.parse_args()
     links = []
@@ -800,7 +805,7 @@ def main() -> None:
     rho_note = (f"rho from {Path(args.robustness_json).name}, variant {args.robustness_variant} "
                 f"(collision names dropped on bare-keyed axes)") if args.robustness_json else ""
     plot(agg, args.slot, n_total, Path(args.output), excluded=excluded, price_basis=args.price_basis,
-         rho_note=rho_note, left_out=left_out, links=links)
+         rho_note=rho_note, left_out=left_out, links=links, links_label=args.links_label)
 
 
 if __name__ == "__main__":

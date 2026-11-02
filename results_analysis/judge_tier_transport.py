@@ -621,6 +621,17 @@ def gemini_request_body(prompt: str, max_tokens: int, settings: Optional[Dict[st
     return {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": cfg}
 
 
+def gemini_quota_ids(body: str) -> List[str]:
+    """The quotas a 429 names (``GenerateRequestsPerMinutePerProjectPerModel-FreeTier``
+    and the like), from its ``google.rpc.QuotaFailure`` detail; empty when the
+    body says nothing readable."""
+    try:
+        details = json.loads(body)["error"]["details"]
+        return [v["quotaId"] for d in details for v in d.get("violations", []) if "quotaId" in v]
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return []
+
+
 def gemini_reply(data: Dict[str, Any]) -> Tuple[Optional[str], Optional[str], int, int]:
     """``(text, finish_reason, prompt_tokens, output_tokens)`` of a
     generateContent response; output tokens include the thought tokens, which
@@ -646,7 +657,8 @@ async def call_gemini(client: Any, prompt: str, model: str, max_tokens: int, rat
     or failed call, :data:`SKIPPED` when ``gate()`` is True.  A 429 or a 5xx
     (the free tier's rate limits, "high demand" 503s) is retried
     :data:`GEMINI_ATTEMPTS` times with growing sleeps; an HTTP 400 raises
-    :class:`JudgeRequestError`."""
+    :class:`JudgeRequestError`, and a 429 naming a daily quota raises
+    :class:`BillingError`, since no retry within a run can get past it."""
     stats = stats if stats is not None else CallStats()
     body = gemini_request_body(prompt, max_tokens, settings)
     last: Optional[str] = None
@@ -675,6 +687,13 @@ async def call_gemini(client: Any, prompt: str, model: str, max_tokens: int, rat
             last = f"HTTP {resp.status_code}: {resp.text[:200]}"
             if resp.status_code == 400 or resp.status_code in (401, 403, 404):
                 raise JudgeRequestError(f"{model}: {last}")
+            if resp.status_code == 429:
+                quotas = gemini_quota_ids(resp.text)
+                if any("PerDay" in q for q in quotas):
+                    raise BillingError(f"{model}: daily quota used up ({', '.join(quotas)}); a rerun resumes "
+                                       f"from the saved answers once it resets")
+                if quotas:
+                    last = f"HTTP 429: {', '.join(quotas)}"
             if resp.status_code not in GEMINI_RETRY_STATUSES:
                 break
         sleep = GEMINI_RETRY_SLEEP_S[min(attempt, len(GEMINI_RETRY_SLEEP_S) - 1)]

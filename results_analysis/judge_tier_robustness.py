@@ -931,15 +931,23 @@ def render_figure(out_png: Path, models_by_rho: Sequence[str], variants: Sequenc
                    markersize=8, label="hollow = estimated cost"),
         plt.Line2D([0], [0], linestyle="--", color="#555555", label="Pareto frontier"),
     ]
+    for provider, name in (("google", "Google"), ("blend", "Blend of judges")):
+        if any(provider_of(m) == provider for m in models_by_rho):
+            handles.insert(2, plt.Line2D([0], [0], marker="o", color="w", markerfacecolor=PROVIDER_COLOR[provider],
+                                         markeredgecolor=PROVIDER_COLOR[provider], markersize=8, label=name))
     title = (f"Judge ranking under {n_v} projection variants, DESCRIPTION judging: {n_axes_total} axes, "
              f"{n_m} judges (default {default_key})")
     fig.suptitle(title + "\n" + subtitle, fontsize=12, y=1 - 0.12 / fig_h, va="top")
     y_b = pan_top + 0.42 / fig_h
     key = label_key(list(models_by_rho))
-    fig.text(0.01, y_b, "(b) Pareto plots, one per variant (rows share y limits; x shared)"
-             + (f"; {key}" if key else ""), fontsize=10, va="center")
-    fig.legend(handles=handles, loc="center right", ncol=5, fontsize=8.5, frameon=False,
-               bbox_to_anchor=(0.99, y_b))
+    # The caption and the legend share a line, and the label key gets its own below: on one
+    # line a long key ran under the legend (2026-11-02).
+    y_cap = y_b + (0.11 / fig_h if key else 0)
+    fig.text(0.01, y_cap, "(b) Pareto plots, one per variant (rows share y limits; x shared)", fontsize=10, va="center")
+    if key:
+        fig.text(0.01, y_b - 0.11 / fig_h, key, fontsize=9, va="center")
+    fig.legend(handles=handles, loc="center right", ncol=len(handles), fontsize=8.5, frameon=False,
+               bbox_to_anchor=(0.99, y_cap))
     out_png = Path(out_png)
     out_png.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_png, dpi=130, bbox_inches="tight",

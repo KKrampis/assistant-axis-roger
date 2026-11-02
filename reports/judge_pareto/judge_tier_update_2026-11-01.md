@@ -280,6 +280,44 @@ time (eight, with an OS download in the background, dropped every connection
 at once), and give batched replies room (`--max_tokens 1500` for Haiku 5.5,
 which writes about 60 tokens per entity).
 
+## 3c. 2026-11-02: tuning the batched method
+
+The method in 3b used two passes at ten entities per call because that is where the
+tuning stopped, not because it had been tested.  A grid on the 30 development axes then
+varied one thing at a time for GPT-5.6 Luna, GPT-6 Luna and Haiku 5.5: passes (1 to 4),
+entities per call N (5, 7, 10, 15, 20) and reasoning effort (none, low, medium).
+
+**Use N=20, two passes, no reasoning.**
+
+- **N=20** costs about 11% less than N=10 and is no worse.  On all 61 axes it gains
+  +0.0072 [+0.0032, +0.0111] for Luna, +0.0036 [-0.0001, +0.0073] for GPT-6 Luna and
+  -0.0001 [-0.0033, +0.0030] for Haiku (95% bootstrap over axes).  N=30 is untested.
+- **More passes** help with diminishing returns: the third adds about 0.009, the fourth
+  about 0.004.
+- **Reasoning** costs a third to 70% more with no gain distinguishable from zero.
+- **A second judge beats more passes of the first.**  Luna + Haiku, two passes each at
+  N=20, beats Luna alone by +0.0119 [+0.0047, +0.0177] on all 61 axes and +0.0115 [+0.0040,
+  +0.0187] on the 31 held out of the tuning.  GPT-6 Luna adds nothing to Luna.
+
+| 61 axes, slot 6, layer 25, raw | ρ | $/axis at list price |
+|---|---|---|
+| GPT-6 Luna, N=20, 2 passes | 0.712 | $0.019 |
+| GPT-5.6 Luna, N=20, 2 passes | 0.732 | $0.042 |
+| GPT-5.6 Luna + Haiku 5.5, N=20, 2 passes each | 0.744 | $0.084 |
+
+These three are the frontier in 12 of 12 projection variants.  GPT-5.6 Terra (0.731 at
+$0.44) is now dominated.  The winners were chosen on the 30 development axes and then run on
+the 31 held-out ones.  Flex and Batch prices are half the list prices shown; the grid and
+the held-out check cost $18.77 as billed.
+
+Plots: [`pareto_pooled_61axes_grid.png`](../../roger/axis_judge_experiments/pareto_pooled_61axes_grid.png),
+[`judge_tier_grid_dev30.png`](../../roger/axis_judge_experiments/judge_tier_grid_dev30/judge_tier_grid_dev30.png),
+[`judge_tier_robustness_61axes_grid.png`](../../roger/axis_judge_experiments/judge_tier_robustness_61axes_grid.png).
+Full tables, caveats and commands: update 3 of
+[`pareto_pooled_61axes_notes.md`](../../roger/axis_judge_experiments/pareto_pooled_61axes_notes.md).
+A Gemini comparison is under way on the free tier, which allows about 500 requests a day
+per model; its cells are not in this commit.
+
 ## 4. Open questions
 
 - **Was gpt-4.1-mini helped by the vectors?**  No, as far as the step-3
@@ -296,9 +334,8 @@ which writes about 60 tokens per entity).
 - **The 20-axis set is selected:** 18 of its axes were the highest-ρ axes of
   an earlier sweep judged by gpt-4.1-mini and Sonnet.  The 61-axis set is
   every axis with cached projections.
-- **Repeat samples.**  Most judges ran once per item at T=1.  Averaging three
-  samples could lift the cheap judges; Roger wants to try it once the
-  shortlist is small.
+- **Repeat samples.**  Answered by 3c: passes in fresh random batch orders are the
+  repeat samples, and two at N=20 is the setting to use.
 - **Other judging tasks.**  This measures description judging only, not
   instruction or response judging, which have different prompts, token mixes
   and caching behaviour.

@@ -1477,6 +1477,38 @@ def test_call_gemini_retries_a_503_and_charges_thoughts_as_output(monkeypatch):
                                                  300, RateLimiter(1000), usage, stats=stats)), tt.Truncated)
 
 
+def gemini_429(quota_id):
+    body = {"error": {"code": 429, "status": "RESOURCE_EXHAUSTED", "details": [
+        {"@type": "type.googleapis.com/google.rpc.QuotaFailure", "violations": [{"quotaId": quota_id}]}]}}
+    return SimpleNamespace(status_code=429, text=json.dumps(body), json=lambda: body)
+
+
+class OneRefusal(FakeGemini):
+    def __init__(self, quota_id):
+        super().__init__()
+        self.refusal = gemini_429(quota_id)
+
+    async def post(self, path, json):
+        if self.refusal is not None:
+            self.calls.append((path, json))
+            refusal, self.refusal = self.refusal, None
+            return refusal
+        return await super().post(path, json)
+
+
+def test_gemini_daily_quota_stops_the_run_and_a_minute_quota_is_retried(monkeypatch):
+    monkeypatch.setattr(tt, "GEMINI_RETRY_SLEEP_S", (0, 0, 0))
+    call = lambda c: asyncio.run(tt.call_gemini(c, "to score\n\n**shy**: x", "gemini-3.1-flash-lite", 300, RateLimiter(1000),
+                                                MultiModelUsage(), stats=tt.CallStats()))
+    daily = OneRefusal("GenerateRequestsPerDayPerProjectPerModel-FreeTier")
+    with pytest.raises(tt.BillingError, match="PerDay"):
+        call(daily)
+    assert len(daily.calls) == 1
+    minute = OneRefusal("GenerateRequestsPerMinutePerProjectPerModel-FreeTier")
+    assert call(minute).endswith("SCORE: 3") and len(minute.calls) == 2
+    assert tt.gemini_quota_ids("not json") == [] and tt.gemini_quota_ids('{"error": {}}') == []
+
+
 def test_gemini_run_batched(world, monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "test-key-not-used")
     client = FakeGemini()
