@@ -2779,6 +2779,18 @@ batches still in flight before submitting anything; it refuses (exit 1)
 when batches in flight were requested with another model or other settings,
 and a `flex` / `realtime` run refuses while a model's batches are in flight.
 
+**Gemini** (2026-11-02): a `gemini-*` judge is reached directly at Google's
+generateContent endpoint over HTTPS (httpx; the key, `GEMINI_API_KEY`, travels
+in the `x-goog-api-key` header, never in the URL), in real time only (no
+Flex; Google's batch mode is not wired up).  Default settings: temperature 0
+(Gemini takes it) and `thinkingConfig.thinkingLevel` "minimal" (no thought
+tokens on 3.1 Flash-Lite; "low" added about 120 per call).  Thought tokens are
+charged as output.  A 429 or 5xx is retried eight times with growing sleeps.
+Candidates in the Luna / Haiku 5.5 price class: `gemini-3.1-flash-lite`
+($0.25 / $1.50) and `gemini-3.5-flash-lite` ($0.30 / $2.50); 2.5 Flash-Lite is
+no longer offered to new users.  A free-tier key is enough for probes, not
+for a run (its daily cap is far below one pass over 30 axes).
+
 **Request settings per model** come from `JUDGE_REQUEST_SETTINGS` in
 [`judge_tier_transport.py`](./judge_tier_transport.py). For the models the
 existing cells used they reproduce what this tree's `assistant_axis/judge.py`

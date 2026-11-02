@@ -1427,3 +1427,61 @@ def test_batched_judging_through_the_batch_api(world, monkeypatch):
     groups = json.loads((world.exp / "_tier_eval_batches" / "claude-haiku-5-5@b10s1" / "groups.json").read_text())
     assert sorted(sum((groups[k] for k in groups if k.startswith("a0|")), [])) == ENTITIES
     assert not client.calls                                           # nothing went live
+
+
+# ---------------------------------------------------------------------------
+# Gemini (generateContent over HTTPS, 2026-11-02)
+# ---------------------------------------------------------------------------
+
+class FakeGemini:
+    """An httpx-like client: ``post(path, json=...)`` answers a generateContent body; the first
+    ``fail_first`` calls return HTTP 503 (the free tier's "high demand")."""
+
+    def __init__(self, fail_first=0, needs=None):
+        self.calls, self.fail_first, self.needs = [], fail_first, dict(needs or {})
+
+    async def post(self, path, json):
+        self.calls.append((path, json))
+        if self.fail_first > 0:
+            self.fail_first -= 1
+            return SimpleNamespace(status_code=503, text="high demand", json=lambda: {})
+        text, cut, _ = capped_reply(json["contents"][0]["parts"][0]["text"], json["generationConfig"]["maxOutputTokens"], self.needs)
+        data = {"candidates": [{"content": {"parts": [{"text": text}]}, "finishReason": "MAX_TOKENS" if cut else "STOP"}],
+                "usageMetadata": {"promptTokenCount": 300, "candidatesTokenCount": 40, "thoughtsTokenCount": 7}}
+        return SimpleNamespace(status_code=200, text="", json=lambda: data)
+
+
+def test_gemini_is_its_own_provider_and_runs_live_only():
+    assert tt.provider_for_model("gemini-3.1-flash-lite") == "google"
+    assert tt.judge_request_settings("gemini-3.1-flash-lite") == {"temperature": 0, "thinkingConfig": {"thinkingLevel": "minimal"}}
+    c = tt.choose_transport("gemini-3.1-flash-lite")
+    assert (c.transport, c.probe) == ("realtime", False)
+    for t in ("flex", "batch"):
+        with pytest.raises(tt.JudgeRequestError):
+            tt.choose_transport("gemini-3.1-flash-lite", t)
+    assert ev.key_name("gemini-3.1-flash-lite") == "GEMINI_API_KEY"
+    assert price_for_model("gemini-3.1-flash-lite") == (0.25, 1.50)
+
+
+def test_call_gemini_retries_a_503_and_charges_thoughts_as_output(monkeypatch):
+    monkeypatch.setattr(tt, "GEMINI_RETRY_SLEEP_S", (0, 0, 0))
+    client = FakeGemini(fail_first=2)
+    usage, stats = MultiModelUsage(), tt.CallStats()
+    text = asyncio.run(tt.call_gemini(client, "to score\n\n**shy**: x", "gemini-3.1-flash-lite", 300, RateLimiter(1000), usage,
+                                      settings=tt.judge_request_settings("gemini-3.1-flash-lite"), stats=stats))
+    assert text.endswith("SCORE: 3") and len(client.calls) == 3 and stats.errors == 0
+    assert client.calls[0][0] == "/models/gemini-3.1-flash-lite:generateContent"
+    assert client.calls[0][1]["generationConfig"] == {"maxOutputTokens": 300, "temperature": 0, "thinkingConfig": {"thinkingLevel": "minimal"}}
+    assert usage.per_model["gemini-3.1-flash-lite"].completion_tokens == 47      # candidates + thoughts
+    assert isinstance(asyncio.run(tt.call_gemini(FakeGemini(needs={"shy": 10_000}), "to score\n\n**shy**: x", "gemini-3.1-flash-lite",
+                                                 300, RateLimiter(1000), usage, stats=stats)), tt.Truncated)
+
+
+def test_gemini_run_batched(world, monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key-not-used")
+    client = FakeGemini()
+    monkeypatch.setattr(ev, "make_gemini_client", lambda: client)
+    assert _run(world, "gemini-3.1-flash-lite", extra=["--rubric", "b10", "--cell_label", "@b10s1", "--entities_per_call", "3"]) == 0
+    scores, usage, d = _cell(world, "alpha_vs_beta", "gemini-3.1-flash-lite@b10s1")
+    assert scores["result"] == {e: batch_score(e, True) for e in ENTITIES}
+    assert scores["_provenance"]["transport"] == "realtime" and usage["n_calls"] == 2

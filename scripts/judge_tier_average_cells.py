@@ -1,6 +1,6 @@
-"""Derive an averaged cell from two batched-judging cells of the same judge (two
-shuffle seeds): per entity the mean of the two scores (or the one present),
-usage the sum of both, correlations recomputed.  Writes <axis>_tier_eval/<out>/
+"""Derive an averaged cell from two or more batched-judging cells of the same judge
+(shuffle seeds): per entity the mean of the scores present, usage the sum of all,
+correlations recomputed.  Writes <axis>_tier_eval/<out>/
 for every axis where both sources are complete; skips axes already derived
 from the same source files (by mtime).
 
@@ -15,41 +15,47 @@ from results_analysis.axis_judge_correlation import compute_correlations
 from assistant_axis.judge_pricing import MultiModelUsage
 from assistant_axis.atomic_io import atomic_write_text
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-ap.add_argument("out"); ap.add_argument("src1"); ap.add_argument("src2")
+ap.add_argument("out"); ap.add_argument("sources", nargs="+", help="two or more source cells to average")
 ap.add_argument("--experiments_dir", default="roger/axis_judge_experiments")
 ap.add_argument("--axes_file", default="scripts/tier_eval_axes.tsv")
 ap.add_argument("--instructions_dir", required=True, help="the corpus the cells were judged on (pinned at 1448a84c)")
 args = ap.parse_args()
 E = Path(args.experiments_dir); DATA = Path(args.instructions_dir)
-out, a, b = args.out, args.src1, args.src2
+out, srcs = args.out, args.sources
+if len(srcs) < 2:
+    ap.error("give at least two source cells")
 jobs = {j.axis_dir: j for j in ev.jobs_from_axes_file(Path(args.axes_file), E)}
 made = kept = 0
 for axis, job in jobs.items():
-    da, db, do = (E / f"{axis}_tier_eval" / c for c in (a, b, out))
-    if not ((da / "usage.json").exists() and (db / "usage.json").exists()):
+    ds = [E / f"{axis}_tier_eval" / c for c in srcs]; do = E / f"{axis}_tier_eval" / out
+    if not all((d / "usage.json").exists() for d in ds):
         continue
-    stamp = max(os.path.getmtime(da / "scores_descriptions.json"), os.path.getmtime(db / "scores_descriptions.json"))
+    stamp = max(os.path.getmtime(d / "scores_descriptions.json") for d in ds)
     if (do / "usage.json").exists():
         prov = json.load(open(do / "scores_descriptions.json"))["_provenance"]
         if prov.get("averaged", {}).get("source_mtime") == stamp:
             kept += 1; continue
-    sa, sb = (json.load(open(d / "scores_descriptions.json")) for d in (da, db))
+    loaded = [json.load(open(d / "scores_descriptions.json")) for d in ds]
+    sa = loaded[0]
     scores = {}
-    for k in set(sa["result"]) | set(sb["result"]):
-        v = [x[k] for x in (sa["result"], sb["result"]) if k in x]
+    for k in set().union(*(x["result"] for x in loaded)):
+        v = [x["result"][k] for x in loaded if k in x["result"]]
         scores[k] = sum(v) / len(v)
     if not job.projections:
         ev.load_axis(job, DATA)
     corr = compute_correlations(scores_by_mode={"descriptions": scores}, projections=job.projections,
                                 slots=list(job.projections.keys()), excluded_set=set(job.axis_spec.exclusions))
-    usage = MultiModelUsage.load_or_create(da / "usage.json"); usage.merge_from(MultiModelUsage.load_or_create(db / "usage.json"))
+    usage = MultiModelUsage.load_or_create(ds[0] / "usage.json")
+    for d in ds[1:]:
+        usage.merge_from(MultiModelUsage.load_or_create(d / "usage.json"))
     prov = dict(sa["_provenance"]); prov.pop("shuffle_seed", None); prov["cell_label"] = f"@{out.split('@', 1)[1]}" if "@" in out else ""
-    prov["averaged"] = {"sources": [a, b], "n_both": sum(1 for k in scores if k in sa["result"] and k in sb["result"]),
-                        "n_one": sum(1 for k in scores if (k in sa["result"]) != (k in sb["result"])),
+    prov["averaged"] = {"sources": list(srcs),
+                        "n_all": sum(1 for k in scores if all(k in x["result"] for x in loaded)),
+                        "n_partial": sum(1 for k in scores if not all(k in x["result"] for x in loaded)),
                         "source_mtime": stamp, "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
     do.mkdir(parents=True, exist_ok=True)
     atomic_write_text(json.dumps({"result": dict(sorted(scores.items())), "_provenance": prov}, indent=2), do / "scores_descriptions.json")
     atomic_write_text(json.dumps(corr, indent=2), do / "correlations.json")
     atomic_write_text(json.dumps(usage.as_dict(), indent=2, sort_keys=True), do / "usage.json")
     made += 1
-print(f"{out}: {made} cells derived, {kept} up to date, from {a} + {b}")
+print(f"{out}: {made} cells derived, {kept} up to date, from {' + '.join(srcs)}")

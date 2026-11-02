@@ -210,6 +210,13 @@ _MODEL_RATES: tuple[tuple[str, float, float], ...] = (
     # Both are reasoning models: judge_tier_transport sends them
     # reasoning_effort "none", else reasoning is billed as output.
     ("gpt-6-luna", 0.10, 0.50),
+    # Gemini (ai.google.dev/gemini-api/docs/pricing, read 2026-11-01; batch is half):
+    # 2.5 Flash-Lite is no longer offered to new users (HTTP 404 on 2026-11-02).
+    ("gemini-3.1-flash-lite", 0.25, 1.50),
+    ("gemini-3.5-flash-lite", 0.30, 2.50),
+    ("gemini-2.5-flash-lite", 0.10, 0.40),
+    ("gemini-3-flash", 0.50, 3.00),
+    ("gemini-2.5-flash", 0.30, 2.50),
     ("gpt-5.4-mini", 0.75, 4.50),
     # Anthropic -- versioned entries before the generic "sonnet"/"opus"
     # fallbacks (see ordering note above).

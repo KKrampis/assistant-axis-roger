@@ -61,13 +61,15 @@ from assistant_axis.judge_pricing import (
 )
 from assistant_axis.plot_metadata import png_metadata
 
-PROVIDER_COLOR = {"openai": "#7FB069", "anthropic": "#D9636B"}
+PROVIDER_COLOR = {"openai": "#7FB069", "anthropic": "#D9636B", "google": "#5B8DEF"}
 
 EST_IN_PER_ENTITY = 320 + 150
 EST_OUT_PER_ENTITY = 80
 
 
 def provider_of(model: str) -> str:
+    if model.startswith("gemini"):
+        return "google"
     return "openai" if model.startswith(("gpt-", "o1-", "o3-", "o4-")) else "anthropic"
 
 
@@ -375,7 +377,8 @@ def split_by_coverage(agg: Dict[str, dict], min_axes: int) -> Tuple[Dict[str, di
 
 
 #: What a cell directory's label suffix (judge_tier_cost_eval.py --cell_label) means, for plot labels.
-CELL_LABEL_TEXT = {"@none": "no reasoning", "@t0": "T=0", "@nothink": "thinking off"}
+CELL_LABEL_TEXT = {"@none": "no reasoning", "@t0": "T=0", "@nothink": "thinking off",
+                   "@low": "reasoning low", "@med": "reasoning medium"}
 #: A note after a model's name in plot labels (OpenAI deprecations page, read 2026-11-01:
 #: gpt-4.1-mini leaves the API on 2027-01-14, replacement gpt-6-luna).
 MODEL_NOTES = {"gpt-4.1-mini": "retires 2027-01-14"}
@@ -397,7 +400,9 @@ LABEL_TOKEN_TEXT = {"v3fix": "rubric v3fix", "rep2": "repeat run"}
 #: to their points (Roger, 2026-11-01).
 TOKEN_KEY = {
     r"c(\d+)": "c{0}: single-entity rubric c{0}",
-    r"b(\d+)x(\d+)": "b{0}x{1}: batched rubric b{0}, {1} shuffles averaged",
+    r"b(\d+)n(\d+)x(\d+)": "b{0}n{1}x{2}: batched rubric b{0}, {1} entities per call, {2} shuffles averaged",
+    r"b(\d+)n(\d+)s(\d+)": "b{0}n{1}s{2}: batched rubric b{0}, {1} entities per call, shuffle {2}",
+    r"b(\d+)x(\d+)": "b{0}x{1}: batched rubric b{0}, 10 entities per call, {1} shuffles averaged",
     r"b(\d+)s(\d+)": "b{0}s{1}: batched rubric b{0}, shuffle {1}",
     r"b(\d+)g2": "b{0}g2: batched rubric b{0}, rows and columns averaged",
     r"b(\d+)g([rc])": "b{0}g{1}: batched rubric b{0}, grid pass {1}",
@@ -638,6 +643,9 @@ def plot(agg: Dict[str, dict], slot: int, n_total_axes: int, output_path: Path,
         plt.Line2D([0], [0], linestyle="--", color="black", alpha=0.5,
                    label="Pareto frontier"),
     ]
+    if any(d["provider"] == "google" for d in agg.values()):
+        provider_handles.insert(2, plt.Line2D([0], [0], marker="o", color="w", markerfacecolor=PROVIDER_COLOR["google"],
+                                              markeredgecolor=PROVIDER_COLOR["google"], markersize=10, label="Google"))
     if links:
         provider_handles.append(plt.Line2D([0], [0], color="#555555", lw=1.1, alpha=0.75,
                                            label="same judge: old rubric → new rubric"))

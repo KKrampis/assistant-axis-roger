@@ -153,8 +153,9 @@ from results_analysis.axis_judge_correlation import (  # noqa: E402
     parse_signed_score,
 )
 from results_analysis import judge_tier_transport as tt  # noqa: E402
+from results_analysis.judge_tier_transport import provider_for_model  # noqa: E402
 from results_analysis import judge_tier_rubrics as jr  # noqa: E402
-from assistant_axis.judge import RateLimiter, provider_for_model, warn_if_low_parse_rate  # noqa: E402
+from assistant_axis.judge import RateLimiter, warn_if_low_parse_rate  # noqa: E402
 from assistant_axis.judge_pricing import BATCH_SUFFIX, MultiModelUsage, price_for_model  # noqa: E402
 from assistant_axis.entity_id import parse_entity_id  # noqa: E402
 from assistant_axis.atomic_io import atomic_write_bytes, atomic_write_text  # noqa: E402
@@ -801,7 +802,11 @@ def make_anthropic_client():
 
 def key_name(model: str) -> str:
     """The environment variable holding the key ``model`` needs (only its presence is checked)."""
-    return "ANTHROPIC_API_KEY" if provider_for_model(model) == "anthropic" else "OPENAI_API_KEY"
+    return {"anthropic": "ANTHROPIC_API_KEY", "google": "GEMINI_API_KEY"}.get(provider_for_model(model), "OPENAI_API_KEY")
+
+
+def make_gemini_client():
+    return tt.make_gemini_client(os.environ["GEMINI_API_KEY"])
 
 
 # ---------------------------------------------------------------------------
@@ -821,6 +826,8 @@ async def run_live(ctx: RunContext, mrun: ModelRun, todo: List[AxisJob], *, tier
     rate_limiter = RateLimiter(ctx.requests_per_second)
     if provider_for_model(model) == "anthropic":
         client, fallback = make_anthropic_client(), None
+    elif provider_for_model(model) == "google":
+        client, fallback = make_gemini_client(), None
     else:
         client = make_openai_client(tier)
         fallback = make_openai_client(None) if tier == "flex" else None

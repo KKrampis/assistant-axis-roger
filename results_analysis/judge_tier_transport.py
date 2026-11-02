@@ -37,7 +37,16 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
-from assistant_axis.judge import RateLimiter, provider_for_model
+from assistant_axis.judge import RateLimiter
+from assistant_axis.judge import provider_for_model as _provider_for_model
+
+
+def provider_for_model(model: str) -> str:
+    """``"google"`` for a Gemini model (reached directly, generateContent over
+    HTTPS, 2026-11-02), else this tree's judge.py answer (openai / anthropic)."""
+    if model.startswith("gemini"):
+        return "google"
+    return _provider_for_model(model)
 from assistant_axis.judge_pricing import BATCH_SUFFIX, FLEX_SUFFIX
 
 logger = logging.getLogger(__name__)
@@ -102,6 +111,9 @@ _EFFORT_LOW = {"output_config": {"effort": "low"}}
 #:   2026-10-26/27).
 JUDGE_REQUEST_SETTINGS: Dict[str, Dict[str, Any]] = {
     # new models, step 3's convention
+    # Gemini (2026-11-02): takes temperature, so T=0 (Roger's rule); thinking at its lowest level
+    # ("minimal": no thought tokens on 3.1 Flash-Lite in the probe; "low" added about 120 per call).
+    "gemini": {"temperature": 0, "thinkingConfig": {"thinkingLevel": "minimal"}},
     "gpt-5.4": {"reasoning_effort": "none"},
     "gpt-6": {"reasoning_effort": "none"},
     "haiku-5": {"thinking": {"type": "disabled"}},
@@ -589,11 +601,99 @@ async def call_anthropic(client: Any, prompt: str, model: str, max_tokens: int, 
     return text
 
 
+GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
+GEMINI_RETRY_STATUSES = (429, 500, 502, 503, 504)
+GEMINI_ATTEMPTS = 8
+GEMINI_RETRY_SLEEP_S = (5, 10, 20, 30, 45, 60, 60)
+
+
+def make_gemini_client(api_key: str, timeout_s: float = 120.0):
+    """An httpx client for generateContent; the key travels only in the
+    x-goog-api-key header (never in the URL, which the HTTP log prints)."""
+    import httpx
+    return httpx.AsyncClient(base_url=GEMINI_BASE_URL, headers={"x-goog-api-key": api_key},
+                             timeout=httpx.Timeout(timeout_s, connect=20.0))
+
+
+def gemini_request_body(prompt: str, max_tokens: int, settings: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    cfg: Dict[str, Any] = {"maxOutputTokens": max_tokens}
+    cfg.update(settings or {})
+    return {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": cfg}
+
+
+def gemini_reply(data: Dict[str, Any]) -> Tuple[Optional[str], Optional[str], int, int]:
+    """``(text, finish_reason, prompt_tokens, output_tokens)`` of a
+    generateContent response; output tokens include the thought tokens, which
+    Google bills as output."""
+    u = data.get("usageMetadata") or {}
+    n_in = int(u.get("promptTokenCount") or 0)
+    n_out = int(u.get("candidatesTokenCount") or 0) + int(u.get("thoughtsTokenCount") or 0)
+    cands = data.get("candidates") or []
+    if not cands:
+        return None, (data.get("promptFeedback") or {}).get("blockReason"), n_in, n_out
+    c = cands[0]
+    parts = (c.get("content") or {}).get("parts") or []
+    text = "".join(p.get("text", "") for p in parts if not p.get("thought")) or None
+    return text, c.get("finishReason"), n_in, n_out
+
+
+async def call_gemini(client: Any, prompt: str, model: str, max_tokens: int, rate_limiter: RateLimiter,
+                      usage: Any, *, settings: Optional[Dict[str, Any]] = None,
+                      stats: Optional[CallStats] = None,
+                      gate: Optional[Callable[[], bool]] = None) -> Any:
+    """One generateContent call: the reply text, :class:`Truncated` when the
+    reply hit ``maxOutputTokens`` (finishReason MAX_TOKENS), None for a blocked
+    or failed call, :data:`SKIPPED` when ``gate()`` is True.  A 429 or a 5xx
+    (the free tier's rate limits, "high demand" 503s) is retried
+    :data:`GEMINI_ATTEMPTS` times with growing sleeps; an HTTP 400 raises
+    :class:`JudgeRequestError`."""
+    stats = stats if stats is not None else CallStats()
+    body = gemini_request_body(prompt, max_tokens, settings)
+    last: Optional[str] = None
+    for attempt in range(GEMINI_ATTEMPTS):
+        await rate_limiter.acquire()
+        if attempt == 0 and gate is not None and gate():
+            stats.skipped += 1
+            return SKIPPED
+        try:
+            resp = await client.post(f"/models/{model}:generateContent", json=body)
+        except Exception as e:  # noqa: BLE001 -- a connection error: tried again
+            last = f"{type(e).__name__}: {e}"
+            resp = None
+        if resp is not None:
+            if resp.status_code == 200:
+                text, finish, n_in, n_out = gemini_reply(resp.json())
+                if usage is not None:
+                    usage.charge(model, n_in, n_out)
+                if finish == "MAX_TOKENS":
+                    return Truncated(text)
+                if text is None:
+                    stats.content_flagged += 1
+                    logger.warning(f"{model}: no text in the reply (finishReason {finish}); this item gives None")
+                    return None
+                return text
+            last = f"HTTP {resp.status_code}: {resp.text[:200]}"
+            if resp.status_code == 400 or resp.status_code in (401, 403, 404):
+                raise JudgeRequestError(f"{model}: {last}")
+            if resp.status_code not in GEMINI_RETRY_STATUSES:
+                break
+        sleep = GEMINI_RETRY_SLEEP_S[min(attempt, len(GEMINI_RETRY_SLEEP_S) - 1)]
+        logger.warning(f"Gemini call to {model} failed ({last}); attempt {attempt + 1} of {GEMINI_ATTEMPTS}, "
+                       f"trying again in {sleep}s")
+        await asyncio.sleep(sleep)
+    stats.errors += 1
+    logger.error(f"Error calling judge model {model}: {last}")
+    return None
+
+
 async def call_model(model: str, prompt: str, max_tokens: int, rate_limiter: RateLimiter, usage: Any, *,
                      client: Any, settings: Dict[str, Any], service_tier: Optional[str] = None,
                      fallback_client: Any = None, stats: Optional[CallStats] = None,
                      gate: Optional[Callable[[], bool]] = None) -> Any:
-    """:func:`call_openai` or :func:`call_anthropic` by the model's provider."""
+    """:func:`call_openai`, :func:`call_anthropic` or :func:`call_gemini` by the model's provider."""
+    if provider_for_model(model) == "google":
+        return await call_gemini(client, prompt, model, max_tokens, rate_limiter, usage,
+                                 settings=settings, stats=stats, gate=gate)
     if provider_for_model(model) == "anthropic":
         return await call_anthropic(client, prompt, model, max_tokens, rate_limiter, usage,
                                     settings=settings, stats=stats, gate=gate)
@@ -631,6 +731,11 @@ def choose_transport(model: str, requested: str = "auto") -> TransportChoice:
     if requested not in TRANSPORT_CHOICES:
         raise ValueError(f"--transport {requested!r}: expected one of {TRANSPORT_CHOICES}")
     provider = provider_for_model(model)
+    if provider == "google":
+        if requested in ("flex", "batch"):
+            raise JudgeRequestError(f"--transport {requested}: a Gemini model is judged in real time only here "
+                                    f"(no Flex; Google's batch mode is not wired up)")
+        return TransportChoice("realtime", False, "Gemini model: real time (generateContent)")
     if requested == "realtime":
         return TransportChoice("realtime", False, "--transport realtime")
     if requested == "batch":

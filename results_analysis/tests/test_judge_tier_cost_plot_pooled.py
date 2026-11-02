@@ -168,7 +168,9 @@ def test_display_names_spell_out_settings_and_notes():
     assert display_name("gpt-4.1-mini@b10x2", short=True) == "gpt-4.1-mini (b10x2)"
     from results_analysis.judge_tier_cost_plot_pooled import label_key
     assert label_key(["gpt-4.1-mini", "gpt-6-luna@b10x2", "gpt-6-luna@c8", "x@b10x2"]) == (
-        "b10x2: batched rubric b10, 2 shuffles averaged; c8: single-entity rubric c8")
+        "b10x2: batched rubric b10, 10 entities per call, 2 shuffles averaged; c8: single-entity rubric c8")
+    assert display_name("gpt-6-luna@low@b10n20s1") == "gpt-6-luna (reasoning low, b10n20s1)"
+    assert "b10n5x4: batched rubric b10, 5 entities per call, 4 shuffles averaged" in label_key(["x@b10n5x4"])
     assert display_name("gpt-4.1-mini (May)") == "gpt-4.1-mini (May)"
 
 
