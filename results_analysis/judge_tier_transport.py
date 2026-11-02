@@ -25,6 +25,12 @@ temperature equal to the provider default (1) is left out of the request
 instead of being sent as 1 (the same sampling, and it works on models that
 refuse the field).
 
+**Prompt caching is off** for the models that take the field (GPT-5.6 and later,
+``judge.prompt_cache_fields``; 2026-11-02).  It is not a request setting: it
+changes the bill and not the judging, so cells judged before that date keep
+resuming and their recorded ``request_settings`` still hold.  Those cells' N=20
+prompts did pay the write premium, which their ``usage.json`` does not show.
+
 Only the standard library and this tree's ``assistant_axis`` are imported;
 clients are passed in, so tests use fakes.
 """
@@ -37,7 +43,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
-from assistant_axis.judge import RateLimiter
+from assistant_axis.judge import RateLimiter, chat_create_kwargs, prompt_cache_fields
 from assistant_axis.judge import provider_for_model as _provider_for_model
 
 
@@ -342,11 +348,12 @@ def chat_request_body(prompt: str, model: str, max_tokens: int, *,
                       settings: Optional[Dict[str, Any]] = None,
                       temperature: Optional[float] = DEFAULT_TEMPERATURE,
                       service_tier: Optional[str] = None) -> Dict[str, Any]:
-    """The chat-completion request: the keyword arguments of
-    ``client.chat.completions.create`` and, unchanged, the ``body`` of an
-    OpenAI Batch API line, so a batched request is exactly the live one.
+    """The chat-completion request: through ``chat_create_kwargs`` the keyword
+    arguments of ``client.chat.completions.create`` and, unchanged, the ``body``
+    of an OpenAI Batch API line, so a batched request is exactly the live one.
     ``settings``: the request settings to add (None: the table's,
-    :func:`judge_request_settings`).  The default temperature is left out."""
+    :func:`judge_request_settings`).  The default temperature is left out, and
+    prompt caching is off (``prompt_cache_fields``)."""
     body: Dict[str, Any] = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
@@ -355,6 +362,7 @@ def chat_request_body(prompt: str, model: str, max_tokens: int, *,
     t = request_temperature(model, temperature)
     if t is not None:
         body["temperature"] = t
+    body.update(prompt_cache_fields(model))
     body.update(judge_request_settings(model) if settings is None else json.loads(json.dumps(settings)))
     if service_tier is not None:
         if service_tier not in SERVICE_TIERS:
@@ -430,14 +438,26 @@ def anthropic_reply(message: Any) -> Tuple[Optional[str], Optional[str], int, in
             stop == "refusal")
 
 
+#: Set once a reply has reported cache writes, so that the warning fires once a run.
+_cache_writes_warned = False
+
+
 def openai_reply(response: Any) -> Tuple[Optional[str], Optional[str], int, int]:
     """``(text, finish_reason, prompt_tokens, completion_tokens)`` of a chat
-    completion, an SDK object or a plain dict (a Batch API result body)."""
+    completion, an SDK object or a plain dict (a Batch API result body).  Warns
+    once if a reply reports cache writes: this tree's usage records price every
+    prompt token plain, so a write premium would not show in ``usage.json``."""
+    global _cache_writes_warned
     choices = _g(response, "choices") or []
     first = choices[0] if choices else None
     text = _g(_g(first, "message"), "content") if first is not None else None
     finish = _g(first, "finish_reason") if first is not None else None
     usage = _g(response, "usage") or {}
+    writes = _g(_g(usage, "prompt_tokens_details"), "cache_write_tokens", 0)
+    if writes and not _cache_writes_warned:
+        _cache_writes_warned = True
+        logger.warning(f"{_g(response, 'model')} wrote {writes} prompt tokens to its cache, billed above the "
+                       f"input rate and not in usage.json: add the model to judge.PROMPT_CACHE_OFF_MODELS")
     return (text or None, finish, int(_g(usage, "prompt_tokens", 0) or 0),
             int(_g(usage, "completion_tokens", 0) or 0))
 
@@ -518,7 +538,7 @@ async def call_openai(client: Any, prompt: str, model: str, max_tokens: int, rat
                 return SKIPPED
         sender = flex_attempt_client(client, started) if service_tier == "flex" else client
         try:
-            response = await sender.chat.completions.create(**body)
+            response = await sender.chat.completions.create(**chat_create_kwargs(body))
             break
         except Exception as e:  # noqa: BLE001 -- classified below
             if is_billing_error(e):

@@ -343,7 +343,8 @@ def test_default_request_settings_reproduce_the_earlier_cells():
     this tree's judge.py sent; new models follow step 3's convention."""
     body = tt.request_for("gpt-5.6-sol", "P", 200, tt.judge_request_settings("gpt-5.6-sol"))
     assert body == {"model": "gpt-5.6-sol", "messages": [{"role": "user", "content": "P"}],
-                    "max_completion_tokens": 200}             # no reasoning_effort, no temperature
+                    "max_completion_tokens": 200,             # no reasoning_effort, no temperature
+                    "prompt_cache_options": {"mode": "explicit"}}   # 2026-11-02: the bill, not the judging
     for m in ("gpt-5.6-luna", "gpt-5.6-terra"):
         assert tt.judge_request_settings(m) == {}
     params = tt.request_for("claude-sonnet-5", "P", 200, tt.judge_request_settings("claude-sonnet-5"))
@@ -388,6 +389,57 @@ def test_cli_override_reaches_the_requests(world, monkeypatch):
 # ---------------------------------------------------------------------------
 # Single calls
 # ---------------------------------------------------------------------------
+
+def test_prompt_caching_is_off_for_the_models_that_take_the_field():
+    off = {"mode": "explicit"}
+    for model in ("gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol", "gpt-6-luna"):
+        assert tt.chat_request_body("P", model, 200)["prompt_cache_options"] == off
+        assert tt.request_for(model, "P", 200, {})["prompt_cache_options"] == off    # a Batch API line's body
+    for model in ("gpt-4.1-mini", "gpt-5.4-mini"):       # mini refuses it with an HTTP 400; 5.4 mini is untested
+        assert "prompt_cache_options" not in tt.chat_request_body("P", model, 200)
+    assert "prompt_cache_options" not in tt.request_for("claude-haiku-5-5", "P", 200, {})
+    # not a request setting, so a cell judged before it was added still resumes
+    assert "prompt_cache_options" not in tt.judge_request_settings("gpt-6-luna")
+
+
+def test_a_live_call_sends_the_field_in_extra_body():
+    usage, rl = MultiModelUsage(), RateLimiter(1000)
+    client = FakeOpenAI()
+    asyncio.run(tt.call_openai(client, "to score\n\n**calm**: x", "gpt-5.6-luna", 200, rl, usage, service_tier="flex"))
+    assert client.calls[0]["extra_body"] == {"prompt_cache_options": {"mode": "explicit"}}
+    assert "prompt_cache_options" not in client.calls[0]
+    mini = FakeOpenAI()
+    asyncio.run(tt.call_openai(mini, "to score\n\n**calm**: x", "gpt-4.1-mini", 200, rl, usage))
+    assert "extra_body" not in mini.calls[0]
+
+
+def test_the_other_openai_send_sites_turn_caching_off(monkeypatch):
+    import openai
+    from assistant_axis.judge import call_judge_single
+    from results_analysis.axis_judge_correlation import _call_openai_batch
+    rl, prompt = RateLimiter(1000), "to score\n\n**calm**: x"
+    single = FakeOpenAI()
+    assert asyncio.run(call_judge_single(single, prompt, "gpt-6-luna", 200, rl))
+    assert single.calls[0]["extra_body"] == {"prompt_cache_options": {"mode": "explicit"}}
+    batch = FakeOpenAI()
+    monkeypatch.setattr(openai, "AsyncOpenAI", lambda: batch)
+    assert asyncio.run(_call_openai_batch([prompt], "gpt-5.6-luna", 200, 1.0, rl, 1))[0]
+    assert batch.calls[0]["extra_body"] == {"prompt_cache_options": {"mode": "explicit"}}
+    mini = FakeOpenAI()
+    monkeypatch.setattr(openai, "AsyncOpenAI", lambda: mini)
+    assert asyncio.run(_call_openai_batch([prompt], "gpt-4.1-mini", 200, 1.0, rl, 1))[0]
+    assert "extra_body" not in mini.calls[0]
+
+
+def test_a_reply_reporting_cache_writes_warns_once(caplog, monkeypatch):
+    monkeypatch.setattr(tt, "_cache_writes_warned", False)
+    reply = {"model": "gpt-9", "choices": [{"message": {"content": "x"}, "finish_reason": "stop"}],
+             "usage": {"prompt_tokens": 1200, "completion_tokens": 9, "prompt_tokens_details": {"cache_write_tokens": 1190}}}
+    with caplog.at_level("WARNING", logger=tt.logger.name):
+        assert tt.openai_reply(reply) == ("x", "stop", 1200, 9)
+        tt.openai_reply(reply)
+    assert sum("wrote 1190 prompt tokens" in r.message for r in caplog.records) == 1
+
 
 def test_call_openai_errors():
     usage, stats, rl = MultiModelUsage(), tt.CallStats(), RateLimiter(1000)

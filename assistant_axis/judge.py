@@ -411,6 +411,39 @@ def parse_batch_scores_json(
     return out
 
 
+#: Model-id fragments (matched at the start of the id or after a hyphen) of the
+#: models that take OpenAI's ``prompt_cache_options``: GPT-5.6 and later.
+PROMPT_CACHE_OFF_MODELS = ("gpt-5.6", "gpt-6")
+PROMPT_CACHE_OFF_OPTIONS: Dict[str, str] = {"mode": "explicit"}
+
+
+def prompt_cache_fields(model: str) -> Dict[str, Any]:
+    """The request field that turns OpenAI's prompt caching off for ``model``.
+
+    GPT-5.6 and later write every prompt of 1,024 tokens or more to the cache
+    by default, at 1.25x the input rate, and a judge prompt is never read back,
+    so the write is a premium for nothing.  Explicit mode with no breakpoints
+    writes and reads nothing.  Any other model is sent nothing: gpt-4.1-mini
+    refuses the field (HTTP 400) and writes free, and Anthropic caches only on
+    ``cache_control``.  Same names and behaviour as the main checkout's
+    ``judge.py`` (2026-11-01; Roger, 2026-11-02, for this tree)."""
+    m = str(model).lower()
+    if any(m.startswith(f) or f"-{f}" in m for f in PROMPT_CACHE_OFF_MODELS):
+        return {"prompt_cache_options": dict(PROMPT_CACHE_OFF_OPTIONS)}
+    return {}
+
+
+def chat_create_kwargs(body: Dict[str, Any]) -> Dict[str, Any]:
+    """The keyword arguments of ``client.chat.completions.create`` for a request
+    body.  The OpenAI SDK does not know ``prompt_cache_options``, so that field
+    travels in ``extra_body``; a Batch API line carries the body as it is."""
+    kwargs = dict(body)
+    extra = {k: kwargs.pop(k) for k in ("prompt_cache_options",) if k in kwargs}
+    if extra:
+        kwargs["extra_body"] = {**(kwargs.get("extra_body") or {}), **extra}
+    return kwargs
+
+
 async def call_judge_single(
     client: openai.AsyncOpenAI,
     prompt: str,
@@ -435,7 +468,8 @@ async def call_judge_single(
             model=model,
             messages=[{"role": "user", "content": prompt}],
             max_completion_tokens=max_tokens,
-            temperature=1
+            temperature=1,
+            **chat_create_kwargs(prompt_cache_fields(model)),
         )
 
         if usage is not None:

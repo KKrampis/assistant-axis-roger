@@ -2779,6 +2779,15 @@ batches still in flight before submitting anything; it refuses (exit 1)
 when batches in flight were requested with another model or other settings,
 and a `flex` / `realtime` run refuses while a model's batches are in flight.
 
+**Prompt caching is off** (2026-11-02): GPT-5.6 and later write any prompt of
+1,024 tokens or more to the cache by default, at 1.25x the input rate, and a judge
+prompt is never read back.  `judge.prompt_cache_fields` turns that off for all
+three OpenAI send sites here: `judge.call_judge_single`, `_call_openai_batch` in
+`axis_judge_correlation.py`, and this tool's real-time, Flex and Batch requests.
+It is not a request setting, so earlier cells keep resuming.  This tree's usage
+records price every prompt token plain, so a reply reporting cache writes logs a
+warning instead; add such a model to `judge.PROMPT_CACHE_OFF_MODELS`.
+
 **Gemini** (2026-11-02): a `gemini-*` judge is reached directly at Google's
 generateContent endpoint over HTTPS (httpx; the key, `GEMINI_API_KEY`, travels
 in the `x-goog-api-key` header, never in the URL), in real time only (no
@@ -2786,9 +2795,10 @@ Flex; Google's batch mode is not wired up).  Default settings: temperature 0
 (Gemini takes it) and `thinkingConfig.thinkingLevel` "minimal" (no thought
 tokens on 3.1 Flash-Lite; "low" added about 120 per call).  Thought tokens are
 charged as output.  A 429 or 5xx is retried eight times with growing sleeps.
-Candidates in the Luna / Haiku 5.5 price class: `gemini-3.1-flash-lite`
-($0.25 / $1.50) and `gemini-3.5-flash-lite` ($0.30 / $2.50); 2.5 Flash-Lite is
-no longer offered to new users.  A free-tier key is enough for probes, not
+In the Luna / Haiku 5.5 price class: `gemini-3.1-flash-lite` ($0.25 / $1.50;
+earliest shutdown 2027-05-07 on [Google's deprecations page](https://ai.google.dev/gemini-api/docs/deprecations))
+and `gemini-3.5-flash-lite` ($0.30 / $2.50; tested and dropped 2026-11-02, worse
+and dearer than 3.1); 2.5 Flash-Lite is no longer offered to new users.  A free-tier key is enough for probes, not
 for a quick run: about 15 requests a minute and about 500 a day per model (seen
 2026-11-02), against 870 calls for one pass over 30 axes at N=20.  A 429 naming a
 `PerDay` quota raises `BillingError`, which stops the run; a rerun resumes from the

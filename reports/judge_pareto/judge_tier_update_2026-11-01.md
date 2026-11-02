@@ -152,9 +152,13 @@ recorded token counts to the cent at the corrected price.  The Sol cells'
 `usage.json` still records cost at the old price ($18.36 recorded, $12.51
 billed); the plots recompute it.
 
-Prompt caching does not apply to this task.  The part of each prompt shared
+Prompt caching cannot lower this task's costs.  The part of each prompt shared
 across an axis is 244 tokens, below every judge's minimum (OpenAI 1,024;
-Anthropic 512 to 4,096).
+Anthropic 512 to 4,096), so nothing could be read back.  It can raise them:
+GPT-5.6 and later write any prompt of 1,024 tokens or more to the cache by
+default, at 1.25x the input rate.  Single-entity prompts are far below that;
+batched prompts at N=20 are not (section 3c), so the tools turn caching off
+since 2026-11-02.
 
 ### 2.6 How ρ is computed for the plots
 
@@ -289,7 +293,8 @@ entities per call N (5, 7, 10, 15, 20) and reasoning effort (none, low, medium).
 
 **Use N=20, two passes, no reasoning.**
 
-- **N=20** costs about 11% less than N=10 and is no worse.  On all 61 axes it gains
+- **N=20** costs about 11% less than N=10 with prompt caching off (see below) and is no
+  worse.  On all 61 axes it gains
   +0.0072 [+0.0032, +0.0111] for Luna, +0.0036 [-0.0001, +0.0073] for GPT-6 Luna and
   -0.0001 [-0.0033, +0.0030] for Haiku (95% bootstrap over axes).  N=30 is untested.
 - **More passes** help with diminishing returns: the third adds about 0.009, the fourth
@@ -309,6 +314,15 @@ These three are the frontier in 12 of 12 projection variants.  GPT-5.6 Terra (0.
 $0.44) is now dominated.  The winners were chosen on the 30 development axes and then run on
 the 31 held-out ones.  Flex and Batch prices are half the list prices shown; the grid and
 the held-out check cost $18.77 as billed.
+
+**These N=20 cells ran with OpenAI's prompt caching on, the default**, and 93% of their prompts
+pass its 1,024-token minimum.  Calculated from the logged tokens, the write premium takes Luna
+from $0.0423 to $0.0452 an axis at list and GPT-6 Luna from $0.0189 to $0.0204, about $0.13 in
+all at Flex prices, which neither `usage.json` nor these tables show.  With caching on, N=15
+($0.0441 and $0.0197) is slightly cheaper than N=20; the comparison above holds with it off.
+Every OpenAI send on this branch has turned it off since 2026-11-02: in a live check of both
+Lunas, a 1,355-token prompt wrote about 1,350 tokens by default and none with the field.  Haiku
+5.5 is not affected, since Anthropic caches only when asked.
 
 Plots: [`pareto_pooled_61axes_grid.png`](../../roger/axis_judge_experiments/pareto_pooled_61axes_grid.png),
 [`judge_tier_grid_dev30.png`](../../roger/axis_judge_experiments/judge_tier_grid_dev30/judge_tier_grid_dev30.png),
@@ -330,6 +344,10 @@ reasoning arm, no four-pass arm and no two-pass arm at N of 10 or less is on it 
 at $0.068 on the 30 development axes, level with Haiku (0.684 at $0.042) at 60% more;
 `gemini-3.5-flash-lite` scores 0.653 at $0.108.  As Luna's second opinion, 3.1 gives 0.714 at
 $0.110 against Haiku's 0.716 at $0.084.  Neither was run on the held-out axes.
+`gemini-3.5-flash-lite` is out of the running (Roger, 2026-11-02).  `gemini-3.1-flash-lite` has
+an earliest shutdown date of 2027-05-07 on
+[Google's deprecations page](https://ai.google.dev/gemini-api/docs/deprecations), which names
+3.5 as its replacement.
 
 ## 4. Open questions
 

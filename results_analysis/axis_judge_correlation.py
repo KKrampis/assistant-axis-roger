@@ -1483,10 +1483,13 @@ async def _call_openai_batch(
 ) -> List[Optional[str]]:
     """Local OpenAI async path; parallels _call_anthropic_batch so we can set
     temperature and token budget freely (the shared assistant_axis/judge.py
-    hardcodes temperature=1).
+    hardcodes temperature=1).  Prompt caching is off for a judge that takes the
+    field (``judge.prompt_cache_fields``): a batch prompt is never repeated.
     """
     import openai
+    from assistant_axis.judge import chat_create_kwargs, prompt_cache_fields
     client = openai.AsyncOpenAI()
+    cache_kwargs = chat_create_kwargs(prompt_cache_fields(model))
 
     async def one(prompt: str) -> Optional[str]:
         async def attempt() -> Optional[str]:
@@ -1496,6 +1499,7 @@ async def _call_openai_batch(
                 messages=[{"role": "user", "content": prompt}],
                 max_completion_tokens=max_tokens,
                 temperature=temperature,
+                **cache_kwargs,
             )
             if tracker is not None:
                 pt, ct = extract_usage_openai(resp)

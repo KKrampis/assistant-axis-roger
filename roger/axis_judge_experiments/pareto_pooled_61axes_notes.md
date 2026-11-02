@@ -101,7 +101,7 @@ GPT-5.6, and temperature little to Haiku 4.5.
 - **Prices are per item for this task**: prompts of about 315 tokens, of which
   the 244-token rubric is shared across an axis, and replies of about 60.
   That is below every judge's minimum for prompt caching, so caching cannot
-  lower these costs.  A different task (judging responses, with long prompts)
+  lower these costs (on a longer prompt it can raise them: see update 3).  A different task (judging responses, with long prompts)
   has a different input/output mix and needs its own prices.
 - Only gpt-4.1-mini and claude-haiku-4-5 ran at T=0.  The other judges
   refuse T=0 or take no temperature setting, and ran at their default with
@@ -341,7 +341,8 @@ What the grid says, with 95% bootstrap intervals over axes on the paired differe
 
 - **Passes help, with diminishing returns.** The third adds 0.008 to 0.010 and the
   fourth 0.003 to 0.005; every interval excludes zero. Costs are linear in passes.
-- **Bigger batches are cheaper and no worse.** N=20 costs about 11% less than N=10.
+- **Bigger batches are cheaper and no worse.** N=20 costs about 11% less than N=10 with
+  prompt caching off (see **Cost** below).
   N=5 costs about 20% more and scores 0.004 to 0.008 lower. N=20 is the top of the
   range tried and the Lunas' best, so N=30 is untested and may do better still.
 - **Reasoning does not pay.** It costs a third to 70% more and no interval excludes zero
@@ -439,9 +440,23 @@ by less than the noise. Neither model was run on the held-out axes, since neithe
 the development axes. The free tier allowed about 500 requests a day per model, so the runs
 were finished on the paid tier, where they took about three minutes at 5 requests a second.
 
+**3.5 Flash-Lite is out of the running** (Roger, 2026-11-02): no further runs, and its cells
+stay as the record. 3.1 Flash-Lite has an earliest shutdown date of 2027-05-07 on
+[Google's deprecations page](https://ai.google.dev/gemini-api/docs/deprecations), which names
+3.5 as its replacement, so a Gemini second opinion is good until about then unless Google
+extends it.
+
 **Cost.** $18.77 as billed for the grid and the held-out check (Flex and Batch prices).
 Gemini: $4.14 at list price on the paid tier ($1.83 for 3.1, $2.31 for 3.5), after the free
 tier had answered the start of each first pass.
+
+**The N=20 cells ran with OpenAI's prompt caching on, the default**, and 93% of their prompts
+pass its 1,024-token minimum. Calculated from the logged tokens, the write premium takes Luna
+from $0.0423 to $0.0452 an axis at list and GPT-6 Luna from $0.0189 to $0.0204, about $0.13 in
+all at Flex prices, which neither `usage.json` nor these tables show. With caching on, N=15
+($0.0441 and $0.0197) is slightly cheaper than N=20. Every OpenAI send on this branch has turned
+it off since 2026-11-02: in a live check of both Lunas, a 1,355-token prompt wrote about 1,350
+tokens by default and none with the field.
 
 **Not in the commit.** The averaged cells of the grid carry no `correlations.json` (about
 100 MB); [`judge_tier_average_cells.py`](../../scripts/judge_tier_average_cells.py) re-derives
