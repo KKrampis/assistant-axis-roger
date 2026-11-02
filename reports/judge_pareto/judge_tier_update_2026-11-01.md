@@ -1,10 +1,10 @@
 # Judge-tier evaluation: what changed on 2026-11-01, and why
 
 For Konstantinos and the Claude sessions working with him.  Roger and Claude
-made these changes on 2026-11-01, starting from `personas-konstantinos` at
+made these changes on 2026-11-01 and 02, starting from `personas-konstantinos` at
 c7743467, and merged your later commits (9b3d6a5c, ccf7bbb3) back in.  This
 file explains what the pull request contains, the decisions behind it, and how
-to carry on from here.  The per-plot notes hold the full numbers:
+to carry on from here.  Section 3d says where the method ended up.  The per-plot notes hold the full numbers:
 [`pareto_pooled_61axes_notes.md`](../../roger/axis_judge_experiments/pareto_pooled_61axes_notes.md)
 and
 [`pareto_pooled_20axes_notes.md`](../../roger/axis_judge_experiments/pareto_pooled_20axes_notes.md).
@@ -348,6 +348,53 @@ $0.110 against Haiku's 0.716 at $0.084.  Neither was run on the held-out axes.
 an earliest shutdown date of 2027-05-07 on
 [Google's deprecations page](https://ai.google.dev/gemini-api/docs/deprecations), which names
 3.5 as its replacement.
+
+## 3d. 2026-11-02, evening: Gemini's grid, the decision, and the port to production
+
+**The decision (Roger):** N=20, two passes, no reasoning.  The default judges are GPT-5.6
+Luna and Haiku 5.5, blended; Gemini 3.1 Flash-Lite stays a supported third judge, and 3.5 is
+out of the running.  Roger has not ruled on two judges against three: the default is the
+recommendation, one line in
+[`judge_descriptions.py`](../../results_analysis/judge_descriptions.py), and May 2027 for 3.1 is
+not a concern to him.
+
+**Gemini 3.1 on the full grid** (30 development axes, $21.09 at list), change in ρ from
+each judge's own N=10, two passes, no reasoning:
+
+| | GPT-5.6 Luna | GPT-6 Luna | Haiku 5.5 | Gemini 3.1 |
+|---|---:|---:|---:|---:|
+| N=5 | −0.005 | −0.006 | −0.008 | −0.008 |
+| N=20 | +0.006 | +0.004 | −0.001 | +0.005 |
+| 1 pass | −0.023 | −0.027 | −0.022 | −0.028 |
+| 3 passes | +0.010 | +0.009 | +0.009 | +0.009 |
+| low reasoning | +0.004 | −0.003 | +0.005 | −0.010 |
+| medium reasoning | +0.002 | −0.003 | +0.005 | −0.006 |
+| medium reasoning, cost | ×1.66 | ×1.70 | ×1.58 | ×3.37 |
+
+Batch size and passes act the same.  Reasoning hurts Gemini (low: [−0.015, −0.005]) and medium
+is dear.  N=20 and 1 and 3 passes are on Gemini's own frontier in 12 of 12 variants, N=5 and N=7
+never: [`judge_tier_grid_shapes.png`](../../roger/axis_judge_experiments/judge_tier_grid_dev30/judge_tier_grid_shapes.png),
+[`judge_tier_grid_own_frontier.png`](../../roger/axis_judge_experiments/judge_tier_grid_dev30/judge_tier_grid_own_frontier.png).
+
+**Ensemble size** (N=20, two passes each): Luna 0.704, Luna + Haiku 0.716 (+0.012 [−0.000, +0.022]),
+with Gemini 0.720 (+0.004 [−0.001, +0.010], ahead in 9 of 12 variants).  A third pass of Luna and
+Haiku at N=10 gains as much, +0.005 [+0.001, +0.009], for $0.143 against $0.152.  3.1 beats 3.5 by +0.034 [+0.019, +0.051], ahead
+in 12 of 12 variants, for less money.
+
+**What the production audit found.**  `judge.py` and this tool sent byte-identical bodies, but
+production's axis judge had no batched rubric, sent T=0 and no reasoning setting, and turned the HTTP
+400 Luna and Haiku 5.5 answer into None for every entity.  So the tool moved to production on top of
+`judge.py` as the one request layer, which also gave step 3 the Flex limits and the out-of-credits
+stop.  Double-checked: 141,719 of 141,719 recorded prompts rebuild byte-for-byte with
+`--name_format mechanical`, 49,668 of 49,668 groups at N other than 10 reproduce from their seed, the
+wire bodies match on all five paths including Gemini, and a real run through all three judges works
+end to end.
+
+**Two faults found on the way.**  A failed call used to finish its cell: an outage left eight empty
+cells marked done, which the averaging took in (now `judge.FAILED`, the cell stays open, and averaging
+refuses a short source).  And Luna sometimes writes `SCORE: thirty-five`: 978 ratings of 1.4 million,
+now parsed and filled into the cells from their logs, which moves no mean ρ in the third decimal
+except where the tables above were rebuilt.
 
 ## 4. Open questions
 

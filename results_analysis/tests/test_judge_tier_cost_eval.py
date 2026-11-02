@@ -21,6 +21,7 @@ from assistant_axis.anthropic_batch import AnthropicBatchRunner
 from assistant_axis.judge import RateLimiter
 from assistant_axis.judge_pricing import MultiModelUsage, price_for_model
 from results_analysis import judge_tier_cost_eval as ev
+from results_analysis import judge_tier_rubrics as jr
 from results_analysis import judge_tier_transport as tt
 
 REPO = Path(__file__).resolve().parents[2]
@@ -1569,3 +1570,187 @@ def test_gemini_run_batched(world, monkeypatch):
     scores, usage, d = _cell(world, "alpha_vs_beta", "gemini-3.1-flash-lite@b10s1")
     assert scores["result"] == {e: batch_score(e, True) for e in ENTITIES}
     assert scores["_provenance"]["transport"] == "realtime" and usage["n_calls"] == 2
+
+
+# ---------------------------------------------------------------------------
+# A call that gets no answer never finishes a cell (2026-11-02: a Mac asleep for three hours left
+# eight empty cells marked done, and the averaging tool took them in)
+# ---------------------------------------------------------------------------
+
+class FlakyOpenAI(FakeOpenAI):
+    """Its first ``fail_calls`` chat calls fail with a 502, as a dead network does."""
+
+    def __init__(self, fail_calls, **kw):
+        super().__init__(**kw)
+        self.fail_calls = fail_calls
+
+    async def _create(self, **kw):
+        if self.fail_calls > 0:
+            self.fail_calls -= 1
+            self.calls.append(kw)
+            raise HTTPError(502, "Bad Gateway")
+        return await super()._create(**kw)
+
+
+REALTIME = ("--transport", "realtime")
+BATCHED = ("--rubric", "b10", "--cell_label", "@b10s1", "--entities_per_call", "3", "--shuffle_seed", "1", *REALTIME)
+
+
+def _no_reask(monkeypatch):
+    monkeypatch.setattr(ev, "REASK_ROUNDS", 0)
+
+
+def test_an_outage_leaves_no_finished_cell_and_a_rerun_finishes_it(world, monkeypatch):
+    _no_reask(monkeypatch)
+    dead = FlakyOpenAI(10 ** 6)
+    _openai(monkeypatch, std=dead)
+    assert _run(world, "gpt-4.1-mini", extra=REALTIME) == ev.EXIT_INCOMPLETE
+    for axis_dir, *_ in AXES[:2]:
+        d = world.exp / f"{axis_dir}_tier_eval" / "gpt-4.1-mini"
+        assert not (d / "usage.json").exists() and not (d / "scores_descriptions.json").exists()
+    alive = FakeOpenAI()
+    _openai(monkeypatch, std=alive)
+    assert _run(world, "gpt-4.1-mini", extra=REALTIME) == 0
+    scores, usage, _d = _cell(world, AXES[0][0], "gpt-4.1-mini")
+    assert set(scores["result"]) == set(ENTITIES) and usage["n_calls"] == len(ENTITIES)
+    assert scores["_provenance"]["n_entities"] == scores["_provenance"]["n_scored"] == len(ENTITIES)
+
+
+def test_a_partial_outage_keeps_the_answers_and_a_rerun_asks_only_the_gaps(world, monkeypatch):
+    _no_reask(monkeypatch)
+    flaky = FlakyOpenAI(3)
+    _openai(monkeypatch, std=flaky)
+    assert _run(world, "gpt-4.1-mini", extra=REALTIME) == ev.EXIT_INCOMPLETE
+    d = world.exp / f"{AXES[0][0]}_tier_eval" / "gpt-4.1-mini"
+    assert not (d / "usage.json").exists() and (d / "scores_descriptions.partial.json").exists()
+    alive = FakeOpenAI()
+    _openai(monkeypatch, std=alive)
+    assert _run(world, "gpt-4.1-mini", extra=REALTIME) == 0
+    assert len(alive.calls) == 3
+    scores, usage, d = _cell(world, AXES[0][0], "gpt-4.1-mini")
+    assert set(scores["result"]) == set(ENTITIES) and usage["n_calls"] == len(ENTITIES)
+    assert not (d / "scores_descriptions.partial.json").exists() and not (d / "usage.partial.json").exists()
+
+
+def test_failed_calls_are_asked_again_in_the_same_run(world, monkeypatch, capsys):
+    monkeypatch.setattr(ev, "REASK_SLEEP_S", 0.0)
+    flaky = FlakyOpenAI(4)
+    _openai(monkeypatch, std=flaky)
+    assert _run(world, "gpt-4.1-mini", extra=REALTIME) == 0
+    assert len(flaky.calls) == 2 * len(ENTITIES) + 4
+    for axis_dir, *_ in AXES[:2]:
+        scores, usage, _d = _cell(world, axis_dir, "gpt-4.1-mini")
+        assert set(scores["result"]) == set(ENTITIES) and usage["n_calls"] == len(ENTITIES)
+
+
+def test_a_failed_group_leaves_all_its_entities_open(world, monkeypatch):
+    _no_reask(monkeypatch)
+    flaky = FlakyOpenAI(1)
+    _openai(monkeypatch, std=flaky)
+    assert _run(world, "gpt-4.1-mini", extra=BATCHED) == ev.EXIT_INCOMPLETE
+    alive = FakeOpenAI()
+    _openai(monkeypatch, std=alive)
+    assert _run(world, "gpt-4.1-mini", extra=BATCHED) == 0
+    assert len(alive.calls) == 1     # the one group that failed, and only it
+    scores, _usage, _d = _cell(world, AXES[0][0], "gpt-4.1-mini@b10s1")
+    assert set(scores["result"]) == set(ENTITIES)
+
+
+def test_a_failure_in_a_batch_remainder_stays_open(world, monkeypatch):
+    missing = ENTITIES[:2]
+    client = FlakyOpenAI(10 ** 6, error_names=missing)
+    _openai(monkeypatch, std=client)
+    assert _run(world, "gpt-4.1-mini", extra=("--transport", "batch")) == ev.EXIT_INCOMPLETE
+    for axis_dir, *_ in AXES[:2]:
+        assert not (world.exp / f"{axis_dir}_tier_eval" / "gpt-4.1-mini" / "usage.json").exists()
+    alive = FakeOpenAI()
+    _openai(monkeypatch, std=alive)
+    assert _run(world, "gpt-4.1-mini", extra=("--transport", "batch")) == 0
+    scores, _usage, _d = _cell(world, AXES[0][0], "gpt-4.1-mini")
+    assert set(scores["result"]) == set(ENTITIES)
+
+
+def test_a_refusal_is_an_outcome_and_a_failure_is_not():
+    job = ev.AxisJob("a", "p", "n", "traits", Path("x"), Path("y"))
+    cell = ev.Cell(0, job, expected={"e1", "e2"})
+    assert not cell.finished
+    cell.scores = {"e1": None, "e2": None}      # answered, and none of them scored
+    assert cell.complete and not cell.finished
+    cell.scores = {"e1": None, "e2": 3}
+    assert cell.finished
+    cell.scores = {"e2": 3}                     # e1's call got no answer
+    assert not cell.complete and not cell.finished
+
+
+# ---------------------------------------------------------------------------
+# Scores in words (Luna, 2026-11-02)
+# ---------------------------------------------------------------------------
+
+def test_batch_parser_reads_scores_in_words():
+    parse = jr.get("b10").parse_batch
+    reply = ("1. Planners favor structure. SCORE:  thirty\n"
+             "2. Technologists pursue novelty. SCORE:  Ninety-Eight\n"
+             "3. Mediators compromise. SCORE: **fifty-five**\n"
+             "4. Bad. SCORE: thirty? Must integer no words. SCORE: 32\n"
+             "5. Out of range. SCORE: one hundred and five\n"
+             "6. Digits. SCORE: 7\n")
+    assert parse(reply, 6) == {1: 30, 2: 98, 3: 55, 4: 32, 5: None, 6: 7}
+
+
+def test_strict_parser_reads_scores_in_words():
+    parse = jr.get("c10").parse
+    assert parse("It leans.\nSCORE: thirty-five") == 35
+    assert parse("It leans.\nscore: FORTY") == 40
+    assert parse("It leans.\nSCORE: 35") == 35
+    assert parse("SCORE: thirty\nSCORE: forty") is None
+    assert parse("SCORE: minus ten") is None      # below the percentile scale
+    assert jr.get("c5").parse("It leans.\nSCORE: - forty") == -40
+
+
+def test_a_batched_reply_in_words_reaches_the_cell(world, monkeypatch):
+    class WordyOpenAI(FakeOpenAI):
+        async def _create(self, **kw):
+            reply = await super()._create(**kw)
+            text = reply.choices[0].message.content
+            reply.choices[0].message.content = re.sub(r"SCORE: 50\b", "SCORE: Fifty", text)
+            return reply
+    _openai(monkeypatch, std=WordyOpenAI())
+    assert _run(world, "gpt-4.1-mini", extra=BATCHED) == 0
+    scores, _usage, _d = _cell(world, AXES[0][0], "gpt-4.1-mini@b10s1")
+    assert scores["result"] == {e: batch_score(e, True) for e in ENTITIES}
+
+
+# ---------------------------------------------------------------------------
+# The averaging tool refuses a short source
+# ---------------------------------------------------------------------------
+
+def _average_script():
+    import importlib.util
+    path = Path(__file__).resolve().parents[2] / "scripts" / "judge_tier_average_cells.py"
+    spec = importlib.util.spec_from_file_location("judge_tier_average_cells", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _write_source(world, axis_dir, cell, result):
+    d = world.exp / f"{axis_dir}_tier_eval" / cell
+    d.mkdir(parents=True)
+    (d / "scores_descriptions.json").write_text(json.dumps({"result": result, "_provenance": {"judge_model": "m"}}))
+    (d / "usage.json").write_text(json.dumps(MultiModelUsage().as_dict()))
+
+
+def test_averaging_refuses_a_source_with_gaps(world, capsys):
+    axis_ok, axis_short = AXES[0][0], AXES[1][0]
+    full = {e: 50.0 for e in ENTITIES}
+    for axis_dir in (axis_ok, axis_short):
+        _write_source(world, axis_dir, "m@s1", full)
+    _write_source(world, axis_ok, "m@s2", {e: 70.0 for e in ENTITIES})
+    _write_source(world, axis_short, "m@s2", {})              # the outage's empty cell
+    argv = ["m@x2", "m@s1", "m@s2", "--experiments_dir", str(world.exp), "--axes_file", str(world.axes2),
+            "--instructions_dir", str(world.data)]
+    assert _average_script().main(argv) == 1
+    assert "REFUSED " + axis_short in capsys.readouterr().err
+    scores, _usage, _d = _cell(world, axis_ok, "m@x2")
+    assert set(scores["result"].values()) == {60.0}
+    assert not (world.exp / f"{axis_short}_tier_eval" / "m@x2").exists()

@@ -393,9 +393,9 @@ def test_grid_figures_cover_the_grid_once_each():
     figs = _grid_script().figures()
     assert set(figs) == {"batch_size", "passes", "reasoning", "all"}
     labels = {stem: f[0] for stem, f in figs.items()}
-    assert len(labels["all"]) == 3 * 10 + 4                      # 10 settings per judge, Gemini twice, two blends
+    assert len(labels["all"]) == 3 * 10 + 9 + 3                  # 10 settings per judge, 9 for Gemini (up to 3 passes), three blends
     assert len(set(labels["all"].values())) == len(labels["all"])
-    assert len(labels["batch_size"]) == 3 * 5 + 2 and len(labels["passes"]) == 3 * 4 and len(labels["reasoning"]) == 3 * 3
+    assert len(labels["batch_size"]) == 4 * 5 and len(labels["passes"]) == 3 * 4 + 3 and len(labels["reasoning"]) == 4 * 3
     for stem in ("batch_size", "passes", "reasoning"):
         assert set(labels[stem]) <= set(labels["all"])
         for run in figs[stem][2]:                                # each arrow chain lies inside its figure

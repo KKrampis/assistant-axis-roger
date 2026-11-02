@@ -488,6 +488,31 @@ uv run python scripts/judge_tier_compare_arms.py --axes_file scripts/tier_eval_a
     --compare "Luna+Haiku:Luna"
 ```
 
+## Update 4, 2026-11-02 (evening): Gemini's grid, the decision, and production
+
+**The decision (Roger):** batched percentile judging at N=20, two passes, no reasoning.  The default judges are
+GPT-5.6 Luna + Haiku 5.5, blended (0.716 at $0.084 on the 30 development axes).  Gemini 3.1 Flash-Lite is a supported
+third judge (0.720 at $0.152, +0.004 [-0.001, +0.010], ahead in 9 of 12 variants); 3.5 is out of the running.  A third
+pass of Luna and Haiku at N=10 gains as much (+0.005 [+0.001, +0.009], at $0.143).
+
+**Gemini 3.1 on the full grid** ($21.09 at list): batch size and passes act as on the other judges (N=5 -0.008 and N=20
++0.005 from N=10; one pass -0.028, three +0.009); reasoning hurts it (low -0.010 [-0.015, -0.005]) and medium costs 3.4
+times as much.  N=20 and 1 and 3 passes are on its own frontier in 12 of 12 variants, N=5 and N=7 never:
+[`judge_tier_grid_shapes.png`](./judge_tier_grid_dev30/judge_tier_grid_shapes.png),
+[`judge_tier_grid_own_frontier.png`](./judge_tier_grid_dev30/judge_tier_grid_own_frontier.png).
+
+**Two faults, fixed.**  A call that got no answer used to finish its cell: a Mac asleep for three hours left eight empty
+cells marked done, which the averaging took in.  Now such a call stays open, is asked again, and a run left with gaps
+exits 4; the averaging refuses a source under 90% of its axis.  And GPT-5.6 Luna sometimes writes `SCORE: thirty-five`,
+about 0.2% of its ratings and often a whole batch: the parsers now read that, and 978 ratings of 1.4 million were filled
+in from the answer logs, with no recorded score changed.  The tables of update 3 can differ from the figures here in the
+third decimal for that reason (Luna N=20: 0.7035 to the value in
+[`judge_tier_grid_dev30.json`](./judge_tier_grid_dev30/judge_tier_grid_dev30.json)).
+
+**Production.**  The method now runs from the main repository's `results_analysis/judge_descriptions.py`, on its one
+request layer `assistant_axis/judge.py`.  There `--name_format judge_label` is the default; this branch's prompts are
+what it calls `mechanical`.  Replaying this branch's cells through that code: 141,719 of 141,719 prompts byte-identical.
+
 ## Original analysis, 2026-10-26
 
 **Plot:** [`pareto_pooled_61axes.png`](./pareto_pooled_61axes.png)  

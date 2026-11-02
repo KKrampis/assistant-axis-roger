@@ -2834,6 +2834,18 @@ thinking off 70 of 11,484 replies cut (52 came out unscored, 18 scored by the
 fallback); Haiku 4.5 3 of 34,072, at T=0 1 of 35,214; Sonnet 5 7 of 34,072;
 Haiku 5.5 (cap 250) 7 of 35,214.
 
+**A call that gets no answer never finishes a cell** (2026-11-02).  A network or provider failure comes back as
+`judge_tier_transport.FAILED`, not None: nothing was charged and nothing is known, so its entities stay unscored, live
+and Flex runs ask them again up to `REASK_ROUNDS` times, a minute apart, and what is still open at the end leaves its
+cell without a `usage.json`, for a rerun (exit status 4).  A refusal, a content flag and an unparseable reply are
+outcomes: asking again would repeat them.  `scripts/judge_tier_average_cells.py` refuses a source holding under 90% of
+the axis.
+
+**Scores in words** (2026-11-02, [`assistant_axis/judge_score_words.py`](../assistant_axis/judge_score_words.py)).
+GPT-5.6 Luna now and then writes `SCORE: thirty-five`, usually for a whole batch; the contemporary and batched rubrics'
+parsers read that, in any case, with UK and US forms.  A digit marker takes precedence, so the parser can only turn a
+missing score into a score.
+
 **Repairing cut replies** (`--repair_truncated`, with the same `--axes_file`,
 `--experiments_dir`, `--instructions_dir`, `--judge_model`, `--cell_label`
 and `--request_setting` as the run that made the cells, and the new

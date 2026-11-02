@@ -15,21 +15,22 @@ from assistant_axis import json_metadata
 from assistant_axis.provenance import load_and_register
 from results_analysis import judge_tier_robustness as rob
 
-# (name in labels, the cell prefix under the batched method, the prefix for a reasoning arm, first shuffle seed)
-JUDGES = (("Luna", "gpt-5.6-luna@none", "gpt-5.6-luna", 1), ("GPT-6", "gpt-6-luna", "gpt-6-luna", 1),
-          ("Haiku", "claude-haiku-5-5", "claude-haiku-5-5", 3))
-# Measured at N=20 only, so they join the batch-size figure and the whole grid without arrows.
-GEMINI = {"gemini-3.1-flash-lite@b10n20x2": "Gemini 3.1 N=20", "gemini-3.5-flash-lite@b10n20x2": "Gemini 3.5 N=20"}
+# (name in labels, the cell prefix under the batched method, the prefix for a reasoning arm, first
+# shuffle seed, passes measured).  Gemini 3.1 stops at 3 passes (Roger, 2026-11-02: "up to 3x").
+JUDGES = (("Luna", "gpt-5.6-luna@none", "gpt-5.6-luna", 1, 4), ("GPT-6", "gpt-6-luna", "gpt-6-luna", 1, 4),
+          ("Haiku", "claude-haiku-5-5", "claude-haiku-5-5", 3, 4),
+          ("Gemini", "gemini-3.1-flash-lite", "gemini-3.1-flash-lite", 1, 3))
 BLENDS = {"gpt-5.6-luna+claude-haiku-5-5@b10n20x2": "Luna + Haiku N=20",
-          "gpt-5.6-luna+gemini-3.1-flash-lite@b10n20x2": "Luna + Gemini 3.1 N=20"}
-X_TICKS = (0.01, 0.015, 0.02, 0.03, 0.05, 0.07, 0.1, 0.15)
+          "gpt-5.6-luna+gemini-3.1-flash-lite@b10n20x2": "Luna + Gemini N=20",
+          "gpt-5.6-luna+claude-haiku-5-5+gemini-3.1-flash-lite@b10n20x2": "Luna + Haiku + Gemini N=20"}
+X_TICKS = (0.01, 0.015, 0.02, 0.03, 0.05, 0.07, 0.1, 0.15, 0.2, 0.3)
 
 
-def dimension_arms(base: str, plain: str, first: int) -> dict:
+def dimension_arms(base: str, plain: str, first: int, max_passes: int = 4) -> dict:
     """{dimension: {arm: cell}} for one judge; every dimension holds the other two at the base
     setting, N=10, two passes, no reasoning."""
     return {"batch_size": {f"N={n}": f"{base}@b10x2" if n == 10 else f"{base}@b10n{n}x2" for n in (5, 7, 10, 15, 20)},
-            "passes": {f"{k}x": f"{base}@b10s{first}" if k == 1 else f"{base}@b10x{k}" for k in (1, 2, 3, 4)},
+            "passes": {f"{k}x": f"{base}@b10s{first}" if k == 1 else f"{base}@b10x{k}" for k in range(1, max_passes + 1)},
             "reasoning": {lvl: f"{base}@b10x2" if lvl == "none" else f"{plain}{tok}@b10x2"
                           for lvl, tok in (("none", ""), ("low", "@low"), ("medium", "@med"))}}
 
@@ -39,30 +40,27 @@ def figures() -> dict:
     labels only, panel width, panel height)}."""
     figs = {}
     own = "the frontier is among this figure's settings only"
-    text = {"batch_size": ("Batch size", f"N = entities per call, at 2 passes and no reasoning; arrows run from N=5 to N=20; "
-                           f"Gemini was measured at N=20 only; {own}", 5.2, 4.2),
-            "passes": ("Number of passes", f"passes = random batch orders averaged, at N=10 and no reasoning; arrows run from 1 pass to 4; {own}", 4.6, 3.8),
+    text = {"batch_size": ("Batch size", f"N = entities per call, at 2 passes and no reasoning; arrows run from N=5 to N=20; {own}", 5.2, 4.2),
+            "passes": ("Number of passes", f"passes = random batch orders averaged, at N=10 and no reasoning; arrows run from 1 pass to 4 "
+                       f"(3 for Gemini); {own}", 4.6, 3.8),
             "reasoning": ("Reasoning effort", f"at N=10 and 2 passes; arrows run from no reasoning to medium; {own}", 4.6, 3.6)}
     for dim, (phrase, sub, w, h) in text.items():
         labels, short, series = {}, {}, []
-        for name, base, plain, first in JUDGES:
-            arms = dimension_arms(base, plain, first)[dim]
+        for name, base, plain, first, max_passes in JUDGES:
+            arms = dimension_arms(base, plain, first, max_passes)[dim]
             labels.update({cell: f"{name} {arm}" for arm, cell in arms.items()})
             series.append(list(arms.values()))
             if dim == "batch_size":      # each judge's five points sit together, so one name is enough
                 short.update({cell: arm[2:] for arm, cell in arms.items() if arm != "N=20"})
-        if dim == "batch_size":
-            labels.update(GEMINI)
-            short.update({cell: text[:-len(" N=20")] for cell, text in GEMINI.items()})
         figs[dim] = (labels, short, series, phrase, sub, False, w, h)
     labels = {}
-    for name, base, plain, first in JUDGES:
-        for dim, arms in dimension_arms(base, plain, first).items():
+    for name, base, plain, first, max_passes in JUDGES:
+        for dim, arms in dimension_arms(base, plain, first, max_passes).items():
             for arm, cell in arms.items():
                 labels[cell] = f"{name} base" if cell == f"{base}@b10x2" else f"{name} {arm}"
-    labels.update(GEMINI); labels.update(BLENDS)
+    labels.update(BLENDS)
     figs["all"] = (labels, {}, [], "The whole grid", "base = N=10, 2 passes, no reasoning; each other row changes one of those; "
-                   "blends and Gemini at N=20, 2 passes; only frontier points are labelled", True, 4.6, 4.2)
+                   "blends at N=20, 2 passes; only frontier points are labelled", True, 4.6, 4.2)
     return figs
 
 

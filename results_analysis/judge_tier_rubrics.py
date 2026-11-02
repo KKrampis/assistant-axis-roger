@@ -43,6 +43,7 @@ from dataclasses import dataclass
 from typing import Callable, Dict, Optional, Sequence, Tuple
 
 from assistant_axis.entity_id import parse_entity_id
+from assistant_axis.judge_score_words import marker_value
 from results_analysis.axis_judge_correlation import (
     AxisSpec,
     RUBRIC_VERSION,
@@ -261,7 +262,7 @@ def batch_parser(lo: int, hi: int):
     to the next numbered line; Haiku 5.5 puts the SCORE on the line after the
     reasoning, with a blank line between items) holds exactly one SCORE marker
     with a value in range; a missing, repeated or out-of-range index gives
-    None."""
+    None.  A value may be in words (``judge_score_words.marker_value``)."""
     def parse(text: Optional[str], n: int) -> Dict[int, Optional[float]]:
         out: Dict[int, Optional[float]] = {k: None for k in range(1, n + 1)}
         if not text:
@@ -272,13 +273,9 @@ def batch_parser(lo: int, hi: int):
             if not 1 <= k <= n:
                 continue
             block = text[pos:starts[j + 1][0] if j + 1 < len(starts) else len(text)]
-            found = _BATCH_SCORE_RE.findall(block)
+            v = marker_value(block, _BATCH_SCORE_RE)
             seen[k] = seen.get(k, 0) + 1
-            if len(found) == 1:
-                v = int(found[0])
-                out[k] = v if lo <= v <= hi else None
-            else:
-                out[k] = None
+            out[k] = v if v is not None and lo <= v <= hi else None
         for k, c in seen.items():
             if c != 1:
                 out[k] = None
@@ -291,15 +288,13 @@ _SCORE_RE = re.compile(r"SCORE\s*:\s*([+-]?\d+)\b", flags=re.IGNORECASE)
 
 def strict_parser(lo: int, hi: int) -> Callable[[Optional[str]], Optional[float]]:
     """Exactly one ``SCORE: <int>`` marker with the value in [lo, hi], else None
-    (as pipeline step 3 and axis_judge_correlation v5 read scores; no fallback)."""
+    (as pipeline step 3 and axis_judge_correlation v5 read scores; no fallback).
+    A value may be in words (``judge_score_words.marker_value``)."""
     def parse(text: Optional[str]) -> Optional[float]:
         if not text:
             return None
-        found = _SCORE_RE.findall(text)
-        if len(found) != 1:
-            return None
-        v = int(found[0])
-        return v if lo <= v <= hi else None
+        v = marker_value(text, _SCORE_RE)
+        return v if v is not None and lo <= v <= hi else None
     return parse
 
 

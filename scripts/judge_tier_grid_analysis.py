@@ -86,7 +86,7 @@ def main() -> None:
         ax.plot([p[0] for p in fc], [p[1] for p in fc], "--", color="#555", lw=1, alpha=0.6)
         ax.set_xscale("log"); xs = [p[0] for p in pts]; lo, hi = min(xs) / 1.35, max(xs) * 1.35; ax.set_xlim(lo, hi)
         ax.set_ylim(min(ys) - pad, max(ys) + pad)
-        tk = [t for t in (0.01, 0.015, 0.02, 0.03, 0.05, 0.07, 0.1, 0.15) if lo <= t <= hi] or cost_ticks(lo, hi)
+        tk = [t for t in (0.01, 0.015, 0.02, 0.03, 0.05, 0.07, 0.1, 0.15, 0.2, 0.3) if lo <= t <= hi] or cost_ticks(lo, hi)
         ax.set_xticks(tk); ax.set_xticklabels([f"\\${t:g}" for t in tk]); ax.minorticks_off()
         ax.grid(True, alpha=0.3); ax.set_title(judge); ax.set_xlabel("cost per axis (USD, list price, log)")
         old = [r for r in rows if r["judge"] == judge and r["dimension"] == "old rubric"]

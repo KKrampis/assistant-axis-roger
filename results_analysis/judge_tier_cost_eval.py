@@ -120,7 +120,9 @@ Usage:
 Drop --dry_run to actually run it.  scripts/run_tier_eval.sh wraps the
 axes-file form with the corpus check.  Each --judge_model may be repeated;
 models run concurrently.  Exit status: 0 done, 1 a model failed (or a key is
-missing), 2 --budget_usd stopped the run, 3 it stalled and no restart was left.
+missing), 2 --budget_usd stopped the run, 3 it stalled and no restart was left,
+4 calls stayed unanswered after their re-asks (rerun: cells with gaps have no
+usage.json, and the saved answers are kept).
 """
 
 import argparse
@@ -198,6 +200,12 @@ PROGRESS_EVERY_S = 300.0
 DEFAULT_STALL_MINUTES = 30.0
 DEFAULT_STALL_RESTARTS = 3
 EXIT_STALLED = 3
+EXIT_INCOMPLETE = 4
+#: A call that got no answer (a network or provider failure, not a refusal) leaves its entities
+#: unscored and its cell open; live and Flex runs ask such calls again this many times, this far
+#: apart, before leaving them for a rerun.
+REASK_ROUNDS = 3
+REASK_SLEEP_S = 60.0
 #: The environment variable that counts restarts after a stall across execs.
 RESTART_ENV = "JUDGE_TIER_EVAL_STALL_RESTARTS"
 #: Per-cell answer log (see "Saved answers" in the docstring).
@@ -434,6 +442,12 @@ class Cell:
     def complete(self) -> bool:
         return self.expected <= set(self.scores)
 
+    @property
+    def finished(self) -> bool:
+        """Every entity has its outcome and at least one has a score: the cell may be written
+        as done.  A call that got no answer leaves its entities out of ``scores``."""
+        return self.complete and any(s is not None for s in self.scores.values())
+
     def parsed_scores(self) -> Dict[str, int]:
         return {n: s for n, s in sorted(self.scores.items()) if s is not None}
 
@@ -457,6 +471,7 @@ class ModelRun:
     to_judge: int = 0       # live or Flex requests this run set out to send
     in_flight: int = 0
     error: Optional[BaseException] = None
+    live_cells: List[Cell] = field(default_factory=list)   # the last live round's, for the rerun record
 
     def __post_init__(self) -> None:
         self.transport = self.transport or self.choice.transport
@@ -557,7 +572,8 @@ def write_cell(cell: Cell, mrun: ModelRun, max_tokens: int) -> None:
                   "request_settings": mrun.settings, "max_tokens": max_tokens,
                   "cell_label": CELL_LABEL, "truncated": sorted(cell.truncated),
                   "entities_per_call": BATCHING["n"], "shuffle_seed": BATCHING["seed"],
-                  "batch_design": BATCHING["design"]}
+                  "batch_design": BATCHING["design"],
+                  "n_entities": len(cell.expected), "n_scored": len(scores)}
     atomic_write_text(json.dumps({"result": scores, "_provenance": provenance}, indent=2),
                       d / "scores_descriptions.json", logger_obj=logger)
     correlations = compute_correlations(
@@ -574,6 +590,8 @@ def write_cell(cell: Cell, mrun: ModelRun, max_tokens: int) -> None:
     atomic_write_text(json.dumps(cell.usage.as_dict(), indent=2, sort_keys=True), d / "usage.json",
                       logger_obj=logger)
     log.unlink(missing_ok=True)
+    for stale in ("scores_descriptions.partial.json", "usage.partial.json"):
+        (d / stale).unlink(missing_ok=True)
     cell.written = True
     mrun.cells_written += 1
     logger.info(f"[{model}] {job.axis_dir}: scored {len(scores)}/{len(cell.expected)}"
@@ -833,9 +851,10 @@ async def run_live(ctx: RunContext, mrun: ModelRun, todo: List[AxisJob], *, tier
         fallback = make_openai_client(None) if tier == "flex" else None
     header = checkpoint_header(mrun, ctx.max_tokens)
     cells = {i: Cell(i, job, expected={name for _, name, _ in job.entities}) for i, job in enumerate(todo)}
+    mrun.live_cells = list(cells.values())
     for cell in cells.values():
         resume_cell(cell, mrun, header)
-        if cell.complete and not cell.written:
+        if cell.finished and not cell.written:
             write_cell(cell, mrun, ctx.max_tokens)
     items = [(i, etype, name, desc) for i, job in enumerate(todo) for etype, name, desc in job.entities
              if not cells[i].written and name not in cells[i].scores]
@@ -894,8 +913,8 @@ async def run_live(ctx: RunContext, mrun: ModelRun, todo: List[AxisJob], *, tier
             mrun.in_flight -= 1
             unfinished -= 1
             ctx.live_pending -= 1
-        if text is tt.SKIPPED:
-            return
+        if text is tt.SKIPPED or text is tt.FAILED:
+            return      # no outcome for these entities: the cell stays open and they are asked again
         if n_per > 1:
             names = [g[1] for g in group]
             scores = ({} if isinstance(text, tt.Truncated) or not text
@@ -910,7 +929,7 @@ async def run_live(ctx: RunContext, mrun: ModelRun, todo: List[AxisJob], *, tier
                 append_answer(cell, model, header, name, text, charge.charges, prompt)
             record(mrun, cell, name, text)
         ctx.note_answer()
-        if cell.complete and not cell.written:
+        if cell.finished and not cell.written:
             write_cell(cell, mrun, ctx.max_tokens)
 
     try:
@@ -932,13 +951,20 @@ async def run_live(ctx: RunContext, mrun: ModelRun, todo: List[AxisJob], *, tier
         ctx.live_pending -= unfinished   # requests never sent (a refused probe, a cancelled run)
     if fatal:
         raise fatal[0]
-    for cell in cells.values():
-        if not cell.written:
-            if cell.scores:
-                write_partial_cell(cell, mrun, ctx.max_tokens)
-            else:
-                mrun.cells_incomplete += 1
     return True
+
+
+def close_live_cells(mrun: ModelRun, max_tokens: int) -> None:
+    """After the last live round: a cell not finished goes on record as partial (no usage.json, so
+    a rerun judges it, taking its saved answers), and its unanswered entities as left for a rerun."""
+    for cell in mrun.live_cells:
+        if cell.written:
+            continue
+        mrun.left_for_rerun += len(cell.expected - set(cell.scores))
+        if cell.scores:
+            write_partial_cell(cell, mrun, max_tokens)
+        else:
+            mrun.cells_incomplete += 1
 
 
 # ---------------------------------------------------------------------------
@@ -1166,7 +1192,7 @@ async def run_batch(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob]) -> Non
             cell = cells[idx]
             if cell.written:
                 continue
-            if cell.complete:
+            if cell.finished:
                 write_cell(cell, mrun, ctx.max_tokens)
                 collected_path(idx).unlink(missing_ok=True)
             else:
@@ -1180,7 +1206,7 @@ async def run_batch(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob]) -> Non
     # A cell already complete from collected results (a run stopped between
     # saving them and writing the cell) is written now.
     for idx in current:
-        if cells[idx].complete:
+        if cells[idx].finished:
             touched.add(idx)
     flush()
 
@@ -1263,8 +1289,8 @@ async def run_batch(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob]) -> Non
             finally:
                 unfinished -= 1
                 ctx.live_pending -= 1
-            if text is tt.SKIPPED:
-                return
+            if text is tt.SKIPPED or text is tt.FAILED:
+                return      # no outcome: left out of the cell, and a rerun submits it again
             if is_group:
                 members = group_members(cid) or []
                 for k, gname in enumerate(members, 1):
@@ -1285,7 +1311,6 @@ async def run_batch(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob]) -> Non
             ctx.live_pending -= unfinished
         flush()
     elif unanswered:
-        mrun.left_for_rerun += len(unanswered)
         logger.error(f"[{model}] {len(unanswered)} requests were not answered by their batches, more than "
                      f"--batch_fallback_max ({ctx.batch_fallback_max}) to send in real time; they stay "
                      f"unscored, and a rerun submits them again")
@@ -1293,6 +1318,7 @@ async def run_batch(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob]) -> Non
         cell = cells[idx]
         if not cell.written:
             mrun.cells_incomplete += 1
+            mrun.left_for_rerun += len(cell.expected - set(cell.scores))
             if cell.scores:
                 touched.add(idx)
     flush()   # incomplete cells' results stay under collected/ for the rerun
@@ -1324,12 +1350,24 @@ async def run_model(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob]) -> Non
     if not todo:
         return
     tier = "flex" if mrun.choice.transport == "flex" else None
-    accepted = await run_live(ctx, mrun, todo, tier=tier, probe=mrun.choice.probe)
-    if not accepted:
-        mrun.transport = "batch"
-        mrun.transport_reason = (f"{mrun.choice.reason}; OpenAI refused Flex on the probe (HTTP 400), "
-                                 f"so the run switched to the Batch API")
-        await run_batch(ctx, mrun, jobs)
+    for round_ in range(REASK_ROUNDS + 1):
+        failed_before, resumed_before = mrun.stats.errors, mrun.resumed
+        accepted = await run_live(ctx, mrun, todo, tier=tier, probe=mrun.choice.probe and round_ == 0)
+        if not accepted:
+            mrun.transport = "batch"
+            mrun.transport_reason = (f"{mrun.choice.reason}; OpenAI refused Flex on the probe (HTTP 400), "
+                                     f"so the run switched to the Batch API")
+            await run_batch(ctx, mrun, jobs)
+            return
+        if round_:
+            mrun.resumed = resumed_before    # the same saved answers, not more of them
+        todo = [job for job in todo if not cell_done(job, model)]
+        if mrun.stats.errors == failed_before or not todo or round_ == REASK_ROUNDS or ctx.budget_hit:
+            break
+        logger.warning(f"[{model}] {mrun.stats.errors - failed_before} calls got no answer; asking them again in "
+                       f"{REASK_SLEEP_S:.0f}s (round {round_ + 1} of {REASK_ROUNDS})")
+        await asyncio.sleep(REASK_SLEEP_S)
+    close_live_cells(mrun, ctx.max_tokens)
 
 
 def summarise(mrun: ModelRun) -> str:
@@ -1927,7 +1965,7 @@ async def repair_model(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob], *, 
             return
         if reply is tt.SKIPPED:
             return
-        if this_call.n_calls == 0:      # no answer (a failed call): left as it was
+        if reply is tt.FAILED or this_call.n_calls == 0:      # no answer: left as it was
             stats.failed += 1
             return
         mrun.attempted += 1
@@ -2304,6 +2342,10 @@ async def main_async(argv: Optional[Sequence[str]] = None) -> int:
         return 1
     if ctx.budget_hit:
         return 2
+    if any(m.left_for_rerun or m.cells_incomplete or m.cells_partial for m in runs):
+        logger.error("calls stayed unanswered: rerun to ask them (cells with gaps have no usage.json, and the "
+                     "saved answers are kept)")
+        return EXIT_INCOMPLETE
     return 0
 
 

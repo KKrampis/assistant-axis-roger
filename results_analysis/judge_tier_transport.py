@@ -489,6 +489,19 @@ class _Skipped:
 SKIPPED = _Skipped()
 
 
+class _Failed:
+    def __repr__(self) -> str:
+        return "FAILED"
+
+
+#: Returned by the call functions for a call that got no answer (network, 5xx, 429 past its retries).
+#: Nothing was charged and nothing is known about the entity, so unlike None (a refusal or a content
+#: flag, which asking again would repeat) it must not finish a cell: the call is asked again.  A Mac
+#: asleep for three hours on 2026-11-02 turned every call of eight cells into None, and those cells,
+#: empty, counted as done.
+FAILED = _Failed()
+
+
 def flex_attempt_client(client: Any, started: float) -> Any:
     """``client`` for one Flex attempt: no SDK retries, and a timeout of the
     time left before :data:`FLEX_FALLBACK_AFTER_S` (at least
@@ -508,8 +521,9 @@ async def call_openai(client: Any, prompt: str, model: str, max_tokens: int, rat
                       gate: Optional[Callable[[], bool]] = None) -> Any:
     """One chat-completion judge call: the reply text, a :class:`Truncated` for
     a reply cut at ``max_tokens`` (``finish_reason == "length"``), None for a
-    failed call, or :data:`SKIPPED` when ``gate()`` (checked once the rate
-    limiter lets the request go, before it is first sent) is True.
+    content flag, :data:`FAILED` for a call that got no answer, or
+    :data:`SKIPPED` when ``gate()`` (checked once the rate limiter lets the
+    request go, before it is first sent) is True.
 
     The Flex loop is the main checkout's ``call_judge_single``: a Flex call
     that fails with anything but an HTTP 400 is tried again every
@@ -571,7 +585,7 @@ async def call_openai(client: Any, prompt: str, model: str, max_tokens: int, rat
                 continue
             stats.errors += 1
             logger.error(f"Error calling judge model {model}: {e}")
-            return None
+            return FAILED
     text, finish, pt, ct = openai_reply(response)
     if usage is not None:
         usage.charge(usage_key(model, service_tier), pt, ct)
@@ -586,9 +600,9 @@ async def call_anthropic(client: Any, prompt: str, model: str, max_tokens: int, 
                          gate: Optional[Callable[[], bool]] = None) -> Any:
     """One Messages API judge call: the reply text, a :class:`Truncated` for a
     reply cut at ``max_tokens`` (``stop_reason == "max_tokens"``), None for a
-    failed call (a refusal included, counted in ``stats.refused`` and charged),
-    or :data:`SKIPPED`.  An HTTP 400 raises :class:`JudgeRequestError` unless it
-    flags the prompt's content."""
+    refusal (counted in ``stats.refused`` and charged) or a content flag,
+    :data:`FAILED` for a call that got no answer, or :data:`SKIPPED`.  An HTTP
+    400 raises :class:`JudgeRequestError` unless it flags the prompt's content."""
     stats = stats if stats is not None else CallStats()
     params = anthropic_request_params(prompt, model, max_tokens, settings=settings)
     await rate_limiter.acquire()
@@ -609,7 +623,7 @@ async def call_anthropic(client: Any, prompt: str, model: str, max_tokens: int, 
             return None
         stats.errors += 1
         logger.error(f"Error calling Anthropic judge model {model}: {e}")
-        return None
+        return FAILED
     text, finish, n_in, n_out, refused = anthropic_reply(response)
     if usage is not None:
         usage.charge(model, n_in, n_out)
@@ -674,7 +688,8 @@ async def call_gemini(client: Any, prompt: str, model: str, max_tokens: int, rat
                       gate: Optional[Callable[[], bool]] = None) -> Any:
     """One generateContent call: the reply text, :class:`Truncated` when the
     reply hit ``maxOutputTokens`` (finishReason MAX_TOKENS), None for a blocked
-    or failed call, :data:`SKIPPED` when ``gate()`` is True.  A 429 or a 5xx
+    prompt, :data:`FAILED` for a call that got no answer, :data:`SKIPPED` when
+    ``gate()`` is True.  A 429 or a 5xx
     (the free tier's rate limits, "high demand" 503s) is retried
     :data:`GEMINI_ATTEMPTS` times with growing sleeps; an HTTP 400 raises
     :class:`JudgeRequestError`, and a 429 naming a daily quota raises
@@ -722,7 +737,7 @@ async def call_gemini(client: Any, prompt: str, model: str, max_tokens: int, rat
         await asyncio.sleep(sleep)
     stats.errors += 1
     logger.error(f"Error calling judge model {model}: {last}")
-    return None
+    return FAILED
 
 
 async def call_model(model: str, prompt: str, max_tokens: int, rate_limiter: RateLimiter, usage: Any, *,
@@ -813,7 +828,7 @@ __all__: List[str] = [
     "accepts_temperature", "accepts_flex", "request_temperature", "content_flag", "is_flex_refusal",
     "SERVICE_TIERS", "FLEX_FALLBACK_AFTER_S", "FLEX_RETRY_SLEEP_S", "FLEX_TIMEOUT_S", "FLEX_MAX_RETRIES",
     "usage_key", "chat_request_body", "anthropic_request_params", "request_for", "prompt_of_request",
-    "anthropic_reply", "openai_reply", "CUT_AT_CAP", "Truncated", "CallStats", "SKIPPED", "call_openai",
+    "anthropic_reply", "openai_reply", "CUT_AT_CAP", "Truncated", "CallStats", "SKIPPED", "FAILED", "call_openai",
     "call_anthropic",
     "call_model", "TRANSPORT_CHOICES", "TransportChoice", "choose_transport", "price_key",
 ]

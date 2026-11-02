@@ -3,6 +3,8 @@
 rewrites scores_descriptions.json and correlations.json, keeps usage.json.  Used on
 2026-11-01 after the batch parser learnt Haiku 5.5's layout (the SCORE on the line
 after the item) and after a resume bug (fixed the same day) had emptied cells.
+--fill_only (2026-11-02, after the parser learnt scores in words) keeps every recorded
+score and adds only the entities that had none.
 
 Usage: uv run python scripts/judge_tier_reparse_batched.py claude-haiku-5-5@b10s3 \
            --instructions_dir /tmp/corpus_2026-05-24/data"""
@@ -18,6 +20,8 @@ ap.add_argument("cells", nargs="+", help="cell directory names, e.g. claude-haik
 ap.add_argument("--experiments_dir", default="roger/axis_judge_experiments")
 ap.add_argument("--axes_file", default="scripts/tier_eval_axes.tsv")
 ap.add_argument("--instructions_dir", required=True, help="the corpus the cells were judged on (pinned at 1448a84c)")
+ap.add_argument("--fill_only", action="store_true", help="keep every recorded score; add only entities that had none")
+ap.add_argument("--note", default="batch parser accepts the SCORE on the line after the item", help="recorded in the cell's provenance")
 args = ap.parse_args()
 E = Path(args.experiments_dir); DATA = Path(args.instructions_dir)
 jobs = {j.axis_dir: j for j in ev.jobs_from_axes_file(Path(args.axes_file), E)}
@@ -46,6 +50,8 @@ for cell in cells:
                 scores[r["name"]] = int(v)
         old = json.load(open(sp)); prov = old["_provenance"]
         n_old = len(old["result"]); tot += 1
+        if args.fill_only:
+            scores = {**scores, **old["result"]}
         if scores == {k: int(v) for k, v in old["result"].items()}:
             continue
         job = jobs[axis]
@@ -54,7 +60,7 @@ for cell in cells:
         corr = compute_correlations(scores_by_mode={"descriptions": scores}, projections=job.projections,
                                     slots=list(job.projections.keys()), excluded_set=set(job.axis_spec.exclusions))
         prov["reparsed"] = {"at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "scored_before": n_old,
-                            "scored_after": len(scores), "note": "batch parser accepts the SCORE on the line after the item"}
+                            "scored_after": len(scores), "note": args.note}
         atomic_write_text(json.dumps({"result": dict(sorted(scores.items())), "_provenance": prov}, indent=2), sp)
         atomic_write_text(json.dumps(corr, indent=2), d / "correlations.json")
         changed += 1
