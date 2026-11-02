@@ -385,15 +385,63 @@ stayed at or below 1.4% in every cell (Luna with low reasoning was the worst) an
 0.3% in the N=20 cells.
 No reply in any grid cell was cut at its cap.
 
-**Gemini (running).** One pass at N=20 on the first axes done, against the other
-judges' first N=20 pass on the same axes: `gemini-3.1-flash-lite` 0.763 at $0.033 on
-5 axes (Luna 0.764 at $0.021, Haiku 0.772 at $0.020), and `gemini-3.5-flash-lite` 0.680
-at $0.053 on 11 axes (Luna 0.717, Haiku 0.722). So far 3.1 keeps up at about 60% more
-than Luna and 3.5 does not. These are partial figures. The free tier allows about 500
-requests a day per model, so one N=20 pass over 30 axes (870 calls) takes about two days.
+**The grid under all 12 projection variants.** One figure per dimension, in the layout of
+the robustness tool (a heatmap of mean ρ above 12 Pareto panels), and one of the whole grid:
+[`batch size`](./judge_tier_grid_dev30/judge_tier_grid_12way_batch_size.png),
+[`passes`](./judge_tier_grid_dev30/judge_tier_grid_12way_passes.png),
+[`reasoning`](./judge_tier_grid_dev30/judge_tier_grid_12way_reasoning.png),
+[`whole grid`](./judge_tier_grid_dev30/judge_tier_grid_12way_all.png). Counts per setting:
+[`judge_tier_grid_12way.json`](./judge_tier_grid_dev30/judge_tier_grid_12way.json); ρ per axis
+and variant: [`judge_tier_grid_12way_rho.json`](./judge_tier_grid_dev30/judge_tier_grid_12way_rho.json).
+Each figure's frontier is taken among its own cells, and each panel has its own y limits, so
+compare within a panel rather than across panels. These are the 30 development axes only, the
+only axes with the whole grid. A count of variants is not a significance test: N=15 and N=20,
+for instance, differ by less than the shuffle noise.
 
-**Cost.** $18.77 as billed for the grid and the held-out check (Flex and Batch prices);
-the Gemini runs are free so far.
+| whole grid: on the frontier in | settings |
+|---|---|
+| 12 of 12 | GPT-6 Luna, 1 pass at N=10 ($0.011); GPT-6 Luna, N=20 ($0.019); Luna, N=20 ($0.042); Luna + Haiku, N=20 ($0.084) |
+| 9 of 12 | Luna, 3 passes at N=10 ($0.071) |
+| 8 of 12 | GPT-6 Luna, 3 passes at N=10 ($0.032); Luna, N=15 ($0.044) |
+| 6 of 12 | Haiku, N=20 ($0.042), by its $0.0007 price edge over Luna |
+| 2 to 4 of 12 | GPT-6 Luna, N=15 (4); Luna, 1 pass at N=10 (2); Luna + Gemini 3.1, N=20 (2) |
+| never | any reasoning; 4 passes; N=5, 7 or 10 at 2 passes; Gemini alone |
+
+- **Batch size.** Among the batch sizes alone, N=20 holds in 12 of 12 for Luna and GPT-6
+  Luna, N=15 in 8 and 4, and N of 10 or less in none.
+- **Passes.** Luna's and GPT-6 Luna's extra passes stay on that figure's frontier in 9 to 12
+  variants, Haiku's in none, because Luna gives more for the same price. Three passes at N=20
+  are untested; they should cost less than the three passes at N=10 that make this list.
+- **Reasoning.** Luna at low effort is on that figure's frontier in 12 of 12, but N=20 beats
+  it for less money, so no reasoning arm survives in the whole grid. Medium never beats low
+  for Luna.
+
+**Gemini: not on the frontier.** Both Flash-Lite models at N=20 and two passes on the 30
+development axes, set beside the others from the same 12-way table (which can differ from the
+first table above by 0.001, because it drops the nine names that are both a trait and a role
+on bare-keyed axes). Everything is at real-time list price, and Gemini ran with temperature 0
+and thinking at its minimal level.
+
+| judge, N=20, 2 passes | ρ | $/axis | against |
+|---|---|---|---|
+| GPT-5.6 Luna | 0.704 | $0.042 | |
+| Haiku 5.5 | 0.684 | $0.042 | |
+| `gemini-3.1-flash-lite` | 0.687 | $0.068 | Luna -0.0163 [-0.0347, +0.0013] |
+| `gemini-3.5-flash-lite` | 0.653 | $0.108 | Luna -0.0504 [-0.0791, -0.0253] |
+| Luna + Haiku | 0.716 | $0.084 | |
+| Luna + Gemini 3.1 | 0.714 | $0.110 | Luna + Haiku -0.0021 [-0.0111, +0.0082] |
+| Luna + Haiku + Gemini 3.1 | 0.721 | $0.152 | Luna + Haiku +0.0041 [-0.0012, +0.0093] |
+
+Gemini 3.1 is indistinguishable from Haiku alone but costs 60% more, and as a second opinion
+it does no better than Haiku at a higher price; 3.5 is clearly worse at more than twice Luna's
+price. Luna + Gemini 3.1 tops the frontier in 2 of 12 variants (s6_l25_softK2, s6_l25_shear3),
+by less than the noise. Neither model was run on the held-out axes, since neither survived
+the development axes. The free tier allowed about 500 requests a day per model, so the runs
+were finished on the paid tier, where they took about three minutes at 5 requests a second.
+
+**Cost.** $18.77 as billed for the grid and the held-out check (Flex and Batch prices).
+Gemini: $4.14 at list price on the paid tier ($1.83 for 3.1, $2.31 for 3.5), after the free
+tier had answered the start of each first pass.
 
 **Not in the commit.** The averaged cells of the grid carry no `correlations.json` (about
 100 MB); [`judge_tier_average_cells.py`](../../scripts/judge_tier_average_cells.py) re-derives
@@ -413,6 +461,11 @@ uv run python scripts/judge_tier_average_cells.py gpt-5.6-luna@none@b10n20x2 gpt
     gpt-5.6-luna@none@b10n20s2 --axes_file scripts/tier_eval_axes.tsv --instructions_dir /tmp/corpus_2026-05-24/data
 # the grid table and figure
 uv run python scripts/judge_tier_grid_analysis.py --axes_file scripts/tier_eval_axes_dev30.tsv
+# the 12-way figures: the rho table, then one figure per dimension and the whole grid (no API calls)
+uv run python results_analysis/judge_tier_robustness.py --axes_file scripts/tier_eval_axes_dev30.tsv --output_dir OUT \
+    --include_models $(uv run python scripts/judge_tier_grid_12way.py --print_cells)
+uv run python scripts/judge_tier_grid_12way.py --robustness_json OUT/judge_tier_robustness.json \
+    --output_dir roger/axis_judge_experiments/judge_tier_grid_dev30
 # any comparison of arms, with intervals
 uv run python scripts/judge_tier_compare_arms.py --axes_file scripts/tier_eval_axes_holdout31.tsv \
     --arm "Luna=gpt-5.6-luna@none@b10n20s1,gpt-5.6-luna@none@b10n20s2" \

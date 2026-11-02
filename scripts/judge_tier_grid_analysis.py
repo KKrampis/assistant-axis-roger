@@ -63,8 +63,10 @@ def main() -> None:
     out.mkdir(parents=True, exist_ok=True)
     (out / f"{args.stem}.json").write_text(json.dumps(rows, indent=1))
 
-    judges = [j for j in JUDGES if any(r["judge"] == j and r["dimension"] != "old rubric" for r in rows)]
     grid = [r for r in rows if r["dimension"] != "old rubric"]
+    # A judge with one arm (Gemini, N=20 only) stays in the table but has no sweep to draw.
+    judges = [j for j in JUDGES if sum(r["judge"] == j for r in grid) > 1]
+    grid = [r for r in grid if r["judge"] in judges]
     ys = [1 / (1 - r["mean_rho"]) for r in grid]
     pad = 0.08 * (max(ys) - min(ys) or 0.1)
     fig, axs = plt.subplots(1, len(judges), figsize=(6.2 * len(judges), 6.6), sharey=True, squeeze=False)

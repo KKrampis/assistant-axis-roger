@@ -210,3 +210,16 @@ def test_include_models_is_an_allow_list(tmp_path: Path) -> None:
     assert r.returncode == 0, r.stderr
     agg = r.stderr.split("Aggregated results")[1]
     assert "full" in agg and "partial" not in agg and "--include_models nosuch: no such cell" in r.stderr
+
+
+def test_place_labels_skips_an_empty_label_but_keeps_its_point_as_an_obstacle():
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from results_analysis.judge_tier_cost_plot_pooled import place_labels
+    fig, ax = plt.subplots()
+    ax.set_xlim(0, 10); ax.set_ylim(0, 10)
+    place_labels(ax, [(5.4, 5), (5, 5)], ["", "seen"], [False, False])
+    assert [t.get_text() for t in ax.texts] == ["seen"]
+    assert tuple(ax.texts[0].get_position()) != (7, 0)            # the first choice, to the right, would cover the empty point
+    plt.close(fig)

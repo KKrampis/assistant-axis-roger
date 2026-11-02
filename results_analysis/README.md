@@ -2792,7 +2792,10 @@ no longer offered to new users.  A free-tier key is enough for probes, not
 for a quick run: about 15 requests a minute and about 500 a day per model (seen
 2026-11-02), against 870 calls for one pass over 30 axes at N=20.  A 429 naming a
 `PerDay` quota raises `BillingError`, which stops the run; a rerun resumes from the
-saved answers once the quota resets.
+saved answers once the quota resets.  On the paid tier, `--requests_per_second 5
+--max_in_flight 20` ran a pass over 30 axes in about two minutes.  Neither model
+reached the frontier at N=20 and two passes (update 3 of
+[`pareto_pooled_61axes_notes.md`](../roger/axis_judge_experiments/pareto_pooled_61axes_notes.md)).
 
 **Request settings per model** come from `JUDGE_REQUEST_SETTINGS` in
 [`judge_tier_transport.py`](./judge_tier_transport.py). For the models the
@@ -3008,6 +3011,9 @@ worse, more passes pay less each, and reasoning effort pays nothing.
 [`scripts/judge_tier_grid_analysis.py`](../scripts/judge_tier_grid_analysis.py) prints
 the grid and draws
 [`judge_tier_grid_dev30.png`](../roger/axis_judge_experiments/judge_tier_grid_dev30/judge_tier_grid_dev30.png);
+[`scripts/judge_tier_grid_12way.py`](../scripts/judge_tier_grid_12way.py) draws the grid
+under the 12 projection variants, one figure per dimension and one of the whole grid
+([`judge_tier_grid_12way_all.png`](../roger/axis_judge_experiments/judge_tier_grid_dev30/judge_tier_grid_12way_all.png));
 [`scripts/judge_tier_compare_arms.py`](../scripts/judge_tier_compare_arms.py) compares any
 arms, blends included, with bootstrap intervals; a blend's cell comes from
 `judge_tier_average_cells.py` with both judges' cells as sources.  Account in update 3 of

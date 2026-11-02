@@ -495,7 +495,8 @@ def place_labels(ax, points: Sequence[Tuple[float, float]], labels: Sequence[str
     never read as another point's); failing that, the least bad one.  A label
     may have several lines.  Call after the axes limits, scale and position
     are final.  ``leaders``: ``"far"`` draws a leader line only for a label
-    placed away from its point, ``"all"`` for every label."""
+    placed away from its point, ``"all"`` for every label.  A point whose label
+    is empty gets none but still keeps the others off it."""
     k = ax.figure.dpi / 72.0
     disp = ax.transData.transform(np.asarray(points, dtype=float))
     ab = ax.get_window_extent()
@@ -514,6 +515,8 @@ def place_labels(ax, points: Sequence[Tuple[float, float]], labels: Sequence[str
 
     placed: List[Tuple[float, float, float, float]] = []
     for i in sorted(range(len(labels)), key=lambda i: (not bold[i], -disp[i][1])):
+        if not labels[i]:
+            continue
         lines = labels[i].split("\n")
         w = (0.62 if bold[i] else 0.56) * fontsize * max(len(t) for t in lines) * k
         h = 1.1 * fontsize * k * len(lines)

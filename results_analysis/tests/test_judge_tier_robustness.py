@@ -339,3 +339,91 @@ def test_legacy_cells_off_by_default(tmp_path, data_dir, experiments_dir):
     """Since 2026-11-01 the May cells enter only with --legacy."""
     res, _ = _run(tmp_path, data_dir, experiments_dir, "--min_axes", "1", "--axes", "alpha_vs_beta", legacy=False)
     assert sorted(res["result"]["models"]) == ["fake-judge"]
+
+
+def _small_figure_inputs():
+    variants = jtr.build_variants([6], [25, 49], ["raw"])
+    costs = {"gpt-6-luna@b10x2": 0.02, "gpt-6-luna@b10n20x2": 0.019, "claude-haiku-5-5@b10x2": 0.05}
+    per_variant, frontiers = {}, {}
+    for shift, v in enumerate(variants):
+        rho = {m: {"ax": {v.key: 0.5 + shift + i * 0.01 if shift == 0 else 0.2 + i * 0.01}}
+               for i, m in enumerate(costs)}
+        per_variant[v.key], frontiers[v.key] = jtr.summarise_variant(rho, costs, list(costs), v.key)
+    return variants, list(costs), per_variant, frontiers
+
+
+def test_figure_options_label_only_the_frontier_with_the_shortest_text_and_each_panel_its_own_y(tmp_path, monkeypatch):
+    variants, cells, per_variant, frontiers = _small_figure_inputs()
+    seen = []
+    monkeypatch.setattr(jtr, "_place_labels", lambda ax, pts, labels, bold, **k: seen.append((labels, bold, ax.get_ylim())))
+    opts = jtr.FigureOptions(headline="A headline", cell_labels={c: f"long {i}" for i, c in enumerate(cells)},
+                             point_labels={cells[1]: "short"}, series=[[cells[0], cells[1]]],
+                             label_frontier_only=True, own_y=True, x_log=True, x_ticks=(0.02, 0.05))
+    out = tmp_path / "fig.png"
+    jtr.render_figure(out, cells, variants, per_variant, frontiers, {c: True for c in cells}, variants[0].key, 30,
+                      "sub", None, opts)
+    assert out.stat().st_size > 0
+    assert len(seen) == 2
+    for (labels, bold, _ylim), k in zip(seen, frontiers):
+        assert [bool(t) for t in labels] == [c in frontiers[k] for c in cells] == list(bold)
+        assert labels[cells.index("gpt-6-luna@b10n20x2")] == "short"        # the cheapest cell is always on the frontier
+    assert seen[0][2] != seen[1][2]                                         # the rows' limits would be equal
+
+
+def test_figures_share_a_row_by_default(tmp_path, monkeypatch):
+    variants, cells, per_variant, frontiers = _small_figure_inputs()
+    seen = []
+    monkeypatch.setattr(jtr, "_place_labels", lambda ax, pts, labels, bold, **k: seen.append((labels, ax.get_ylim())))
+    jtr.render_figure(tmp_path / "fig.png", cells, variants, per_variant, frontiers, {c: True for c in cells},
+                      variants[0].key, 30, "sub", None)
+    assert seen[0][1] == seen[1][1]
+    assert all(all(labels) for labels, _ in seen)
+
+
+def _grid_script():
+    import importlib.util
+    path = Path(jtr.__file__).resolve().parents[1] / "scripts" / "judge_tier_grid_12way.py"
+    spec = importlib.util.spec_from_file_location("judge_tier_grid_12way", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_grid_figures_cover_the_grid_once_each():
+    figs = _grid_script().figures()
+    assert set(figs) == {"batch_size", "passes", "reasoning", "all"}
+    labels = {stem: f[0] for stem, f in figs.items()}
+    assert len(labels["all"]) == 3 * 10 + 4                      # 10 settings per judge, Gemini twice, two blends
+    assert len(set(labels["all"].values())) == len(labels["all"])
+    assert len(labels["batch_size"]) == 3 * 5 + 2 and len(labels["passes"]) == 3 * 4 and len(labels["reasoning"]) == 3 * 3
+    for stem in ("batch_size", "passes", "reasoning"):
+        assert set(labels[stem]) <= set(labels["all"])
+        for run in figs[stem][2]:                                # each arrow chain lies inside its figure
+            assert set(run) <= set(labels[stem])
+    # N=10, 2 passes, no reasoning is one cell, in all three dimensions
+    assert "gpt-6-luna@b10x2" in labels["batch_size"] and "gpt-6-luna@b10x2" in labels["passes"]
+    assert "gpt-6-luna@b10x2" in labels["reasoning"] and labels["all"]["gpt-6-luna@b10x2"] == "GPT-6 base"
+
+
+def test_grid_script_recomputes_each_figures_frontier(tmp_path, monkeypatch):
+    mod = _grid_script()
+    cells = list(mod.figures()["all"][0])
+    variants = jtr.build_variants([0, 6], [25, 49], list(jtr.REGIMES))
+    rng = np.random.default_rng(1)
+    payload = {"config": {"slots": [0, 6], "layers": [25, 49], "regimes": list(jtr.REGIMES), "soft_K": 2, "shear_L": 3,
+                          "default_variant": "s6_l25_raw"},
+               "axes": [{"axis_dir": "ax"}], "models": {c: {"mean_cost": float(rng.uniform(0.01, 0.1))} for c in cells},
+               "rho": {c: {"ax": {v.key: float(rng.uniform(0.4, 0.7)) for v in variants}} for c in cells}}
+    src = tmp_path / "rho.json"
+    src.write_text(json.dumps(payload))
+    drawn = {}
+    monkeypatch.setattr(mod.rob, "render_figure", lambda out, order, vs, pv, fr, *a, **k: drawn.setdefault(Path(out).stem, fr))
+    monkeypatch.setattr("sys.argv", ["x", "--robustness_json", str(src), "--output_dir", str(tmp_path)])
+    mod.main()
+    assert set(drawn) == {f"judge_tier_grid_12way_{s}" for s in ("batch_size", "passes", "reasoning", "all")}
+    for stem in ("batch_size", "passes", "reasoning"):
+        labels = mod.figures()[stem][0]
+        assert all(set(f) <= set(labels) for f in drawn[f"judge_tier_grid_12way_{stem}"].values())
+    res = json.loads((tmp_path / "judge_tier_grid_12way.json").read_text())
+    res = res.get("result", res)
+    assert all(0 <= c["on_frontier_of_12"] <= 12 for fig in ("batch_size", "all") for c in res[fig]["cells"].values())

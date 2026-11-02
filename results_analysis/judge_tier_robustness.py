@@ -806,10 +806,28 @@ def _usd(x: float) -> str:
     return f"\\${x:.2f}" if x >= 0.1 else f"\\${x:.3f}"
 
 
+@dataclass(frozen=True)
+class FigureOptions:
+    """For figures that compare settings rather than judges (scripts/judge_tier_grid_12way.py)."""
+    headline: Optional[str] = None                     # replaces the "Judge ranking ..." title
+    cell_labels: Optional[Dict[str, str]] = None       # cell -> text, for the heatmap rows and the points
+    point_labels: Optional[Dict[str, str]] = None      # cell -> shorter text for the points, where it differs
+    series: Sequence[Sequence[str]] = ()               # arrows through each list of cells, in order
+    label_frontier_only: bool = False                  # leave the other points unlabelled (crowded panels)
+    own_y: bool = False                                # each panel its own y limits, not its row's
+    x_log: Optional[bool] = None                       # None: log when the costs span more than 8x
+    x_ticks: Optional[Sequence[float]] = None          # None: cost_ticks
+    x_log_pad: float = 1.6                             # a log axis runs from the lowest cost over this to the highest times it
+    panel_w: float = 4.2
+    panel_h: float = 3.3
+
+
 def render_figure(out_png: Path, models_by_rho: Sequence[str], variants: Sequence[Variant],
                   per_variant: Dict[str, Dict[str, dict]], frontiers: Dict[str, List[str]],
                   measured: Dict[str, bool], default_key: str, n_axes_total: int,
-                  subtitle: str, inputs: Optional[list]) -> None:
+                  subtitle: str, inputs: Optional[list], options: FigureOptions = FigureOptions()) -> None:
+    """The heatmap above the Pareto panels."""
+    opts = options
     vkeys = [v.key for v in variants]
     n_m, n_v = len(models_by_rho), len(vkeys)
     sl_pairs = list(dict.fromkeys((v.slot, v.layer) for v in variants))
@@ -818,9 +836,9 @@ def render_figure(out_png: Path, models_by_rho: Sequence[str], variants: Sequenc
 
     # Layout in inches, top to bottom.
     n_title_lines = 2 + subtitle.count("\n")
-    top_in, heat_h, mid_in, panel_h, row_gap, bot_in = (0.45 + 0.25 * n_title_lines, 0.5 + 0.38 * n_m,
-                                                        1.55, 3.3, 0.75, 0.6)
-    fig_w = max(16.0, 4.2 * n_cols + 1.5)
+    top_in, heat_h, mid_in, row_gap, bot_in = (0.45 + 0.25 * n_title_lines, 0.5 + 0.38 * n_m, 1.55, 0.75, 0.6)
+    panel_h = opts.panel_h
+    fig_w = max(16.0, opts.panel_w * n_cols + 1.5)
     fig_h = top_in + heat_h + mid_in + n_rows * panel_h + (n_rows - 1) * row_gap + bot_in
     fig = plt.figure(figsize=(fig_w, fig_h))
     heat_top = 1 - top_in / fig_h
@@ -854,7 +872,8 @@ def render_figure(out_png: Path, models_by_rho: Sequence[str], variants: Sequenc
             lbl.set_fontweight("bold")
     cost0 = per_variant[vkeys[0]]
     ax_h.set_yticks(range(n_m))
-    ax_h.set_yticklabels([f"{display_name(m)}  ({_usd(cost0[m]['mean_cost'])}/axis{'' if measured[m] else ' est.'})"
+    ax_h.set_yticklabels([f"{opts.cell_labels[m] if opts.cell_labels else display_name(m)}  "
+                          f"({_usd(cost0[m]['mean_cost'])}/axis{'' if measured[m] else ' est.'})"
                           for m in models_by_rho], fontsize=9)
     for j in range(1, n_v):
         if variants[j].layer != variants[j - 1].layer or variants[j].slot != variants[j - 1].slot:
@@ -866,20 +885,23 @@ def render_figure(out_png: Path, models_by_rho: Sequence[str], variants: Sequenc
 
     # (b) Pareto small multiples
     all_costs = [per_variant[vkeys[0]][m]["mean_cost"] for m in models_by_rho]
-    logx = min(all_costs) > 0 and max(all_costs) / min(all_costs) > 8
+    logx = opts.x_log if opts.x_log is not None else (min(all_costs) > 0 and max(all_costs) / min(all_costs) > 8)
     if logx:
-        x_lo, x_hi = min(all_costs) / 1.6, max(all_costs) * 1.6
+        x_lo, x_hi = min(all_costs) / opts.x_log_pad, max(all_costs) * opts.x_log_pad
     else:
         span = max(all_costs) - min(all_costs) or max(all_costs) or 1.0
         x_lo, x_hi = min(all_costs) - 0.15 * span, max(all_costs) + 0.15 * span
     by_key = {v.key: v for v in variants}
-    for r, regime in enumerate(regimes):
-        row_keys = [variant_key(s, l, regime, K=variants[0].K, L=variants[0].L) for s, l in sl_pairs]
-        qs = [per_variant[k][m]["quality"] for k in row_keys if k in by_key for m in models_by_rho]
+
+    def y_limits(keys: Sequence[str]) -> Tuple[float, float]:
+        qs = [per_variant[k][m]["quality"] for k in keys if k in by_key for m in models_by_rho]
         qs = [q for q in qs if math.isfinite(q)]
         y_lo, y_hi = (min(qs), max(qs)) if qs else (1.0, 2.0)
         pad = 0.14 * (y_hi - y_lo or 0.1)
-        y_lo, y_hi = y_lo - pad, y_hi + pad
+        return y_lo - pad, y_hi + pad
+
+    for r, regime in enumerate(regimes):
+        row_keys = [variant_key(s, l, regime, K=variants[0].K, L=variants[0].L) for s, l in sl_pairs]
         for c, k in enumerate(row_keys):
             ax = fig.add_subplot(gs_p[r, c])
             if k not in by_key:
@@ -890,14 +912,20 @@ def render_figure(out_png: Path, models_by_rho: Sequence[str], variants: Sequenc
             if logx:
                 ax.set_xscale("log")
             ax.set_xlim(x_lo, x_hi)
-            ax.set_ylim(y_lo, y_hi)
-            ticks = _cost_ticks(x_lo, x_hi)
+            ax.set_ylim(*y_limits([k] if opts.own_y else row_keys))
+            ticks = [t for t in opts.x_ticks if x_lo <= t <= x_hi] if opts.x_ticks else _cost_ticks(x_lo, x_hi)
             if ticks:
                 ax.set_xticks(ticks)
                 ax.set_xticklabels([f"\\${t:g}" for t in ticks])
                 ax.minorticks_off()
             ax.plot([per[m]["mean_cost"] for m in fr], [per[m]["quality"] for m in fr], "--",
                     color="#555555", linewidth=1.0, alpha=0.7, zorder=2)
+            for run in opts.series:
+                for a, b in zip(run, run[1:]):
+                    ax.annotate("", xy=(per[b]["mean_cost"], per[b]["quality"]),
+                                xytext=(per[a]["mean_cost"], per[a]["quality"]),
+                                arrowprops=dict(arrowstyle="-|>", color=PROVIDER_COLOR[provider_of(a)], lw=0.9,
+                                                alpha=0.6, shrinkA=3, shrinkB=3, mutation_scale=7), zorder=3)
             pts, labels, bold = [], [], []
             for m in models_by_rho:
                 x, y = per[m]["mean_cost"], per[m]["quality"]
@@ -909,7 +937,10 @@ def render_figure(out_png: Path, models_by_rho: Sequence[str], variants: Sequenc
                            facecolors=col if measured[m] else "none", edgecolors=col,
                            linewidths=1.6, zorder=4)
                 pts.append((x, y))
-                labels.append(_short(m))
+                if opts.label_frontier_only and not on:
+                    labels.append("")
+                else:
+                    labels.append((opts.point_labels or {}).get(m) or (opts.cell_labels or {}).get(m) or _short(m))
                 bold.append(on)
             ax.grid(True, alpha=0.3)
             ax.tick_params(labelsize=7.5)
@@ -927,23 +958,25 @@ def render_figure(out_png: Path, models_by_rho: Sequence[str], variants: Sequenc
                    markeredgecolor=PROVIDER_COLOR["openai"], markersize=8, label="OpenAI"),
         plt.Line2D([0], [0], marker="D", color="w", markerfacecolor="#888888", markersize=8,
                    label="on the frontier (bold label)"),
-        plt.Line2D([0], [0], marker="o", color="w", markerfacecolor="none", markeredgecolor="#888888",
-                   markersize=8, label="hollow = estimated cost"),
         plt.Line2D([0], [0], linestyle="--", color="#555555", label="Pareto frontier"),
     ]
+    if not all(measured[m] for m in models_by_rho):
+        handles.insert(3, plt.Line2D([0], [0], marker="o", color="w", markerfacecolor="none", markeredgecolor="#888888",
+                                     markersize=8, label="hollow = estimated cost"))
     for provider, name in (("google", "Google"), ("blend", "Blend of judges")):
         if any(provider_of(m) == provider for m in models_by_rho):
             handles.insert(2, plt.Line2D([0], [0], marker="o", color="w", markerfacecolor=PROVIDER_COLOR[provider],
                                          markeredgecolor=PROVIDER_COLOR[provider], markersize=8, label=name))
-    title = (f"Judge ranking under {n_v} projection variants, DESCRIPTION judging: {n_axes_total} axes, "
-             f"{n_m} judges (default {default_key})")
+    title = opts.headline or (f"Judge ranking under {n_v} projection variants, DESCRIPTION judging: "
+                              f"{n_axes_total} axes, {n_m} judges (default {default_key})")
     fig.suptitle(title + "\n" + subtitle, fontsize=12, y=1 - 0.12 / fig_h, va="top")
     y_b = pan_top + 0.42 / fig_h
-    key = label_key(list(models_by_rho))
+    key = "" if opts.cell_labels else label_key(list(models_by_rho))
     # The caption and the legend share a line, and the label key gets its own below: on one
     # line a long key ran under the legend (2026-11-02).
     y_cap = y_b + (0.11 / fig_h if key else 0)
-    fig.text(0.01, y_cap, "(b) Pareto plots, one per variant (rows share y limits; x shared)", fontsize=10, va="center")
+    fig.text(0.01, y_cap, f"(b) Pareto plots, one per variant ({'each its own y limits' if opts.own_y else 'rows share y limits'}; "
+             "x shared)", fontsize=10, va="center")
     if key:
         fig.text(0.01, y_b - 0.11 / fig_h, key, fontsize=9, va="center")
     fig.legend(handles=handles, loc="center right", ncol=len(handles), fontsize=8.5, frameon=False,

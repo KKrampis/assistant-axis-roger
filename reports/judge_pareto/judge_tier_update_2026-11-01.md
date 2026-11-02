@@ -315,8 +315,21 @@ Plots: [`pareto_pooled_61axes_grid.png`](../../roger/axis_judge_experiments/pare
 [`judge_tier_robustness_61axes_grid.png`](../../roger/axis_judge_experiments/judge_tier_robustness_61axes_grid.png).
 Full tables, caveats and commands: update 3 of
 [`pareto_pooled_61axes_notes.md`](../../roger/axis_judge_experiments/pareto_pooled_61axes_notes.md).
-A Gemini comparison is under way on the free tier, which allows about 500 requests a day
-per model; its cells are not in this commit.
+
+**The whole grid under the 12 projection variants** (30 development axes only, the only axes
+that have it):
+[`batch size`](../../roger/axis_judge_experiments/judge_tier_grid_dev30/judge_tier_grid_12way_batch_size.png),
+[`passes`](../../roger/axis_judge_experiments/judge_tier_grid_dev30/judge_tier_grid_12way_passes.png),
+[`reasoning`](../../roger/axis_judge_experiments/judge_tier_grid_dev30/judge_tier_grid_12way_reasoning.png),
+[`whole grid`](../../roger/axis_judge_experiments/judge_tier_grid_dev30/judge_tier_grid_12way_all.png).
+Four settings are on the whole grid's frontier in all 12: GPT-6 Luna with one pass at N=10
+($0.011) and at N=20 ($0.019), Luna at N=20 ($0.042) and Luna + Haiku at N=20 ($0.084).  No
+reasoning arm, no four-pass arm and no two-pass arm at N of 10 or less is on it in any variant.
+
+**Gemini is not on the frontier.**  `gemini-3.1-flash-lite` at N=20 and two passes scores 0.687
+at $0.068 on the 30 development axes, level with Haiku (0.684 at $0.042) at 60% more;
+`gemini-3.5-flash-lite` scores 0.653 at $0.108.  As Luna's second opinion, 3.1 gives 0.714 at
+$0.110 against Haiku's 0.716 at $0.084.  Neither was run on the held-out axes.
 
 ## 4. Open questions
 
