@@ -22,6 +22,8 @@ from assistant_axis.judge_pricing import (
     HAIKU_RATE_OUT,
     MultiModelUsage,
     ROLES_RESPONSE_LENGTH_FACTOR,
+    SONNET4_RATE_IN,
+    SONNET4_RATE_OUT,
     SONNET_RATE_IN,
     SONNET_RATE_OUT,
     UsageTotals,
@@ -61,9 +63,12 @@ class TestPriceForModel:
         )
 
     def test_sonnet_canonical(self):
+        # Sonnet 4 keeps its own $3/$15 row; SONNET_RATE_* is Sonnet 5's $2/$10 since
+        # the September 2026 table (this test still expected the old shared constant).
         assert price_for_model("claude-sonnet-4-20250514") == (
-            SONNET_RATE_IN, SONNET_RATE_OUT,
+            SONNET4_RATE_IN, SONNET4_RATE_OUT,
         )
+        assert price_for_model("claude-sonnet-5") == (SONNET_RATE_IN, SONNET_RATE_OUT)
 
     def test_case_insensitive(self):
         assert price_for_model("GPT-4.1-Mini") == (

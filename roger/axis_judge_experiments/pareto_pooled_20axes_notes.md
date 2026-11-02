@@ -1,12 +1,84 @@
 # Judge-Tier Pareto Analysis — 20 Axes
 
+**Plot:** [`pareto_pooled_20axes.png`](./pareto_pooled_20axes.png)
+**Robustness check:** [`judge_tier_robustness_20axes.png`](./judge_tier_robustness_20axes.png), numbers in [`judge_tier_robustness_20axes.json`](./judge_tier_robustness_20axes.json)
+
+## Update, 2026-11-01: the 20-axis set, with both Opus 5 runs and GPT-5.6 Sol
+
+The same settings, prices and corrections as the 61-axis update
+([`pareto_pooled_61axes_notes.md`](./pareto_pooled_61axes_notes.md)), on the
+first 20 axes of [`tier_eval_axes.tsv`](../../scripts/tier_eval_axes.tsv)
+(listed in [`tier_eval_axes_20.tsv`](../../scripts/tier_eval_axes_20.tsv)).  Two
+expensive judges were run on this set only: claude-opus-5 with thinking off,
+and gpt-5.6-sol with reasoning off.  claude-opus-5 at the low effort setting
+of the 26 October run is shown beside the thinking-off run.  The 26 October
+analysis follows below, unchanged.
+
+| judge | settings | ρ | cost per axis |
+|---|---|---|---|
+| claude-opus-5 | effort low (thinks); refuses T=0 | 0.704 | $3.181 |
+| claude-opus-5 | thinking off | 0.693 | $3.198 |
+| gpt-4.1-mini | T=0 | 0.688 | $0.130 |
+| claude-haiku-4-5 | T=0 | 0.655 | $0.518 |
+| claude-sonnet-5 | effort low (no thinking seen) | 0.648 | $1.182 |
+| gpt-5.6-sol | reasoning off | 0.644 | $1.301 |
+| claude-haiku-5-5 | thinking off | 0.633 | $0.069 |
+| gpt-5.6-luna | reasoning off | 0.632 | $0.072 |
+| gpt-5.6-terra | reasoning off | 0.631 | $0.718 |
+| gpt-5.4-mini | reasoning off | 0.611 | $0.291 |
+| gpt-6-luna | reasoning off | 0.572 | $0.033 |
+
+**Pareto frontier:** gpt-6-luna, claude-haiku-5-5, gpt-4.1-mini, claude-opus-5
+at low effort, the same in all 12 projection variants (gpt-5.6-luna joins in
+4).  Opus at low effort is the top judge in all 12 variants and stays ahead of
+Opus with thinking off in at least 98.7% of 2,000 bootstrap draws over axes in
+every variant.  Opus with thinking off leads gpt-4.1-mini by only 0.006 at 25
+times the cost.  Ranking agreement with the default: Kendall τ from 0.855 to
+1.000.
+
+These 20 axes are not a random sample: 18 of them were picked as the
+highest-ρ axes of an earlier 35-axis sweep judged by gpt-4.1-mini and Sonnet,
+so absolute ρ is higher here than on all 61, and the selection may favour
+those judges.
+
+**Update 2, 2026-11-01 (evening): every judge under the new method.**  The
+rubric tuning described in update 2 of
+[`pareto_pooled_61axes_notes.md`](./pareto_pooled_61axes_notes.md) was run on
+this set for all ten judges, Opus 5 (thinking off) and Sol (reasoning off)
+included: [`pareto_pooled_20axes_rubrics.png`](./pareto_pooled_20axes_rubrics.png)
+(old and new points joined), the 12-variant check in
+[`judge_tier_robustness_20axes_rubrics.png`](./judge_tier_robustness_20axes_rubrics.png)
+and [`judge_tier_robustness_20axes_rubrics.json`](./judge_tier_robustness_20axes_rubrics.json).
+The ten judges land within 0.04 of one another (0.745 to 0.786); Haiku 5.5,
+Terra and Opus 5 share the top within 0.002, so price decides, and Opus at 40
+times Haiku's price buys nothing measurable.  The table is in the 61-axis
+notes.
+
+**Reproduce** (from the repository root):
+
+```bash
+uv run python results_analysis/judge_tier_robustness.py --axes_file scripts/tier_eval_axes_20.tsv \
+    --exclude_models claude-haiku-4-5 gpt-5.6-luna gpt-5.6-terra --output_dir /tmp/robust20
+cp /tmp/robust20/judge_tier_robustness.json roger/axis_judge_experiments/judge_tier_robustness_20axes.json
+cp /tmp/robust20/judge_tier_robustness.png roger/axis_judge_experiments/judge_tier_robustness_20axes.png
+uv run python results_analysis/judge_tier_cost_plot_pooled.py \
+    --tier_eval_dirs $(awk '!/^#/ && NF {print "roger/axis_judge_experiments/"$1"_tier_eval"}' scripts/tier_eval_axes_20.tsv) \
+    --robustness_json roger/axis_judge_experiments/judge_tier_robustness_20axes.json \
+    --exclude_models claude-haiku-4-5 gpt-5.6-luna gpt-5.6-terra \
+    --output roger/axis_judge_experiments/pareto_pooled_20axes.png
+```
+
+---
+
+## Original analysis, 2026-10-26
+
 **Plot:** [`pareto_pooled_20axes.png`](./pareto_pooled_20axes.png)  
 **Date:** 2026-10-26  
 **Branch:** `personas-konstantinos`
 
 ---
 
-## What Was Done
+### What Was Done
 
 We evaluated five judge model tiers on 20 personality-axis pairs to find the best
 cost–quality trade-off for description-mode axis judging.
@@ -52,7 +124,7 @@ existing `gpt/` and `sonnet/` correlation caches.
 
 ---
 
-## Key Finding
+### Key Finding
 
 Across 20 axes, the **Pareto frontier** runs:
 
@@ -72,7 +144,7 @@ gpt-5.6-luna ($0.10, ρ≈0.627) → gpt-4.1-mini ($0.18 est., ρ≈0.684) → c
 
 ---
 
-## Output Files
+### Output Files
 
 All results live under `roger/axis_judge_experiments/` (gitignored):
 
@@ -91,7 +163,7 @@ Plotter: [`results_analysis/judge_tier_cost_plot_pooled.py`](../../results_analy
 
 ---
 
-## Reproduce
+### Reproduce
 
 ```bash
 # Regenerate the plot from existing results:

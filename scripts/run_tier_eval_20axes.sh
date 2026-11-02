@@ -2,6 +2,12 @@
 # Run judge_tier_cost_eval.py for 18 new axes x 3 models (luna, terra, opus).
 # Angel_vs_demon and decisive_vs_indecisive are already done and skipped here.
 #
+# Superseded (2026-11-01) by scripts/run_tier_eval.sh, which runs all 61 axes of
+# scripts/tier_eval_axes.tsv in one invocation with batch / Flex transports.  This
+# script still works: it passes --transport realtime, so each (axis, model) call is
+# judged in real time as before (the default, auto, would submit and wait for one
+# batch per axis).
+#
 # Prerequisites:
 #   Corpus pinned to /tmp/corpus_2026-05-24 (run once):
 #     mkdir -p /tmp/corpus_2026-05-24
@@ -97,7 +103,8 @@ for SPEC in "${AXIS_SPECS[@]}"; do
       --projections_file "$PROJ" \
       --instructions_dir "$CORPUS" \
       --judge_model "$MODEL" \
-      --output_dir "$OUT_DIR"
+      --output_dir "$OUT_DIR" \
+      --transport realtime
   done
 done
 
