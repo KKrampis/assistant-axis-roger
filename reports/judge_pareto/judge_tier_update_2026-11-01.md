@@ -353,10 +353,11 @@ an earliest shutdown date of 2027-05-07 on
 
 **The decision (Roger):** N=20, two passes, no reasoning.  The default judges are GPT-5.6
 Luna and Haiku 5.5, blended; Gemini 3.1 Flash-Lite stays a supported third judge, and 3.5 is
-out of the running.  Roger has not ruled on two judges against three: the default is the
-recommendation, one line in
-[`judge_descriptions.py`](../../results_analysis/judge_descriptions.py), and May 2027 for 3.1 is
-not a concern to him.
+out of the running.  Two judges are the default (Roger, the same day): the two-model ensemble was
+found significantly better than either model alone, while three models bring three pairs and a trio
+to evaluate, so the default stays close to what was being done until a third judge is proven.  The
+default is one line in [`judge_descriptions.py`](../../results_analysis/judge_descriptions.py), and
+May 2027 for 3.1 is not a concern to him.
 
 **Gemini 3.1 on the full grid** (30 development axes, $21.09 at list), change in ρ from
 each judge's own N=10, two passes, no reasoning:
