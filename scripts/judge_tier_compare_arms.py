@@ -1,6 +1,7 @@
 """Compare judging arms on a set of axes (slot 6, layer 25, raw): each arm is a list of cells whose
 scores are averaged per entity, so an arm can be several passes of one judge or a blend of judges.
-Prints each arm's mean rho and cost per axis at list price, and for each --compare A:B the mean
+Prints each arm's mean rho and cost per axis (at the real price, each judge's batch or Flex rate, since
+2026-11-03; --price_basis list for the list price), and for each --compare A:B the mean
 per-axis difference with a 95% bootstrap interval over axes.  Reads scores and projections; no API calls.
 
 Usage: uv run python scripts/judge_tier_compare_arms.py --axes_file scripts/tier_eval_axes_holdout31.tsv \\
@@ -12,7 +13,8 @@ from pathlib import Path
 import numpy as np
 from scipy.stats import spearmanr
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from results_analysis.judge_tier_cost_plot_pooled import load_measured_cost
+from results_analysis.judge_tier_cost_eval import cell_scores_path, cell_usage_path
+from results_analysis.judge_tier_cost_plot_pooled import DEFAULT_PRICE_BASIS, PRICE_BASES, load_measured_cost
 
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 ap.add_argument("--experiments_dir", default="roger/axis_judge_experiments")
@@ -20,6 +22,8 @@ ap.add_argument("--axes_file", default="scripts/tier_eval_axes.tsv")
 ap.add_argument("--arm", action="append", required=True, metavar="NAME=CELL,CELL,...")
 ap.add_argument("--compare", action="append", default=[], metavar="A:B")
 ap.add_argument("--seed", type=int, default=20261102)
+ap.add_argument("--price_basis", choices=PRICE_BASES, default=DEFAULT_PRICE_BASIS,
+                help=f"as judge_tier_cost_plot_pooled.py (default {DEFAULT_PRICE_BASIS}, the real price)")
 args = ap.parse_args()
 E = Path(args.experiments_dir)
 axes = [l.split()[0] for l in open(args.axes_file) if l.strip() and not l.startswith("#")]
@@ -33,7 +37,7 @@ for a in axes:
 def arm_rhos(cells):
     out = []
     for a in axes:
-        loaded = [json.load(open(E / f"{a}_tier_eval" / c / "scores_descriptions.json"))["result"] for c in cells]
+        loaded = [json.load(open(cell_scores_path(E / f"{a}_tier_eval" / c)))["result"] for c in cells]
         blend = {}
         for name in proj[a]:
             vals = [s[name] for s in loaded if s.get(name) is not None]
@@ -46,8 +50,8 @@ def arm_rhos(cells):
 rhos = {k: arm_rhos(c) for k, c in arms.items()}
 width = max(len(k) for k in arms)
 for k, cells in arms.items():
-    cost = sum(np.mean([load_measured_cost(E / f"{a}_tier_eval" / c / "usage.json", "list") for a in axes]) for c in cells)
-    print(f"{k:{width}s}  rho {np.nanmean(rhos[k]):.4f}  ${cost:.3f}/axis")
+    cost = sum(np.mean([load_measured_cost(cell_usage_path(E / f"{a}_tier_eval" / c), args.price_basis) for a in axes]) for c in cells)
+    print(f"{k:{width}s}  rho {np.nanmean(rhos[k]):.4f}  ${cost:.3f}/axis ({args.price_basis} price)")
 rng = np.random.default_rng(args.seed)
 for spec in args.compare:
     x, y = spec.split(":")

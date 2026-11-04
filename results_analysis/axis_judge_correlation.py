@@ -18,7 +18,7 @@ import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Collection, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
@@ -28,15 +28,20 @@ from tqdm import tqdm
 # Repo-internal imports: reuse the existing OpenAI judge infrastructure.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from assistant_axis.judge import (  # type: ignore  # noqa: E402
-    RateLimiter,
+    accepts_temperature, anthropic_reply, anthropic_request_params, BillingError,
+    chat_create_kwargs, chat_request_body, content_flag, DEFAULT_TEMPERATURE, is_billing_error,
+    JudgeRequestError, provider_for_model, RateLimiter, REFUSED_REPLIES, request_temperature, TRUNCATED_REPLIES,
     warn_if_low_parse_rate,
 )
 from assistant_axis import (  # noqa: E402
     json_metadata, png_metadata, RESPONSE_BATCH_SIZE,
 )
+from assistant_axis.atomic_io import atomic_write_text  # noqa: E402
 from assistant_axis.entity_id import (  # noqa: E402
     display_form_name,
     entity_id,
+    is_entity_id,
+    judge_label,
     kind_long,
     normalize_to_file_name,
     parse_entity_id,
@@ -46,11 +51,14 @@ from assistant_axis.judge_pricing import (  # noqa: E402
     BudgetExceededError,
     BudgetTracker,
     UsageTotals,
+    anthropic_usage,
     extract_usage_anthropic,
+    openai_usage,
     extract_usage_openai,
 )
 from assistant_axis.provenance import (  # noqa: E402
     InputSpec,
+    current_corpus_files_input,
     current_file_input,
     current_files_input,
 )
@@ -140,7 +148,30 @@ logging.getLogger("anthropic").setLevel(logging.WARNING)
 #       are display sites).  See AGENT_NOTES "File-name vs
 #       display-name convention".  v3 supersedes v2 for new judging;
 #       v1/v2 caches remain valid for already-judged data.
-RUBRIC_VERSION = "v3"
+#   v4 (2026-10-09, W19, Roger) -- entity names rendered in the *judge
+#       display form* (``assistant_axis.entity_id.judge_label``): the
+#       stored label with its capitals, hyphens, diacritics and
+#       apostrophes (``systems-thinker``, ``devil's advocate``,
+#       ``ENFJ``), and a standard's suffix in the long form
+#       (``careless (from HEXACO)``).  The pair-axis header is composed
+#       from the two rendered pole names (``careless (from HEXACO) (+) vs
+#       conscientious (from HEXACO) (-) [traits]``, nested parentheses
+#       accepted); a free-text axis name keeps the mechanical form.  A
+#       name the corpus does not know renders as under v3.  Prompts are
+#       byte-identical to v3 wherever every name involved is a single
+#       lower-case word; the scoped v3 -> v4 edges are in
+#       rubric_equivalences.yaml.
+#   v5 (2026-10-12, walk-through D5, Roger) -- prompts unchanged; the
+#       parser changed.  ``parse_signed_score`` requires exactly one
+#       ``SCORE: <int>`` marker and returns None when it is absent or
+#       repeated (v4 fell back to the first integer in the reply, or took
+#       the first of several markers).  Every recorded reply was re-parsed
+#       on 2026-10-12 (2,876,150 replies in 316 response caches): five
+#       live replies changed, all split-persona answers, and were
+#       hand-edited to None with backups and envelope ``edits`` notes.  A
+#       global v4 -> v5 edge in rubric_equivalences.yaml keeps every
+#       cache; static caches keep no reply text, so cannot be re-parsed.
+RUBRIC_VERSION = "v5"
 
 _SCALE_TABLE = (
     "## Scale\n"
@@ -161,9 +192,10 @@ _SCALE_TABLE = (
 # under "Judge prompts: reason BEFORE score" -- non-reasoning judges
 # (4.1-mini, Haiku, Sonnet non-thinking) need explicit "think on the
 # page" framing or they commit to a score before deliberating.  The
-# parser at ``parse_signed_score`` below extracts the SCORE: <int>
-# token; do not change to a "first integer in response" parser
-# without changing the rubrics in lockstep.
+# parser at ``parse_signed_score`` below extracts the one SCORE: <int>
+# token and returns None without it (RUBRIC_VERSION v5); do not change
+# to a "first integer in response" parser without changing the rubrics
+# in lockstep.
 _RUBRIC_HEADER = (
     "You are scoring where a {entity} concept falls on a semantic axis.\n\n"
     "## Axis: {axis_name}\n\n"
@@ -196,31 +228,27 @@ RUBRIC_RESPONSE_BATCH = _RUBRIC_HEADER + (
 )
 
 
-def parse_signed_score(text: Optional[str]) -> Optional[int]:
-    """Extract a signed integer score from a judge response (looks for 'SCORE: <int>').
+_SCORE_MARKER = re.compile(r"SCORE\s*:\s*([+-]?\d+)", flags=re.IGNORECASE)
 
-    Falls back to finding the first standalone integer in [-3, 3] if no 'SCORE:' marker.
-    Returns None if nothing parseable is found.
+
+def parse_signed_score(text: Optional[str]) -> Optional[int]:
+    """The judge's score: the integer after the reply's one ``SCORE: <int>``
+    marker, clamped to [-3, 3].
+
+    Returns None when the reply has no marker or more than one
+    (RUBRIC_VERSION v5; walk-through D5, 2026-10-12).  Until v4 a reply
+    with no marker was scored from the first integer in [-3, 3] anywhere
+    in it, and a reply with several from the first marker; the replies
+    that hit either case were judges splitting a batch into two personas
+    and scoring each ("SCORE (responses 1-5): +3 ... SCORE (responses
+    6-10): -3"), so neither reading was the judge's answer for the batch.
     """
     if not text:
         return None
-    m = re.search(r"SCORE\s*:\s*([+-]?\d+)", text, flags=re.IGNORECASE)
-    if m:
-        try:
-            v = int(m.group(1))
-        except ValueError:
-            v = None
-        if v is not None:
-            return int(max(-3, min(3, v)))
-    # Fallback: first standalone integer in [-3, 3], optionally signed.
-    for tok in re.findall(r"(?<![\w.])([+-]?\d+)(?![\w.])", text):
-        try:
-            v = int(tok)
-        except ValueError:
-            continue
-        if -3 <= v <= 3:
-            return v
-    return None
+    found = _SCORE_MARKER.findall(text)
+    if len(found) != 1:
+        return None
+    return int(max(-3, min(3, int(found[0]))))
 
 
 # ---------------------------------------------------------------------------
@@ -250,6 +278,19 @@ class AxisSpec:
     # judged from its own rubric (see ``build_static_prompt``), so we
     # still get one ρ data point per example entity.
     pole_pair_names: List[str] = field(default_factory=list)
+    # The poles' kind (``"roles"`` / ``"traits"``; the pair's
+    # ``--pair_type``).  The skip is by entity id, so on a traits axis
+    # whose pole name is also a role (impatient_vs_patient and the role
+    # patient) the role is judged and projected like any other entity
+    # (review 9a D2, walk-through D3, 2026-10-12).  ``None`` (an AxisSpec
+    # built without it) skips the names in both kinds, the old behaviour.
+    pole_kind: Optional[str] = None
+
+    def pole_entity_ids(self) -> set:
+        """Entity ids (``name|R`` / ``name|T``) skipped from scoring,
+        projection and ρ on this axis: the poles, in the pole kind."""
+        kinds = (self.pole_kind,) if self.pole_kind else ("roles", "traits")
+        return {entity_id(n, k) for n in self.pole_pair_names for k in kinds}
 
 
 def _slot_list_from_arg(arg: str, n_slots: int) -> List[int]:
@@ -356,6 +397,7 @@ def resolve_axis(
             axis_by_slot=axis_by_slot,
             source_description=source, exclusions=exclusions,
             pole_pair_names=[name1, name2],
+            pole_kind=args.pair_type,
         )
 
     # Manual-axis path
@@ -1087,7 +1129,7 @@ def compute_projections(
     axis_spec: AxisSpec,
     whiten_K: int,
     slots: Sequence[int],
-    pole_pair_names: Sequence[str],
+    pole_ids: Collection[str],
 ) -> Dict[int, Dict[str, Dict[str, float]]]:
     """Return ``{slot: {entity_id: {'raw': float, 'whitened': float}}}``.
 
@@ -1103,8 +1145,10 @@ def compute_projections(
 
     Per-entity leave-one-out pool: when computing the projection of entity
     X, the whitener pool is built from every other entity in the corpus
-    except X (and except the pair-mode pole pair names, which are the axis-
-    defining vectors and would be degenerate to include).
+    except X (and except the pair-mode poles, ``pole_ids``, which are the
+    axis-defining vectors and would be degenerate to include).  The poles
+    are skipped by entity id: an entity of the other kind that shares a
+    pole's name is projected and stays in the pool (walk-through D3).
 
     This avoids the "deflate variance along the axis you're judging" failure
     mode of holding all listed-example entities out together: extremes along
@@ -1116,7 +1160,7 @@ def compute_projections(
     At ``whiten_K == 0`` the soft-K whitener is identity, so we skip the
     per-entity SVD entirely and ``raw == whitened`` per entity.
     """
-    pole_skip = set(pole_pair_names)
+    pole_skip = set(pole_ids)
     result: Dict[int, Dict[str, Dict[str, float]]] = {}
     for slot in slots:
         default_vec = corpus.default[slot]  # (hidden,)
@@ -1143,15 +1187,15 @@ def compute_projections(
             # reach hours -- consider SMW rank-1 updates for K>0 in
             # high-throughput contexts.
             for target_eid, target_x in all_centered.items():
-                target_name = parse_entity_id(target_eid).name
-                if target_name in pole_skip:
+                if target_eid in pole_skip:
                     continue
-                # LOO pool: everyone except target_eid and pole-pair names
-                # (regardless of kind, since the pole pair is axis-defining).
+                # LOO pool: everyone except target_eid and the two poles
+                # (by entity id: the axis-defining vectors are the poles'
+                # own kind; a same-named entity of the other kind stays).
                 pool_rows = [
                     x for eid_other, x in all_centered.items()
                     if eid_other != target_eid
-                    and parse_entity_id(eid_other).name not in pole_skip
+                    and eid_other not in pole_skip
                 ]
                 if len(pool_rows) < 2:
                     raise SystemExit(
@@ -1189,6 +1233,46 @@ def _entity_words(etype: str) -> Tuple[str, str, str, str]:
     return ("trait", "traits", "Trait", "Traits")
 
 
+# The pair-mode axis name as ``resolve_axis`` writes it: two stems (which
+# never contain spaces or parentheses) and the pair's kind.
+_PAIR_AXIS_NAME = re.compile(
+    r"^(?P<pos>\S+) \(\+\) vs (?P<neg>\S+) \(-\) \[(?P<kind>roles|traits)\]$"
+)
+
+
+def _pair_axis_parts(axis_name: str) -> Optional[Tuple[str, str, str]]:
+    """``(pos stem, neg stem, kind)`` of a pair-mode axis name, else None
+    (an axis-file axis's free-text ``--axis_name``)."""
+    m = _PAIR_AXIS_NAME.match(axis_name or "")
+    return (m.group("pos"), m.group("neg"), m.group("kind")) if m else None
+
+
+def judge_axis_name(axis_name: str) -> str:
+    """The axis name as the rubric header shows it (RUBRIC_VERSION v4).
+
+    A pair axis (``careless_hexaco (+) vs conscientious_hexaco (-)
+    [traits]``) is composed from the two poles' judge labels, keeping the
+    ``(+)`` / ``(-)`` / ``[kind]`` frame, so a standards pair nests
+    parentheses: ``careless (from HEXACO) (+) vs conscientious (from
+    HEXACO) (-) [traits]``.  Any other axis name is free text and keeps
+    the mechanical ``_`` -> space form.
+    """
+    parts = _pair_axis_parts(axis_name)
+    if parts is None:
+        return display_form_name(axis_name)
+    pos, neg, kind = parts
+    return f"{judge_label(pos, kind)} (+) vs {judge_label(neg, kind)} (-) [{kind}]"
+
+
+def _judge_examples(axis_spec: AxisSpec, examples: Sequence[str]) -> str:
+    """Example names in judge display form.  On a pair axis they are of the
+    pair's kind; on an axis-file axis the kind is unknown and both tables
+    are consulted (the collision names display identically)."""
+    parts = _pair_axis_parts(axis_spec.axis_name)
+    kind = parts[2] if parts else None
+    return ", ".join(judge_label(e, kind) for e in examples) or "(none)"
+
+
 def build_static_prompt(axis_spec: AxisSpec, etype: str, name: str, content: str) -> str:
     # Per-call leakage prevention: strip the entity being judged from its
     # own rubric example list, so a 10-example axis becomes a 9-example
@@ -1199,20 +1283,18 @@ def build_static_prompt(axis_spec: AxisSpec, etype: str, name: str, content: str
     sing, plur, sing_t, plur_t = _entity_words(etype)
     neg_ex = [e for e in axis_spec.neg_examples if e != name]
     pos_ex = [e for e in axis_spec.pos_examples if e != name]
-    # RUBRIC_VERSION v3: entity names rendered in display form
-    # (``aligned artificial intelligence``) for human / LLM
-    # readability; canonical file-name form is preserved everywhere
-    # else (cache keys, dict keys, provenance, exclusions).
+    # RUBRIC_VERSION v4: entity names rendered in the judge display form
+    # (``judge_label``: ``systems-thinker``, ``careless (from HEXACO)``);
+    # canonical file-name form is preserved everywhere else (cache keys,
+    # dict keys, provenance, exclusions).
     return RUBRIC_STATIC.format(
         entity=sing, entity_plural=plur,
         entity_title=sing_t, entity_plural_title=plur_t,
-        axis_name=display_form_name(axis_spec.axis_name),
+        axis_name=judge_axis_name(axis_spec.axis_name),
         negative_pole=axis_spec.neg_pole, positive_pole=axis_spec.pos_pole,
-        negative_examples=", ".join(display_form_name(e) for e in neg_ex)
-            or "(none)",
-        positive_examples=", ".join(display_form_name(e) for e in pos_ex)
-            or "(none)",
-        name=display_form_name(name), content=content,
+        negative_examples=_judge_examples(axis_spec, neg_ex),
+        positive_examples=_judge_examples(axis_spec, pos_ex),
+        name=judge_label(name, etype), content=content,
     )
 
 
@@ -1235,16 +1317,16 @@ def build_response_batch_prompt(
     items_block = "\n\n".join(blocks)
     neg_ex = [e for e in axis_spec.neg_examples if e != name]
     pos_ex = [e for e in axis_spec.pos_examples if e != name]
+    # ``name`` is not in the v2+ template (the body is anonymised); it is
+    # passed so that a template edit naming it would get the judge form.
     return RUBRIC_RESPONSE_BATCH.format(
         entity=sing, entity_plural=plur,
         entity_title=sing_t, entity_plural_title=plur_t,
-        axis_name=display_form_name(axis_spec.axis_name),
+        axis_name=judge_axis_name(axis_spec.axis_name),
         negative_pole=axis_spec.neg_pole, positive_pole=axis_spec.pos_pole,
-        negative_examples=", ".join(display_form_name(e) for e in neg_ex)
-            or "(none)",
-        positive_examples=", ".join(display_form_name(e) for e in pos_ex)
-            or "(none)",
-        name=display_form_name(name), n_items=n, items_block=items_block,
+        negative_examples=_judge_examples(axis_spec, neg_ex),
+        positive_examples=_judge_examples(axis_spec, pos_ex),
+        name=judge_label(name, etype), n_items=n, items_block=items_block,
     )
 
 
@@ -1375,19 +1457,23 @@ async def _call_with_retry(
     classify+backoff retries. Returns the call result, or ``None`` if all
     attempts failed (logged at WARNING with full classification).
 
-    :class:`BudgetExceededError` (Phase 4c, May 2026) is RE-RAISED
-    unconditionally — it indicates the cost cap was crossed and the
-    run must abort immediately, NOT retry.  All other exceptions are
-    classified normally.
+    :class:`BudgetExceededError` (Phase 4c, May 2026) and
+    :class:`JudgeRequestError` are RE-RAISED unconditionally: the run must
+    abort at once, NOT retry.  A fatal error other than a content flag on this
+    one prompt raises :class:`JudgeRequestError` (:class:`BillingError` for an
+    account the provider refuses), since every further call would fail the
+    same way; until 2026-11-02 it gave None, so that a judge refusing the
+    request's temperature "completed" with no score at all.  All other
+    exceptions are classified normally.
     """
     last_exc: Optional[BaseException] = None
     for attempt in range(1 + len(delays)):
         try:
             return await one_attempt()
-        except BudgetExceededError:
+        except (BudgetExceededError, JudgeRequestError):
             # Hard escape: bypass all retry/swallow logic.  The
             # orchestrator's try/except in run() catches this and
-            # exits with code 2.
+            # exits with code 2 (budget) or 1.
             raise
         except Exception as e:  # noqa: BLE001 (we intentionally classify)
             action, server_wait = _classify_judge_error(e)
@@ -1397,7 +1483,13 @@ async def _call_with_retry(
                     f"{provider_name} fatal error (no retry): "
                     f"{type(e).__name__}: {e}"
                 )
-                return None
+                flag = content_flag(e)
+                if flag is not None:
+                    logger.warning(f"{provider_name}: content flag ({flag}): this item gives None")
+                    return None
+                error = BillingError if is_billing_error(e) else JudgeRequestError
+                raise error(f"{provider_name} judge call refused: {type(e).__name__}: {e}.  Every further "
+                            f"call would fail the same way") from e
             if attempt == len(delays):
                 logger.warning(
                     f"{provider_name} call failed after {attempt + 1} attempts: "
@@ -1416,6 +1508,21 @@ async def _call_with_retry(
     return None
 
 
+def _usable_reply(text: Optional[str], finish: Optional[str], refused: bool, model: str) -> Optional[str]:
+    """The reply's text, or None for a refusal or a reply cut at ``max_tokens``, each counted (a
+    cut reply is never parsed, as in step 3: its reasoning was cut, whatever it holds)."""
+    if refused:
+        REFUSED_REPLIES[model] = REFUSED_REPLIES.get(model, 0) + 1
+        logger.warning(f"{model} refused a judge prompt ({REFUSED_REPLIES[model]} refusals so far)")
+        return None
+    if finish == "length":
+        TRUNCATED_REPLIES[model] = TRUNCATED_REPLIES.get(model, 0) + 1
+        logger.warning(f"{model}: a reply was cut at max_tokens ({TRUNCATED_REPLIES[model]} so far): scored as "
+                       f"missing; raise --max_tokens")
+        return None
+    return text
+
+
 async def _call_anthropic_batch(
     prompts: Sequence[str],
     model: str,
@@ -1430,11 +1537,9 @@ async def _call_anthropic_batch(
 
     async def one(prompt: str) -> Optional[str]:
         async def attempt() -> Optional[str]:
+            params = anthropic_request_params(prompt, model, max_tokens, temperature=temperature)
             await rate_limiter.acquire()
-            resp = await client.messages.create(
-                model=model, max_tokens=max_tokens, temperature=temperature,
-                messages=[{"role": "user", "content": prompt}],
-            )
+            resp = await client.messages.create(**params)
             # Tick the budget tracker BEFORE returning text so a
             # cap-crossing call still gets accounted for in n_calls
             # and prompt/completion tokens (the orchestrator wants
@@ -1442,14 +1547,11 @@ async def _call_anthropic_batch(
             # cap).  charge() raises BudgetExceededError if the
             # running total now exceeds the cap.
             if tracker is not None:
-                pt, ct = extract_usage_anthropic(resp)
-                tracker.charge(pt, ct)
-            parts = []
-            for block in resp.content:
-                text = getattr(block, "text", None)
-                if text:
-                    parts.append(text)
-            return "".join(parts) if parts else None
+                u = anthropic_usage(resp)
+                tracker.charge(u.prompt_tokens, u.completion_tokens,
+                               u.cache_write_tokens, u.cache_read_tokens)
+            text, finish, _n_in, _n_out, refused = anthropic_reply(resp)
+            return _usable_reply(text, finish, refused, model)
 
         return await _call_with_retry(attempt, provider_name="anthropic")
 
@@ -1459,7 +1561,7 @@ async def _call_anthropic_batch(
         tasks = [one(p) for p in chunk]
         r = await asyncio.gather(*tasks, return_exceptions=True)
         for x in r:
-            if isinstance(x, BudgetExceededError):
+            if isinstance(x, (BudgetExceededError, JudgeRequestError)):
                 # Phase 4c: cap exceeded — abort immediately rather
                 # than swallowing as None (which would let the loop
                 # continue spending on the remaining chunks).
@@ -1481,30 +1583,30 @@ async def _call_openai_batch(
     batch_size: int,
     tracker: Optional[BudgetTracker] = None,
 ) -> List[Optional[str]]:
-    """Local OpenAI async path; parallels _call_anthropic_batch so we can set
-    temperature and token budget freely (the shared assistant_axis/judge.py
-    hardcodes temperature=1).  Prompt caching is off for a judge that takes the
-    field (``judge.prompt_cache_fields``): a batch prompt is never repeated.
+    """Local OpenAI async path; parallels _call_anthropic_batch, with this
+    script's retries around the requests of ``judge.py`` (since 2026-11-02):
+    ``judge.chat_request_body`` leaves out a temperature equal to the provider
+    default, checks a non-default one against ``judge.MODEL_CAPABILITIES`` and
+    adds the model's request settings (reasoning effort "none"), and turns
+    prompt caching off for a judge that takes the field (GPT-5.6 and later: a
+    batch prompt of B responses is never repeated, and its default caching
+    would write it at 1.25x the input rate).  The tracker is charged the cache
+    tokens the response reports.
     """
     import openai
-    from assistant_axis.judge import chat_create_kwargs, prompt_cache_fields
     client = openai.AsyncOpenAI()
-    cache_kwargs = chat_create_kwargs(prompt_cache_fields(model))
 
     async def one(prompt: str) -> Optional[str]:
         async def attempt() -> Optional[str]:
+            body = chat_request_body(prompt, model, max_tokens, temperature=temperature)
             await rate_limiter.acquire()
-            resp = await client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": prompt}],
-                max_completion_tokens=max_tokens,
-                temperature=temperature,
-                **cache_kwargs,
-            )
+            resp = await client.chat.completions.create(**chat_create_kwargs(body))
             if tracker is not None:
-                pt, ct = extract_usage_openai(resp)
-                tracker.charge(pt, ct)
-            return resp.choices[0].message.content
+                u = openai_usage(resp)
+                tracker.charge(u.prompt_tokens, u.completion_tokens,
+                               u.cache_write_tokens, u.cache_read_tokens)
+            choice = resp.choices[0]
+            return _usable_reply(choice.message.content, getattr(choice, "finish_reason", None), False, model)
 
         return await _call_with_retry(attempt, provider_name="openai")
 
@@ -1514,7 +1616,7 @@ async def _call_openai_batch(
         tasks = [one(p) for p in chunk]
         r = await asyncio.gather(*tasks, return_exceptions=True)
         for x in r:
-            if isinstance(x, BudgetExceededError):
+            if isinstance(x, (BudgetExceededError, JudgeRequestError)):
                 # Phase 4c: cap exceeded — abort immediately.
                 raise x
             if isinstance(x, Exception):
@@ -2032,6 +2134,13 @@ def _save_json(
         notes: Optional dict merged into ``_provenance.notes`` (e.g.
             ``{"rejudge_names": [...]}`` for surgical rejudges, or
             ``{"usage": ...}`` for budget tracking).
+
+    The write is atomic (review 9a D5, walk-through D4, 2026-10-12): the
+    text is staged in ``$TMPDIR``, copied to ``<path>.inprogress`` and
+    renamed onto ``path`` with ``os.replace``
+    (:func:`assistant_axis.atomic_io.atomic_write_text`), so a run killed
+    mid-write leaves the previous cache intact rather than a truncated
+    file that the next resume would read as empty and re-judge in full.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     if inputs is not None:
@@ -2044,9 +2153,10 @@ def _save_json(
                 existing = {"notes": existing}
             merged = {**existing, **notes}
             envelope["_provenance"]["notes"] = merged
-        path.write_text(json.dumps(envelope, indent=2, sort_keys=True))
+        text = json.dumps(envelope, indent=2, sort_keys=True)
     else:
-        path.write_text(json.dumps(obj, indent=2, sort_keys=True))
+        text = json.dumps(obj, indent=2, sort_keys=True)
+    atomic_write_text(text, path, logger_obj=logger)
 
 
 def _flush_budget_artifacts(
@@ -2075,7 +2185,9 @@ def _flush_budget_artifacts(
         return
     p = Path(side_car)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(tracker.as_dict(), indent=2, sort_keys=True))
+    # Atomic for the same reason as the caches (_save_json).
+    atomic_write_text(json.dumps(tracker.as_dict(), indent=2, sort_keys=True), p,
+                      logger_obj=logger)
 
 
 # ---------------------------------------------------------------------------
@@ -2085,6 +2197,48 @@ def _flush_budget_artifacts(
 # ---------------------------------------------------------------------------
 
 _SCRIPT_PATH = Path(__file__).resolve()
+
+# The side-car files ``pipeline/3_judge.py`` writes beside the per-entity
+# score files in a step-3 scores directory (its ``SIDE_CAR_FILENAMES``:
+# ``usage.json``, ``judge_rubric.json``, ``batch_state.json``).  Copied
+# rather than imported, since importing step 3 here would pull in its
+# dependencies; ``test_axis_judge_correlation_review_fixes.py`` checks
+# that the two tuples agree.
+SIDE_CAR_FILENAMES: Tuple[str, ...] = ("usage.json", "judge_rubric.json", "batch_state.json")
+
+
+# The fields of an instruction JSON each output depends on (AGENT_NOTES
+# housekeeping item 3; Roger, 2026-09-12): the description judge reads the
+# description; the instruction judge reads the pos instructions, and response
+# generation (hence the responses judged) was made from them, both taken with
+# the description they were written from.  ``positive_label`` is in every set
+# because since W19 (2026-10-09) the prompts name the scored entity and the
+# examples by their judge label.  Nothing here reads the neg instructions,
+# questions, eval prompt, arrangement, tags, source or generator.
+CORPUS_CONTENT_FIELDS: Dict[str, Tuple[str, ...]] = {
+    "descriptions": ("positive_label", "description"),
+    "instructions": ("positive_label", "description", "instruction[*].pos"),
+    "responses": ("positive_label", "description", "instruction[*].pos"),
+    "correlations": ("positive_label", "description", "instruction[*].pos"),
+}
+# A pair axis's poles: the header names them by label, and the pole text is
+# the description.
+POLE_CONTENT_FIELDS: Tuple[str, ...] = ("positive_label", "description")
+
+
+def _corpus_entities(args: argparse.Namespace) -> List[Tuple[str, str]]:
+    """``(kind, stem)`` of every entity :func:`load_corpus` reads: one with
+    both a vector file and an instruction JSON (``default`` excluded)."""
+    out: List[Tuple[str, str]] = []
+    for etype in ("roles", "traits"):
+        vdir = Path(args.data_dir) / etype / "vectors"
+        idir = Path(args.instructions_dir) / etype / "instructions"
+        if not (vdir.exists() and idir.exists()):
+            continue
+        for vfile in sorted(vdir.glob("*.pt")):
+            if vfile.stem != "default" and (idir / f"{vfile.stem}.json").exists():
+                out.append((etype, vfile.stem))
+    return out
 
 
 def _build_axis_judge_inputs(
@@ -2115,7 +2269,12 @@ def _build_axis_judge_inputs(
     the project's stated tradeoff (regenerating plots is cheap; only
     rejudging is expensive, and Phase 6b's script-equivalence
     registry plus the deferred-rejudge registry handle the cost
-    cases).
+    cases).  The corpus inputs (``corpus_instructions``,
+    ``pole_instructions``) also carry per-entity content hashes of the
+    fields the mode reads (``CORPUS_CONTENT_FIELDS``), so an edit to a
+    field no prompt sees (``arrangement``, ``tags``, ``generator``,
+    ``questions``, a neg instruction) validates as ``equivalent_content``
+    rather than ``drift``, and a real change names the entities it hit.
     """
     inputs: List[InputSpec] = []
 
@@ -2174,14 +2333,21 @@ def _build_axis_judge_inputs(
             )
         pole_paths = [p for p in pole_paths if p.exists()]
         if pole_paths:
-            inputs.append(current_files_input(
+            inputs.append(current_corpus_files_input(
                 dep_key="pole_instructions", paths=pole_paths,
+                root=Path(args.instructions_dir),
+                entities=[(args.pair_type, p.stem) for p in pole_paths],
+                fields=POLE_CONTENT_FIELDS,
             ))
 
     # Corpus (entity descriptions / instructions) -- read by load_corpus
     # in every mode; affects the set of scorable entities, and for
     # descriptions/instructions modes is the actual content judged.
-    if mode in ("descriptions", "instructions", "responses", "correlations"):
+    # The metadata fingerprint covers every instruction JSON; the content
+    # hashes cover the fields this mode reads, for the entities load_corpus
+    # reads (those with a vector), so an edit to anything else validates
+    # as ``equivalent_content`` (housekeeping item 3).
+    if mode in CORPUS_CONTENT_FIELDS:
         instr_root = Path(args.instructions_dir)
         instr_paths: List[Path] = []
         for etype in ("roles", "traits"):
@@ -2189,8 +2355,11 @@ def _build_axis_judge_inputs(
             if idir.exists():
                 instr_paths.extend(sorted(idir.glob("*.json")))
         if instr_paths:
-            inputs.append(current_files_input(
+            inputs.append(current_corpus_files_input(
                 dep_key="corpus_instructions", paths=instr_paths,
+                root=instr_root,
+                entities=_corpus_entities(args),
+                fields=CORPUS_CONTENT_FIELDS[mode],
             ))
 
     # Corpus vectors -- needed by projections (always loaded; defines
@@ -2230,7 +2399,13 @@ def _build_axis_judge_inputs(
                 ))
         if getattr(args, "scores_dir", None):
             scores_dir = Path(args.scores_dir)
-            score_files = sorted(scores_dir.glob("*.json"))
+            # Per-entity score files only: step 3's side-cars (usage record,
+            # rubric stamp, batch state) are rewritten by every step-3 run
+            # and are not read here (review P3 cross-file, walk-through D12).
+            score_files = sorted(
+                p for p in scores_dir.glob("*.json")
+                if p.name not in SIDE_CAR_FILENAMES
+            )
             if score_files:
                 inputs.append(current_files_input(
                     dep_key="response_score_files", paths=score_files,
@@ -2999,23 +3174,31 @@ def compute_correlations(
     ids** (e.g. ``"patient|R"``) for the ``descriptions`` /
     ``instructions`` static modes; the response mode is kind-pure (one
     cohort dir per kind) so its keys are bare names.  Both shapes are
-    accepted: the helper looks up the bare-name in ``excluded_set``
-    (the pole-pair set is bare-name) via :func:`parse_entity_id` when
-    the key carries a kind suffix.
+    accepted.
+
+    ``excluded_set`` holds entity ids (``run`` passes the poles'
+    :meth:`AxisSpec.pole_entity_ids`, walk-through D3) or bare names (the
+    older form, which excludes the name in both kinds).  An entity-id key
+    is excluded when the id, or its bare name, is in the set; a bare key,
+    whose kind is unknown here, is excluded when it is in the set or is
+    the name of an excluded id.
 
     The emitted ``names`` array preserves whichever key shape the
     inputs used (so a v2 static-mode correlation stamps disambiguated
     ids; a response-mode correlation stamps bare names).
     """
     out: Dict[str, Any] = {}
+    excluded_names_any_kind = {
+        parse_entity_id(e).name if is_entity_id(e) else e for e in excluded_set
+    }
 
-    def _bare_name(key: str) -> str:
-        # Tolerate both ``"patient|R"`` and ``"patient"`` so we don't
-        # crash on response-mode (kind-pure, bare-name) inputs.
-        try:
-            return parse_entity_id(key).name
-        except ValueError:
-            return key
+    def _is_excluded(key: str) -> bool:
+        if key in excluded_set:
+            return True
+        if is_entity_id(key):
+            # A bare-name entry excludes both kinds (legacy callers).
+            return parse_entity_id(key).name in excluded_set
+        return key in excluded_names_any_kind
 
     for mode, score_map in scores_by_mode.items():
         out[mode] = {}
@@ -3027,8 +3210,7 @@ def compute_correlations(
                 svals = []
                 pvals = []
                 for key, s in sorted(score_map.items()):
-                    bare = _bare_name(key)
-                    if bare in excluded_set:
+                    if _is_excluded(key):
                         continue
                     if key not in per_slot:
                         continue
@@ -3205,6 +3387,10 @@ def parse_args() -> argparse.Namespace:
 
     # Scoring modes.
     sm = p.add_argument_group("scoring modes")
+    sm.add_argument("--projections_only", action="store_true",
+                    help="Write <output_dir>/projections.json and stop: no judge calls.  For judging an axis "
+                         "by results_analysis/judge_descriptions.py, the batched percentile method (2026-11-02), "
+                         "which reads <experiments_dir>/<axis>/gpt/projections.json.")
     sm.add_argument("--score_descriptions", action="store_true",
                     help="Score each entity's description text.")
     sm.add_argument("--score_instructions", action="store_true",
@@ -3266,8 +3452,11 @@ def parse_args() -> argparse.Namespace:
                    help="Defaults: claude-sonnet-4-6 (anthropic) / gpt-4.1-mini (openai).")
     j.add_argument("--max_tokens", type=int, default=1024,
                    help="Token budget for the judge response (must fit reasoning + SCORE line).")
-    j.add_argument("--temperature", type=float, default=0.0,
-                   help="Sampling temperature; 0 for greedy/deterministic rubric grading.")
+    j.add_argument("--temperature", type=float, default=None,
+                   help="Sampling temperature.  Default: 0 for greedy/deterministic rubric grading on a "
+                        "model that takes one, else the provider's default (judge.MODEL_CAPABILITIES: GPT-5 "
+                        "and later and Claude 5 refuse any other with HTTP 400).  A value the model refuses "
+                        "stops the run before anything is sent.")
     j.add_argument("--rps", type=float, default=10.0, help="Requests per second (token bucket).")
     j.add_argument("--batch_size", type=int, default=20, help="Concurrent in-flight calls.")
     j.add_argument("--save_every", type=int, default=40,
@@ -3380,11 +3569,27 @@ def parse_args() -> argparse.Namespace:
         args.score_descriptions = True
         args.score_instructions = True
         args.score_responses = True
-    if not (args.score_descriptions or args.score_instructions or args.score_responses):
+    if not (args.score_descriptions or args.score_instructions or args.score_responses or args.projections_only):
         p.error("Specify at least one of --score_descriptions / --score_instructions / "
-                "--score_responses, or use --all.")
+                "--score_responses, or use --all, or --projections_only.")
+    if args.projections_only and (args.score_descriptions or args.score_instructions or args.score_responses):
+        p.error("--projections_only excludes the --score_* modes and --all.")
     if args.judge_model is None:
         args.judge_model = _default_model_for_provider(args.provider)
+    try:
+        provider = provider_for_model(args.judge_model)
+    except ValueError:      # a name no prefix covers goes to --provider's client, as before
+        provider = args.provider
+    if provider != args.provider:
+        hint = (" (Gemini is judged by results_analysis/judge_descriptions.py, not by this script)"
+                if provider == "google" else "")
+        p.error(f"--judge_model {args.judge_model} is a {provider} model, but --provider is {args.provider}{hint}")
+    if args.temperature is None:
+        args.temperature = 0.0 if accepts_temperature(args.judge_model) else DEFAULT_TEMPERATURE
+    try:
+        request_temperature(args.judge_model, args.temperature)     # before minutes of projections
+    except JudgeRequestError as e:
+        p.error(str(e))
     args.rejudge_names = _parse_rejudge_names(args.rejudge_names)
     return args
 
@@ -3518,6 +3723,15 @@ def _resolve_rejudge_names_against_scorable(
     return kept
 
 
+def scorable_entities(
+    entities: Sequence[Tuple[str, str]], pole_ids: Collection[str],
+) -> List[Tuple[str, str]]:
+    """The ``(kind, name)`` entities judged on an axis: every corpus entity
+    whose entity id is not one of the poles' (``AxisSpec.pole_entity_ids``).
+    A same-named entity of the other kind is kept (walk-through D3)."""
+    return [(et, n) for (et, n) in entities if entity_id(n, et) not in pole_ids]
+
+
 def _csv_or_space_list(s: str) -> List[str]:
     if not s:
         return []
@@ -3570,21 +3784,26 @@ async def run(args: argparse.Namespace) -> None:
     if not 0 <= args.layer < n_layers:
         raise SystemExit(f"--layer {args.layer} out of range [0, {n_layers})")
     slots = _slot_list_from_arg(args.slot, n_slots)
+    # What each slot is in this tree (multi-model plan § 5.6): another model
+    # family has another header, so slot 6 need not be </think>.
+    from assistant_axis.axis import slot_labels, tree_vector_metadata
+    _labels = slot_labels(tree_vector_metadata(data_dir, ("roles/vectors", "traits/vectors")))
+    logger.info("slot labels: " + ", ".join(
+        f"{i}={_labels[i]!r}" if i < len(_labels) else f"{i}=?" for i in range(n_slots)))
 
     # Build the axis spec and load corpus.
     axis_spec = resolve_axis(args, n_slots, hidden_dim, args.layer)
     corpus = load_corpus(args, args.layer)
 
-    # Which entities are scorable?  All corpus entities minus the **pole
-    # pair** names (axis-defining; degenerate to judge).  Listed examples
-    # ARE scorable -- their per-call rubric strips them from the example
-    # list (see build_static_prompt), so judging an example entity is no
-    # longer self-referential.
-    exclusion_set = set(axis_spec.exclusions)            # full set: still used to hold examples out of the whitener pool below
-    pole_skip_set = set(axis_spec.pole_pair_names)        # names actually skipped from scoring + ρ
-    scorable: List[Tuple[str, str]] = [
-        (et, n) for (et, n) in corpus.entities if n not in pole_skip_set
-    ]
+    # Which entities are scorable?  All corpus entities minus the two
+    # **poles** (axis-defining; degenerate to judge), by entity id: on a
+    # traits axis whose pole name is also a role, the role is scored
+    # (walk-through D3, 2026-10-12).  Listed examples ARE scorable --
+    # their per-call rubric strips them from the example list (see
+    # build_static_prompt), so judging an example entity is no longer
+    # self-referential.
+    pole_skip_set = axis_spec.pole_entity_ids()   # entity ids skipped from scoring, projection pool and ρ
+    scorable = scorable_entities(corpus.entities, pole_skip_set)
     if args.max_entities is not None:
         scorable = scorable[:args.max_entities]
 
@@ -3609,7 +3828,7 @@ async def run(args: argparse.Namespace) -> None:
     # the whitener is identity and the per-entity SVD is short-circuited.
     projections = compute_projections(
         corpus=corpus, axis_spec=axis_spec, whiten_K=args.whiten_K,
-        slots=slots, pole_pair_names=axis_spec.pole_pair_names,
+        slots=slots, pole_ids=pole_skip_set,
     )
     proj_out = {str(slot): per_slot for slot, per_slot in projections.items()}
     # Projections is computed from the corpus, no API calls — usage
@@ -3622,6 +3841,9 @@ async def run(args: argparse.Namespace) -> None:
         schema_version=2,
         notes={"usage": tracker.as_dict()},
     )
+    if args.projections_only:
+        logger.info(f"--projections_only: wrote {Path(args.output_dir) / 'projections.json'}; no judge calls")
+        return
 
     # Save config up-front.  ``cohort_kind`` records the kind-pure
     # cohort the responses_dir points at (when in response mode);
@@ -3680,6 +3902,12 @@ async def run(args: argparse.Namespace) -> None:
         logger.error(str(e))
         _flush_budget_artifacts(args, tracker)
         raise SystemExit(2) from e
+    except JudgeRequestError as e:
+        # The API refuses the request or the account: every further call
+        # would fail the same way.  What was judged is already saved.
+        logger.error(str(e))
+        _flush_budget_artifacts(args, tracker)
+        raise SystemExit(1) from e
     else:
         # On clean completion, also write the side-car / log a
         # one-line final summary so the operator sees the bill.
@@ -3704,8 +3932,8 @@ async def run(args: argparse.Namespace) -> None:
         scores_for_corr["responses"] = means
 
     # Compute correlations and output.
-    # ρ calc skips only pole-pair names (which weren't judged anyway);
-    # listed examples DO contribute ρ data points now.
+    # ρ calc skips only the two poles, by entity id (they weren't judged
+    # anyway); listed examples DO contribute ρ data points now.
     correlations = compute_correlations(
         scores_by_mode=scores_for_corr, projections=projections,
         slots=slots, excluded_set=pole_skip_set,

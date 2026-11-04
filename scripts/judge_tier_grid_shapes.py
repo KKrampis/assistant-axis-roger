@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import matplotlib; matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from assistant_axis import json_metadata, png_metadata
-from assistant_axis.provenance import load_and_register
+from assistant_axis.provenance import CACHE_POLICIES, load_and_register
 from results_analysis import judge_tier_robustness as rob
 from scripts.judge_tier_grid_12way import JUDGES, dimension_arms
 
@@ -48,9 +48,11 @@ def main() -> None:
     ap.add_argument("--robustness_json", required=True)
     ap.add_argument("--output_dir", required=True)
     ap.add_argument("--axes_label", default="30 development axes")
+    ap.add_argument("--cache-policy", dest="cache_policy", choices=CACHE_POLICIES, default="warn",
+                    help="what to do when the rho table's recorded inputs have changed: strict | warn (default) | rebuild | off")
     args = ap.parse_args()
     inputs: list = []
-    payload, _spec, _check = load_and_register(Path(args.robustness_json), dep_key="robustness", inputs=inputs, policy="off")
+    payload, _spec, _check = load_and_register(Path(args.robustness_json), dep_key="robustness", inputs=inputs, policy=args.cache_policy)
     d = rob._unwrap(payload); cfg = d["config"]; out = Path(args.output_dir); rho = d["rho"]
     costs = {m: v["mean_cost"] for m, v in d["models"].items()}
     default = cfg["default_variant"]

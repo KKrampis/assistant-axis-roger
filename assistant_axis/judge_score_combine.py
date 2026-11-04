@@ -1,10 +1,10 @@
 """Standard, empirically-tuned mixing ratios for combining judge scores.
 
-Four families of weights live here, all derived from sweeps at the
-project's operating-point cells (slot 6 / layer 25 for response-mode,
-slot 3 / 0 / 0 for desc+inst).  Centralised so any new analysis or
-plotting script gets the project's current best-default with a single
-import.
+Five families of weights live here, the first four derived from sweeps
+at the project's operating-point cells (slot 6 / layer 25 for
+response-mode, slot 3 / 0 / 0 for desc+inst), the fifth set by Roger on
+a sweep's evidence.  Centralised so any new analysis or plotting script
+gets the project's current best-default with a single import.
 
 ::
 
@@ -145,6 +145,28 @@ import.
    w=0.8 vs 0.772 at w=0.71) so the choice is robust to whether
    eco/anthro is treated as a regular or held-out axis.
 
+5. **Between the batched tier judges** -- ``TIER_JUDGE_WEIGHTS`` /
+   ``tier_judge_weights`` / ``combine_tier_judges``: how one entity's
+   scores from GPT-5.6 Luna, Haiku 5.5 and Gemini 3.1 Flash-Lite (each
+   judge's own mean over its passes or instruction rounds) are averaged
+   in description and instruction judging
+   (``results_analysis/judge_tier_average.py``,
+   ``scripts/judge_instruction_12way.py``).  Luna 4, any other judge 3:
+   4:3 in a pair with Luna, 4:3:3 in the trio, 1:1 without Luna.
+
+   Selection history:
+
+   * **4:3:3** (Roger, 2026-11-03: "a lean towards Luna is supported by
+     the fact that Luna alone is always better than Haiku/Gemini
+     alone"): instruction judging on the 61 axes at slot 6 / layer 25
+     raw, Luna alone 0.721 / 0.749 / 0.759 at 1 / 2 / 3 rounds against
+     Haiku 0.708 / 0.735 / 0.745 and Gemini 0.706 / 0.736 / 0.747.
+     Weights fitted to maximise ρ leaned to Luna (0.55-0.60 in a pair,
+     0.40-0.50 in the trio; 4:3 is 0.571) but gained at most +0.0008 in
+     sample and nothing out of sample (within ±0.001, split-half and
+     leave-one-axis-out), so the lean is a prior, not a tuning.  Equal
+     weights before.
+
 Usage examples::
 
     # Combine one judge's desc + inst with the standard tiebreak.
@@ -281,6 +303,65 @@ DEFAULT_RESPONSE_DI_WEIGHT: float = 0.80
 # default).  Bump only after re-deriving from a sweep with new RF /
 # regret weighting.
 PRIMARY_AXIS_SAMPLE_WEIGHT: float = 5.0
+
+
+# Weights between the batched tier judges when one entity's scores from
+# several are averaged (description and instruction judging, 2026-11):
+# GPT-5.6 Luna 4, any other judge 3, so 4:3 in a pair with Luna and 4:3:3
+# in the trio (Roger, 2026-11-03).  A judge is named by its model, the
+# part of a cell name before "@".  See the module docstring, item 5.
+TIER_JUDGE_WEIGHTS: Dict[str, float] = {"gpt-5.6-luna": 4.0}
+TIER_JUDGE_DEFAULT_WEIGHT: float = 3.0
+#: Per judging mode, the weights that differ from TIER_JUDGE_WEIGHTS (2026-11-04).  Jev (TypeSafe AI) on
+#: descriptions: 24 beside Luna 4, Haiku 3, Gemini 3 (Roger: "an optimal blend ... of the form 4:3:3:X ...
+#: average across all 12"), fitted on the balanced cells of the 61 axes (each judge two passes, one each way)
+#: on rho averaged over the 12 projection variants: the peak of 4:3:3:X, the plateau 16-40 within 0.0005 of it,
+#: the bootstrap's best X in [16, 40] (95%), 24 chosen fitting either half and leaving any one axis out, and
+#: +0.0083 [+0.0051, +0.0113] over X = 3; a free fit of all four weights gains nothing on held-out halves.
+#: instructions: 24 too (Roger: "(Luna + Haiku + Gemini + Jev) x2, and just do both directions in the x2"),
+#: fitted the same way on the balanced instruction cells (rounds 0-9): the peak at 20, 0.0000 above 24
+#: ([-0.0002, +0.0003]), the plateau 12-40 within 0.001, the bootstrap's best X in [12, 40] (95%, 24 the
+#: commonest), 16 to 24 chosen fitting either half or leaving any one axis out, and +0.0044 [+0.0014, +0.0074]
+#: over X = 3; one weight for both modes, since nothing tells the two apart.
+#: Evidence: reports/judge_pareto/jev_judging.md.
+TIER_JUDGE_WEIGHTS_BY_MODE: Dict[str, Dict[str, float]] = {"descriptions": {"jev-1.14.0": 24.0},
+                                                           "instructions": {"jev-1.14.0": 24.0}}
+
+
+def tier_judge_weights(judges, mode: Optional[str] = None) -> Dict[str, float]:
+    """``{judge: weight}`` over ``judges`` (models, or cell names whose model
+    is the part before "@"), summing to 1, from :data:`TIER_JUDGE_WEIGHTS` and,
+    for ``mode`` ("descriptions", "instructions"), :data:`TIER_JUDGE_WEIGHTS_BY_MODE`."""
+    table = {**TIER_JUDGE_WEIGHTS, **TIER_JUDGE_WEIGHTS_BY_MODE.get(mode or "", {})}
+    raw = {j: table.get(j.split("@", 1)[0], TIER_JUDGE_DEFAULT_WEIGHT) for j in judges}
+    total = sum(raw.values())
+    return {j: w / total for j, w in raw.items()}
+
+
+def combine_tier_judges(
+    per_judge: Dict[str, Dict[str, float]],
+    weights: Optional[Dict[str, float]] = None,
+    mode: Optional[str] = None,
+) -> Dict[str, float]:
+    """One score per entity from several judges' scores (each judge's own
+    mean over its passes or rounds): the weighted mean, with
+    :func:`tier_judge_weights` unless ``weights`` is given, renormalised
+    over the judges that scored the entity (the one-side-missing fallback
+    of :func:`blend_two_with_fallback`).  An entity no judge scored is
+    left out."""
+    w = weights if weights is not None else tier_judge_weights(per_judge, mode)
+    out: Dict[str, float] = {}
+    for n in set().union(*per_judge.values()) if per_judge else ():
+        num = den = 0.0
+        for j, scores in per_judge.items():
+            v = scores.get(n)
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                num += w[j] * v
+                den += w[j]
+        if den > 0:
+            out[n] = num / den
+    return out
+
 
 DI_WEIGHT_CHOICES = {
     "inst_tie": DI_WEIGHTS_INST_TIE,  # 0.499*d + 0.501*i  -- DEFAULT
@@ -699,6 +780,7 @@ def declare_constants_dependency(
             "DEFAULT_GPT_HAIKU_Q9_WEIGHT": f"{DEFAULT_GPT_HAIKU_Q9_WEIGHT}",
             "DEFAULT_RESPONSE_DI_WEIGHT": f"{DEFAULT_RESPONSE_DI_WEIGHT}",
             "PRIMARY_AXIS_SAMPLE_WEIGHT": f"{PRIMARY_AXIS_SAMPLE_WEIGHT}",
+            "TIER_JUDGE_WEIGHTS": f"{TIER_JUDGE_WEIGHTS}, others {TIER_JUDGE_DEFAULT_WEIGHT}",
         },
     ))
 

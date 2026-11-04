@@ -427,3 +427,201 @@ def test_grid_script_recomputes_each_figures_frontier(tmp_path, monkeypatch):
     res = json.loads((tmp_path / "judge_tier_grid_12way.json").read_text())
     res = res.get("result", res)
     assert all(0 <= c["on_frontier_of_12"] <= 12 for fig in ("batch_size", "all") for c in res[fig]["cells"].values())
+
+
+# ---------------------------------------------------------------------------
+# The other figure scripts: tracked producers that record their inputs
+# ---------------------------------------------------------------------------
+
+def _script(name):
+    import importlib.util
+    path = Path(jtr.__file__).resolve().parents[1] / "scripts" / f"{name}.py"
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _grid_rho_table(cells):
+    variants = jtr.build_variants([0, 6], [25, 49], list(jtr.REGIMES))
+    rng = np.random.default_rng(1)
+    axes = [f"ax{i}" for i in range(4)]
+    return {"config": {"slots": [0, 6], "layers": [25, 49], "regimes": list(jtr.REGIMES), "soft_K": 2, "shear_L": 3,
+                       "default_variant": "s6_l25_raw"},
+            "axes": [{"axis_dir": a} for a in axes],
+            "models": {c: {"mean_cost": float(rng.uniform(0.01, 0.1))} for c in cells},
+            "rho": {c: {a: {v.key: float(rng.uniform(0.4, 0.7)) for v in variants} for a in axes} for c in cells}}
+
+
+def _png_inputs(path):
+    from PIL import Image
+    return Image.open(path).info.get("Inputs")
+
+
+def test_grid_shapes_writes_both_figures_with_inputs(tmp_path, monkeypatch):
+    mod = _script("judge_tier_grid_shapes")
+    cells = [c for name, base, plain, first, k in mod.JUDGES
+             for dim in mod.dimension_arms(base, plain, first, min(k, 3)).values() for c in dim.values()]
+    src = tmp_path / "rho.json"
+    src.write_text(json.dumps(_grid_rho_table(sorted(set(cells)))))
+    monkeypatch.setattr("sys.argv", ["x", "--robustness_json", str(src), "--output_dir", str(tmp_path), "--cache-policy", "off"])
+    mod.main()
+    assert _png_inputs(tmp_path / "judge_tier_grid_shapes.png") and _png_inputs(tmp_path / "judge_tier_grid_own_frontier.png")
+    res = json.loads((tmp_path / "judge_tier_grid_shapes.json").read_text())
+    assert set(res["_provenance"]) and set(res["result"]["own_frontier"]) == {"Luna", "GPT-6", "Haiku", "Gemini"}
+    assert res["result"]["shapes"]["Gemini"]["passes"]["2x"]["drho"] == 0.0     # the judge's own base
+
+
+def test_tuning_panels_writes_a_figure_with_inputs(tmp_path):
+    mod = _script("judge_tier_tuning_panels")
+    cells = [c for j in mod.JUDGES for c in (j, f"{j}@c8", f"{j}@b10x2")]
+    payload = _grid_rho_table(cells)
+    payload["per_variant"] = {"s6_l25_raw": {"models": {c: {"mean_rho": 0.5 + 0.01 * i} for i, c in enumerate(cells)}}}
+    src, out = tmp_path / "rho.json", tmp_path / "tuning.png"
+    src.write_text(json.dumps(payload))
+    mod.main(["--robustness_json", str(src), "--output", str(out), "--cache-policy", "off"])
+    assert _png_inputs(out)
+
+
+def test_grid_analysis_records_its_inputs(tmp_path, monkeypatch):
+    mod = _script("judge_tier_grid_analysis")
+    E = tmp_path / "exp"
+    axes = tmp_path / "axes.tsv"
+    axes.write_text("a_vs_b\ta\tb\ttraits\n")
+    arms = {"gpt-6-luna@b10s1": 0.60, "gpt-6-luna@b10x2": 0.65, "gpt-6-luna@b10n20x2": 0.66}
+    for cell, rho in arms.items():
+        d = E / "a_vs_b_tier_eval" / cell
+        d.mkdir(parents=True)
+        (d / "correlations.json").write_text(json.dumps({"descriptions": {"6": {"raw": {"rho": rho, "n": 9}}}}))
+        (d / "usage.json").write_text(json.dumps({"total_cost_usd": 0.1, "per_model": {}}))
+    monkeypatch.setattr("sys.argv", ["x", "--experiments_dir", str(E), "--axes_file", str(axes), "--output_dir", str(tmp_path)])
+    mod.main()
+    assert _png_inputs(tmp_path / "judge_tier_grid_dev30.png")
+    res = json.loads((tmp_path / "judge_tier_grid_dev30.json").read_text())
+    assert res["_provenance"]["inputs"] and {r["cell"] for r in res["result"]} == set(arms)
+
+
+# ---------------------------------------------------------------------------
+# scripts/judge_instruction_12way.py: Nx = N passes over all five instructions (Roger, 2026-11-03),
+# averaged over the choices of passes
+# ---------------------------------------------------------------------------
+
+def test_instruction_12way_arms_are_every_judge_set_at_1x_and_2x_luna_to_4x_and_the_mixes():
+    mod = _script("judge_instruction_12way")
+    # the figure before 2026-11-04: no Jev, the axes' own order (--without_jev --directions own)
+    mod.WITH_JEV, mod.BALANCED = False, False
+    arms = mod.arms()
+    assert len(arms) == 7 * 2 + 2 + 4 and len({lab for lab, _ in arms.values()}) == 20
+    assert arms["gpt-5.6-luna+claude-haiku-5-5@i1_p0n20x2"] == ("Luna + Haiku 2x", {"gpt-5.6-luna": 2, "claude-haiku-5-5": 2})
+    assert arms["gpt-5.6-luna@i1_p0n20x4"] == ("Luna 4x", {"gpt-5.6-luna": 4})          # Luna alone (Roger, 2026-11-03)
+    assert not any(k.endswith(("x3", "x4")) for k in arms if not k.startswith("gpt-5.6-luna@"))
+    assert arms["gpt-5.6-luna+claude-haiku-5-5+gemini-3.1-flash-lite@i1_p0n20m2-1-1"] == (
+        "Luna 2x + Haiku 1x + Gemini 1x", {"gpt-5.6-luna": 2, "claude-haiku-5-5": 1, "gemini-3.1-flash-lite": 1})
+    assert arms["gpt-5.6-luna+claude-haiku-5-5+gemini-3.1-flash-lite@i1_p0n20m2-2-1"][0] == "Luna 2x + Haiku 2x + Gemini 1x"
+    assert len(mod.replicates({"gpt-5.6-luna": 2, "claude-haiku-5-5": 2, "gemini-3.1-flash-lite": 1})) == 6 * 1 * 2
+    series = mod.series()
+    luna = next(s for s in series if s[0].startswith("gpt-5.6-luna@"))
+    assert [c[-2:] for c in luna] == ["x1", "x2", "x3", "x4"]
+    assert len(series) == 7 and all([c[-2:] for c in s] == ["x1", "x2"] for s in series if s is not luna)
+    assert sorted(c for s in series for c in s) == sorted(k for k, (_, spec) in arms.items() if len(set(spec.values())) == 1)
+    # every arm fits the passes judged
+    assert all(k <= mod.PASSES[m] for _, spec in arms.values() for m, k in spec.items())
+    # the defaults since 2026-11-04 (Roger: Jev beside the trio, balanced directions): the six Jev arms, three more
+    # series, and a 2x choice of passes one each way (Luna 2x of 4: 4 choices, not 6)
+    mod.WITH_JEV, mod.BALANCED = True, True
+    arms = mod.arms()
+    assert len(arms) == 7 * 2 + 2 + 4 + 6 and len({lab for lab, _ in arms.values()}) == 26
+    assert arms["jev-1.14.0@i1_p0n20x2"] == ("Jev 2x", {"jev-1.14.0": 2})
+    assert len(mod.series()) == 10
+    assert len(mod.replicates({"gpt-5.6-luna": 2, "claude-haiku-5-5": 2, "gemini-3.1-flash-lite": 1})) == 4 * 1 * 2
+    assert all(k <= mod.passes_of(mod.INSTRUCTIONS)[m] for _, spec in arms.values() for m, k in spec.items())
+
+
+def test_instruction_12way_a_pass_is_all_five_instructions_and_choices_are_per_judge():
+    mod = _script("judge_instruction_12way")
+    assert list(mod.pass_rounds(0)) == [0, 1, 2, 3, 4] and list(mod.pass_rounds(3)) == [15, 16, 17, 18, 19]
+    passes = {"a": 4, "b": 2}
+    mod.BALANCED = False            # the axes' own order: every choice of passes
+    assert len(mod.replicates({"a": 1}, passes)) == 4 and len(mod.replicates({"a": 2}, passes)) == 6
+    assert len(mod.replicates({"a": 4}, passes)) == 1
+    mix = mod.replicates({"a": 2, "b": 1}, passes)
+    assert len(mix) == 6 * 2 and all(len(rep["a"]) == 10 and len(rep["b"]) == 5 for rep in mix)
+    assert {rep["b"] for rep in mix} == {(0, 1, 2, 3, 4), (5, 6, 7, 8, 9)}
+    mod.BALANCED = True             # balanced (the default since 2026-11-04): an even count takes one pass each way
+    assert len(mod.replicates({"a": 1}, passes)) == 4 and len(mod.replicates({"a": 2}, passes)) == 4
+    assert len(mod.replicates({"a": 4}, passes)) == 1 and len(mod.replicates({"a": 2, "b": 1}, passes)) == 4 * 2
+    # Luna's two judgements average to 2, Haiku says 6: per judge, then Luna 4 to Haiku 3 (Roger, 2026-11-03), not
+    # (1 + 3 + 6) / 3; an entity Haiku left out is Luna's alone; two judges without Luna weigh alike
+    assert mod.combine({"gpt-5.6-luna": [{"e": 1, "f": 5}, {"e": 3}], "claude-haiku-5-5": [{"e": 6}]}) == pytest.approx(
+        {"e": (4 * 2 + 3 * 6) / 7, "f": 5.0})
+    assert mod.combine({"a": [{"e": 1}, {"e": 3}], "b": [{"e": 6}]}) == {"e": 4.0}
+
+
+def test_instruction_12way_table_costs_whole_passes_and_averages_over_the_choices():
+    mod = _script("judge_instruction_12way")
+    rng = np.random.default_rng(3)
+    names = [f"t{i}" for i in range(40)]
+    proj = {n: float(rng.normal()) for n in names}
+    ax = jtr.AxisDef("x_vs_y", "x", "y", "traits")
+    vkeys = ["v1", "v2"]
+    projections = {"x_vs_y": {"v1": proj, "v2": {n: -p for n, p in proj.items()}}}
+    scores, costs = {}, {}
+    for r in range(10):
+        scores["x_vs_y", "good", r] = dict(proj)                                    # agrees with v1 exactly
+        scores["x_vs_y", "noise", r] = {n: float(rng.normal()) for n in names}
+        costs["x_vs_y", "good", r], costs["x_vs_y", "noise", r] = 0.01 * (r + 1), 0.02
+    passes = {"good": 2, "noise": 2}
+    rho, cost, per_choice = mod.arm_table({"good@x1": {"good": 1}, "good+noise@x2": {"good": 2, "noise": 2}},
+                                          [ax], scores, costs, projections, vkeys, passes=passes)
+    assert rho["good@x1"]["x_vs_y"]["v1"] == pytest.approx(1.0) and rho["good@x1"]["x_vs_y"]["v2"] == pytest.approx(-1.0)
+    assert cost["good@x1"] == pytest.approx((0.15 + 0.40) / 2)                      # a whole pass, either of the two
+    assert cost["good+noise@x2"] == pytest.approx(0.55 + 10 * 0.02)                 # both passes of each judge
+    assert len(per_choice["good@x1"]["v1"]) == 2 and len(per_choice["good+noise@x2"]["v1"]) == 1
+    assert 0 < rho["good+noise@x2"]["x_vs_y"]["v1"] < 1
+
+
+def test_instruction_12way_fits_the_mix_weights_and_checks_them_out_of_sample():
+    mod = _script("judge_instruction_12way")
+    rng = np.random.default_rng(5)
+    axes = [jtr.AxisDef(f"a{i}_vs_b{i}", f"a{i}", f"b{i}", "traits") for i in range(6)]
+    scores, projection = {}, {}
+    for ax in axes:
+        names = [f"t{i}|T" for i in range(60)]
+        proj = {n: float(rng.normal()) for n in names}
+        projection[ax.axis_dir] = proj
+        for r in range(10):       # "good" tracks the projection with a little noise, "noise" does not
+            scores[ax.axis_dir, "good", r] = {n: p + 0.3 * float(rng.normal()) for n, p in proj.items()}
+            scores[ax.axis_dir, "noise", r] = {n: float(rng.normal()) for n in names}
+    spec, passes = {"good": 2, "noise": 1}, {"good": 2, "noise": 2}
+    grid = mod.weight_grid(2)
+    assert len(grid) == 21 and np.allclose(grid.sum(1), 1)
+    assert len(mod.weight_grid(3)) == 231
+    G = mod.fit_rho(spec, axes, scores, projection, grid, passes=passes)
+    fit = mod.fit_weights(G, grid, np.array([True, False] * 3), list(spec))
+    assert fit["weights"]["good"] >= 0.9 and fit["in_sample_gain"] > 0
+    assert set(fit["split_half_weights"]) == {"dev", "held"} and fit["leave_one_axis_out_gain"] > 0
+    # the fitted weights reach the table, the others keep the default
+    projections = {a: {"v": p} for a, p in projection.items()}
+    costs = {k: 0.01 for k in scores}
+    rho_fit, _, _ = mod.arm_table({"m": spec}, axes, scores, costs, projections, ["v"], passes=passes,
+                                  weights={"m": fit["weights"]})
+    rho_def, _, _ = mod.arm_table({"m": spec}, axes, scores, costs, projections, ["v"], passes=passes)
+    assert np.mean([r["v"] for r in rho_fit["m"].values()]) > np.mean([r["v"] for r in rho_def["m"].values()])
+
+
+def test_instruction_12way_descriptions_mode_reads_the_jl_cells_two_passes_each():
+    mod = _script("judge_instruction_12way")
+    d = mod.MODES["descriptions"]
+    assert d.cell("gpt-5.6-luna", 0) == "gpt-5.6-luna@none@b10n20s1jl" and d.cell("claude-haiku-5-5", 1) == "claude-haiku-5-5@b10n20s2jl"
+    assert d.rounds_per_pass == 1 and d.passes == {"gpt-5.6-luna": 4, "claude-haiku-5-5": 2, "gemini-3.1-flash-lite": 2}
+    mod.WITH_JEV, mod.BALANCED = False, False       # the figure before 2026-11-04
+    arms = mod.arms(d)
+    assert len(arms) == 7 * 2 + 2 + 4 and all(k <= d.passes[m] for _, spec in arms.values() for m, k in spec.items())
+    assert "gpt-5.6-luna@b10n20jlx4" in arms and "claude-haiku-5-5@b10n20jlx3" not in arms
+    assert len(mod.replicates({"gpt-5.6-luna": 2, "claude-haiku-5-5": 1}, d.passes, d.rounds_per_pass)) == 6 * 2
+    assert mod.replicates({"a": 1}, {"a": 2}, 1) == [{"a": (0,)}, {"a": (1,)}]
+    assert sorted(len(s) for s in mod.series(d)) == [2] * 6 + [4]
+    assert mod.INSTRUCTIONS.cell("gpt-5.6-luna", 7) == "gpt-5.6-luna@i1_p0n20r7"
+    mod.WITH_JEV, mod.BALANCED = True, True         # the defaults since 2026-11-04: with Jev, balanced
+    assert len(mod.arms(d)) == 26 and sorted(len(s) for s in mod.series(d)) == [2] * 9 + [4]
+    assert len(mod.replicates({"gpt-5.6-luna": 2, "claude-haiku-5-5": 1}, d.passes, d.rounds_per_pass)) == 4 * 2

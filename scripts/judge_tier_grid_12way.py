@@ -12,7 +12,7 @@ import argparse, json, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from assistant_axis import json_metadata
-from assistant_axis.provenance import load_and_register
+from assistant_axis.provenance import CACHE_POLICIES, load_and_register
 from results_analysis import judge_tier_robustness as rob
 
 # (name in labels, the cell prefix under the batched method, the prefix for a reasoning arm, first
@@ -23,7 +23,7 @@ JUDGES = (("Luna", "gpt-5.6-luna@none", "gpt-5.6-luna", 1, 4), ("GPT-6", "gpt-6-
 BLENDS = {"gpt-5.6-luna+claude-haiku-5-5@b10n20x2": "Luna + Haiku N=20",
           "gpt-5.6-luna+gemini-3.1-flash-lite@b10n20x2": "Luna + Gemini N=20",
           "gpt-5.6-luna+claude-haiku-5-5+gemini-3.1-flash-lite@b10n20x2": "Luna + Haiku + Gemini N=20"}
-X_TICKS = (0.01, 0.015, 0.02, 0.03, 0.05, 0.07, 0.1, 0.15, 0.2, 0.3)
+X_TICKS = (0.005, 0.007, 0.01, 0.015, 0.02, 0.03, 0.05, 0.07, 0.1, 0.15, 0.2, 0.3)
 
 
 def dimension_arms(base: str, plain: str, first: int, max_passes: int = 4) -> dict:
@@ -70,12 +70,14 @@ def main() -> None:
     ap.add_argument("--robustness_json")
     ap.add_argument("--output_dir")
     ap.add_argument("--axes_label", default="30 development axes")
+    ap.add_argument("--cache-policy", dest="cache_policy", choices=CACHE_POLICIES, default="warn",
+                    help="what to do when the rho table's recorded inputs have changed: strict | warn (default) | rebuild | off")
     args = ap.parse_args()
     if args.print_cells:
         print(" ".join(figures()["all"][0]))
         return
     inputs: list = []
-    payload, _spec, _check = load_and_register(Path(args.robustness_json), dep_key="robustness", inputs=inputs, policy="off")
+    payload, _spec, _check = load_and_register(Path(args.robustness_json), dep_key="robustness", inputs=inputs, policy=args.cache_policy)
     d = rob._unwrap(payload); cfg = d["config"]; out = Path(args.output_dir)
     variants = rob.build_variants(cfg["slots"], cfg["layers"], cfg["regimes"], K=cfg["soft_K"], L=cfg["shear_L"])
     default = cfg["default_variant"]; costs = {m: v["mean_cost"] for m, v in d["models"].items()}
@@ -94,7 +96,7 @@ def main() -> None:
                     f"(default {default})")
         rob.render_figure(out / f"judge_tier_grid_12way_{stem}.png", order, variants, per_variant, frontiers,
                           {m: True for m in cells}, default, len(d["axes"]),
-                          f"{sub}\ncost at real-time list price; soft_K: K={cfg['soft_K']}; soft_shear: L={cfg['shear_L']}",
+                          f"{sub}\ncost at {rob.PRICE_BASIS_LABEL[cfg.get('price_basis', 'list')]}; soft_K: K={cfg['soft_K']}; soft_shear: L={cfg['shear_L']}",
                           inputs, rob.FigureOptions(headline=headline, cell_labels=labels, point_labels=short, series=series,
                                                     label_frontier_only=frontier_only, own_y=True, x_log=True, x_ticks=X_TICKS, x_log_pad=2.0,
                                                     panel_w=panel_w, panel_h=panel_h))

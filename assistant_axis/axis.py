@@ -4,14 +4,39 @@ Assistant axis computation and projection utilities.
 The assistant axis is a direction in activation space that captures the difference
 between role-playing and default assistant behavior in language models.
 
-Formula:
-    axis = mean(default_activations) - mean(pos_3_activations)
+Formula (as pipeline/5_axis.py computes it):
+    axis = mean(default vectors) - nanmean(entity vectors)
 
 Where:
-    - default_activations: activations from neutral system prompts
-    - pos_3_activations: activations from responses fully playing a role (score=3)
+    - the default vector is the mean of every default-prompt activation
+      (pipeline/4_vectors.py, type "mean");
+    - each entity vector is the mean of that role's / trait's /
+      combination's score=3 activations (type "pos_3"), so the second
+      term is a mean of per-entity means: every entity weighs the same,
+      however many score=3 responses it kept.
 
 The axis points FROM role-playing TOWARD default assistant behavior.
+
+Tensor layout (the convention every vector and axis file follows):
+    - legacy, no header slots: (n_layers, hidden_dim)
+    - since the header-token extraction: (n_slots, n_layers, hidden_dim),
+      slot 0 = mean over the response's tokens ("body-mean"), slots
+      1..N = the assistant header tokens listed in
+      metadata["header_tokens"], in that order (see :func:`slot_labels`;
+      the 8-slot Qwen files have 7: <|im_start|>, assistant, \\n,
+      <think>, \\n\\n, </think>, \\n\\n).  A header slot is NaN where the
+      header was not found, which is why the pipeline averages with
+      nanmean.
+    - layer index i = the output of decoder block i (a forward hook on
+      ``model.layers[i]``), 0-based, no embedding layer -- provided step 2
+      ran with its default ``--layers all``.  The files do not record the
+      layer list, so a step 2 run with a ``--layers`` subset would shift
+      every index silently.
+
+The helpers below that take a ``layer`` index (``project``,
+``project_batch``, ``cosine_similarity_per_layer``,
+``axis_norm_per_layer``, ``compute_axis``) expect the 2-D layout: pass
+``axis[slot]`` for a slotted file.
 
 Example:
     from assistant_axis import load_axis, project
@@ -22,7 +47,7 @@ Example:
 
 import torch
 import numpy as np
-from typing import List, Union, Optional
+from typing import List, Optional, Sequence, Union
 
 
 def compute_axis(
@@ -66,7 +91,9 @@ def project(
 
     Args:
         activations: Tensor of shape (n_layers, hidden_dim) or (hidden_dim,)
-        axis: Tensor of shape (n_layers, hidden_dim)
+        axis: Tensor of shape (n_layers, hidden_dim); for a slotted
+              (n_slots, n_layers, hidden_dim) axis pass ``axis[slot]``
+              (indexing the 3-D tensor with ``layer`` would pick a slot)
         layer: Layer index to use for projection
         normalize: Whether to normalize the axis before projection
 
@@ -164,15 +191,22 @@ def save_axis(
     """
     Save axis to a .pt file.
 
+    Written through :func:`assistant_axis.atomic_io.torch_save_with_retry`
+    (TMPDIR staging, verified copy, atomic rename), like every other axis
+    and vector write; a plain ``torch.save`` here could leave a truncated
+    file on /workspace.
+
     Args:
-        axis: Axis tensor of shape (n_layers, hidden_dim)
+        axis: Axis tensor of shape (n_layers, hidden_dim) or
+              (n_slots, n_layers, hidden_dim)
         path: Path to save to
         metadata: Optional metadata dict to include
     """
+    from .atomic_io import torch_save_with_retry
     save_dict = {"axis": axis}
     if metadata:
         save_dict["metadata"] = metadata
-    torch.save(save_dict, path)
+    torch_save_with_retry(save_dict, path)
 
 
 def load_axis(path: str) -> torch.Tensor:
@@ -271,6 +305,98 @@ def slot_labels(metadata: Optional[dict]) -> List[str]:
     if not metadata or "header_tokens" not in metadata:
         return ["body-mean"]
     return ["body-mean"] + list(metadata["header_tokens"])
+
+
+class SlotLayoutError(ValueError):
+    """A tree whose header slots are not the layout a script's slot numbers
+    or slot names assume."""
+
+
+SLOT_HINT = "pass --slot explicitly to use another layout"
+
+
+def require_header_layout(
+    metadata: Optional[dict],
+    expected: Optional[Sequence[str]] = None,
+    where: str = "",
+    hint: str = SLOT_HINT,
+) -> None:
+    """Refuse a tree whose header tokens are not ``expected`` (default: the
+    seven of Qwen3's non-thinking header, the 8slot layout,
+    ``assistant_axis.model_families.QWEN3_NON_THINKING_HEADER_TOKENS``).
+
+    For the scripts whose default slot (``DEFAULT_SLOT = 6``, the
+    ``</think>`` position; ``7`` for the PC round trip) or whose slot names
+    are Qwen3's: on a tree with another header (another model family, the
+    multi-model plan of 2026-10-13) such a number points at another token,
+    silently, or past the end.  A script calls this only when its default or
+    its names are used, so an explicit ``--slot`` on another tree still works
+    (and :func:`slot_labels` names the slot).  Raises
+    :class:`SlotLayoutError` naming ``where``, the tree's header and the
+    expected one, and ending with ``hint`` (a script whose slot names are
+    used on every run, with no ``--slot``, passes its own)."""
+    if expected is None:
+        from .model_families import QWEN3_NON_THINKING_HEADER_TOKENS
+        expected = QWEN3_NON_THINKING_HEADER_TOKENS
+    got = list((metadata or {}).get("header_tokens") or [])
+    if got != list(expected):
+        raise SlotLayoutError(
+            f"{where + ': ' if where else ''}this tree's header slots are {got!r} "
+            f"({len(got)} tokens), not the {len(expected)} the script's slot numbers and names "
+            f"assume ({list(expected)!r}, Qwen3's layout); {hint}")
+
+
+def is_qwen3_header(metadata: Optional[dict]) -> bool:
+    """Whether ``metadata["header_tokens"]`` are the seven of Qwen3's
+    non-thinking header (the 8slot layout)."""
+    from .model_families import QWEN3_NON_THINKING_HEADER_TOKENS
+    return list((metadata or {}).get("header_tokens") or []) == list(
+        QWEN3_NON_THINKING_HEADER_TOKENS)
+
+
+TREE_VECTOR_SUBDIRS = ("traits/vectors", "roles/vectors", "combinations/vectors",
+                       "default/vectors")
+
+
+def tree_vector_metadata(data_dir,
+                         subdirs: Sequence[str] = TREE_VECTOR_SUBDIRS) -> Optional[dict]:
+    """The metadata of one vector of an extraction tree: the first non-empty
+    ``*.pt`` (sorted) of the first of ``subdirs`` under ``data_dir`` that has
+    one, or None when there is none (a zero-byte file is never a vector; it
+    is skipped, not retried).  One file stands for the tree: step 5 refuses
+    vectors whose header, model or family differ.  Loads one vector file
+    (about 5-10 MB)."""
+    from pathlib import Path
+    root = Path(data_dir)
+    for sub in subdirs:
+        for f in sorted((root / sub).glob("*.pt")):
+            if f.stat().st_size == 0:
+                continue
+            _, meta = load_role_vector(str(f))
+            return dict(meta or {})
+    return None
+
+
+def require_tree_header_layout(
+    data_dir,
+    where: str = "",
+    expected: Optional[Sequence[str]] = None,
+    subdirs: Sequence[str] = TREE_VECTOR_SUBDIRS,
+    hint: str = SLOT_HINT,
+) -> dict:
+    """:func:`require_header_layout` on the metadata of ``data_dir``'s
+    vectors (:func:`tree_vector_metadata`); returns that metadata.  A tree
+    with no vector to read is not checked (a WARNING; the script's own
+    checks report a missing tree), and ``{}`` is returned."""
+    meta = tree_vector_metadata(data_dir, subdirs)
+    if meta is None:
+        import logging
+        logging.getLogger(__name__).warning(
+            "%s: no vector under %s to read the header layout from; slot layout not checked",
+            where or "require_tree_header_layout", data_dir)
+        return {}
+    require_header_layout(meta, expected, where, hint)
+    return meta
 
 
 def aggregate_role_vectors(

@@ -4,7 +4,9 @@ For Konstantinos and the Claude sessions working with him.  Roger and Claude
 made these changes on 2026-11-01 and 02, starting from `personas-konstantinos` at
 c7743467, and merged your later commits (9b3d6a5c, ccf7bbb3) back in.  This
 file explains what the pull request contains, the decisions behind it, and how
-to carry on from here.  Section 3d says where the method ended up.  The per-plot notes hold the full numbers:
+to carry on from here.  Section 3d says where the method stood on 2 November, and section 3e
+what changed on 3 and 4 November (instruction judging, balanced pole order, Jev as a fourth
+judge, response judging).  The per-plot notes hold the full numbers:
 [`pareto_pooled_61axes_notes.md`](../../roger/axis_judge_experiments/pareto_pooled_61axes_notes.md)
 and
 [`pareto_pooled_20axes_notes.md`](../../roger/axis_judge_experiments/pareto_pooled_20axes_notes.md).
@@ -396,6 +398,53 @@ cells marked done, which the averaging took in (now `judge.FAILED`, the cell sta
 refuses a short source).  And Luna sometimes writes `SCORE: thirty-five`: 978 ratings of 1.4 million,
 now parsed and filled into the cells from their logs, which moves no mean ρ in the third decimal
 except where the tables above were rebuilt.
+
+## 3e. 2026-11-03 and 04: instruction judging, balanced pole order, Jev, and responses
+
+Shorter here; each item links to the full account.
+
+- **Instruction judging (2026-11-03).**  Every judge judges each of an entity's five instructions,
+  one instruction per entity per call (`i1_p0`), 20 entities a call:
+  [`judge_instruction_grid.py`](../../scripts/judge_instruction_grid.py) `--design rounds`.  Roger's
+  rule, against choosing among some twenty arms a few thousandths apart: one pass of every model.
+  Luna + Haiku + Gemini at 1x scored 0.777 at $0.178 an axis, against Luna alone at 0.767
+  ([`results_analysis/README.md`](../../results_analysis/README.md) § "Instruction judging: the
+  settled method").  The same rule put Gemini into description judging: the trio at 2x, 0.752 at
+  $0.076.
+- **Prices and the frontier.**  Cost is now the price actually paid: each judge's Flex or Batch
+  rate, with cached tokens priced.  Gemini runs through its Batch API
+  ([`gemini_batch.py`](../../assistant_axis/gemini_batch.py)).  A point is on the Pareto frontier
+  only when it is on the upper convex hull of mean ρ against cost.
+- **Pole order balanced (2026-11-04, Roger's rule).**  Every axis prompt names one pole first, and
+  the order matters: Luna's repeats in the same order agree more than in opposite orders, and on
+  axes with a morally good pole Luna scores better with that pole high.  So no judging runs in one
+  fixed order any more.  Descriptions take one pass each way, instructions follow Roger's table
+  (`judge_tier_cost_eval.INSTRUCTION_DIRECTIONS`), and responses take a coin per call.  **Scores made
+  before 2026-11-04 are in the pair list's order**, which favoured the 18 moral axes by about
+  +0.03 ρ on descriptions.  Account: § 4c of
+  [`response_judging_plan.md`](./response_judging_plan.md).
+- **Jev (TypeSafe AI) as a fourth judge (2026-11-04).**  Batched, 160 entities a request, one
+  yes/no-probability question per entity ("nearer the second end than most of the other
+  entries?"), at $0.042 per million input tokens with output free.  Alone it scores above every
+  other judge (descriptions 0.745 against Luna's 0.709 at one pass), and its fitted weight gives
+  it 71% of the blend: [`jev_judging.md`](./jev_judging.md).  Its API serves only `jev-latest`,
+  so the drivers ask for that and stop if the answers come from another version than
+  `jev-1.14.0`.  **The standard since then, in both modes: Luna + Haiku +
+  Gemini + Jev, two passes each, one each way, weighted 4 : 3 : 3 : 24.**  Descriptions: 0.766 at
+  $0.084 an axis; instructions: 0.789 at $0.398.  Luna + Haiku + Jev at 2x is within 0.0005 of
+  that in both modes, for about 60% of the cost; the figures are
+  [`judge_description_12way.png`](../../roger/axis_judge_experiments/instruction_judging_12way/judge_description_12way.png)
+  and
+  [`judge_instruction_12way.png`](../../roger/axis_judge_experiments/instruction_judging_12way/judge_instruction_12way.png),
+  with [notes](../../roger/axis_judge_experiments/instruction_judging_12way/notes.md).
+- **Response judging** (in progress, 12 axes): the batched method with a cached prefix, what
+  share of the responses to judge, and the cost Pareto:
+  [`response_judging_plan.md`](./response_judging_plan.md) and
+  [`judge_response_pareto.png`](../../roger/axis_judge_experiments/response_pareto/judge_response_pareto.png).
+  Its hollow extrapolated points (1/3 and all of the responses) are unreliable.  The round-robin
+  ensembles' extrapolated segments rise more steeply than their measured curves, and the 1.86
+  correction was fitted on Luna alone.  The measured points, from 1/45 to 1/9 of the responses,
+  are sound.
 
 ## 4. Open questions
 

@@ -475,3 +475,39 @@ class TestCohortMeanCurves:
         }
         avg_rs, _, _ = cohort_mean_curves(rho_table, pair_keys, min_axes=1)
         assert isinstance(avg_rs[0], float)
+
+
+class TestTierJudgeWeights:
+    """Luna 4, any other judge 3 (Roger, 2026-11-03)."""
+
+    def test_weights_by_model_whatever_the_cell_label(self):
+        from assistant_axis.judge_score_combine import tier_judge_weights
+        assert tier_judge_weights(["gpt-5.6-luna", "claude-haiku-5-5"]) == pytest.approx(
+            {"gpt-5.6-luna": 4 / 7, "claude-haiku-5-5": 3 / 7})
+        trio = tier_judge_weights(["gpt-5.6-luna@none@b10n20x2", "claude-haiku-5-5@b10n20x2", "gemini-3.1-flash-lite@b10n20x2"])
+        assert list(trio.values()) == pytest.approx([0.4, 0.3, 0.3])
+        assert tier_judge_weights(["claude-haiku-5-5", "gemini-3.1-flash-lite"]) == pytest.approx(
+            {"claude-haiku-5-5": 0.5, "gemini-3.1-flash-lite": 0.5})
+
+    def test_combine_renormalises_over_the_judges_present(self):
+        from assistant_axis.judge_score_combine import combine_tier_judges
+        out = combine_tier_judges({"gpt-5.6-luna": {"a": 1.0, "b": 2.0},
+                                   "claude-haiku-5-5": {"a": 8.0, "c": 5.0, "d": None}})
+        assert out == pytest.approx({"a": (4 * 1 + 3 * 8) / 7, "b": 2.0, "c": 5.0})
+        assert combine_tier_judges({}) == {}
+
+
+def test_tier_judge_weights_take_a_modes_own_weights():
+    """2026-11-04: Jev's weight is fitted per judging mode (TIER_JUDGE_WEIGHTS_BY_MODE); with no mode, or a mode
+    without its own entry, a judge takes TIER_JUDGE_WEIGHTS or the default 3."""
+    from assistant_axis.judge_score_combine import combine_tier_judges, tier_judge_weights
+    four = ["gpt-5.6-luna", "claude-haiku-5-5", "gemini-3.1-flash-lite", "jev-1.14.0"]
+    w = tier_judge_weights(four, "descriptions")
+    assert w["jev-1.14.0"] / w["gpt-5.6-luna"] == pytest.approx(24 / 4) and w["claude-haiku-5-5"] / w["gpt-5.6-luna"] == pytest.approx(3 / 4)
+    wi = tier_judge_weights(four, "instructions")        # fitted the same way on the balanced instruction cells
+    assert wi["jev-1.14.0"] / wi["gpt-5.6-luna"] == pytest.approx(24 / 4) and wi["gemini-3.1-flash-lite"] == pytest.approx(3 / 34)
+    plain = tier_judge_weights(four)
+    assert plain["jev-1.14.0"] / plain["gpt-5.6-luna"] == pytest.approx(3 / 4)
+    assert tier_judge_weights(["gpt-5.6-luna", "jev-1.14.0@x"], "responses")["jev-1.14.0@x"] == pytest.approx(3 / 7)
+    per = {"gpt-5.6-luna": {"a": 0.0}, "jev-1.14.0": {"a": 28.0}}
+    assert combine_tier_judges(per, mode="descriptions")["a"] == pytest.approx(28.0 * 24 / 28)

@@ -1462,11 +1462,15 @@ def _make_axis_spec(
 
 
 class TestRubricsRenderDisplayForm:
-    """RUBRIC_VERSION v3: entity names are rendered in display form
-    (``aligned artificial intelligence``) inside the prompt body
-    instead of file-name form (``aligned_artificial_intelligence``).
-    See AGENT_NOTES "File-name vs display-name convention" /
-    "LLM-prompt sites are display sites".
+    """Entity names in the rubric body.  v3 (May 2026) rendered them in
+    the mechanical display form (``aligned artificial intelligence``,
+    ``systems thinker``); v4 (2026-10-09, W19, Roger) renders the judge
+    display form (``judge_label``): the stored label (``systems-thinker``,
+    ``devil's advocate``) with a standard's suffix in the long form
+    (``careless (from HEXACO)``), and the mechanical form for a name the
+    corpus does not know.  Expectations changed from v3 to v4 on purpose
+    (the spec changed, not the code under test).
+    See AGENT_NOTES "Judge prompts show the judge display form".
     """
 
     def test_static_rubric_renders_name_with_spaces(self):
@@ -1476,12 +1480,12 @@ class TestRubricsRenderDisplayForm:
             name="aligned_artificial_intelligence",
             content="...some description...",
         )
-        # Display form appears in the body
+        # not a trait in the corpus: the mechanical form, as under v3
         assert "aligned artificial intelligence" in prompt
         # File form does NOT appear in the body
         assert "aligned_artificial_intelligence" not in prompt
 
-    def test_static_rubric_renders_examples_with_spaces(self):
+    def test_static_rubric_renders_examples_in_judge_form(self):
         spec = _make_axis_spec(
             pos_examples=("systems_thinker", "stream_of_consciousness"),
             neg_examples=("analytical",),
@@ -1489,27 +1493,69 @@ class TestRubricsRenderDisplayForm:
         prompt = ajc.build_static_prompt(
             spec, etype="traits", name="patient", content="x",
         )
-        # The two multi-word example names appear with spaces, not
-        # underscores
-        assert "systems thinker" in prompt
-        assert "stream of consciousness" in prompt
-        # NB: the substring ``systems_thinker`` would also match
-        # ``systems thinker`` if we were sloppy with assertions, so
-        # check for the underscore form explicitly.
+        # The two multi-word example names appear as their stored labels
+        assert "systems-thinker" in prompt
+        assert "stream-of-consciousness" in prompt
         assert "systems_thinker" not in prompt
         assert "stream_of_consciousness" not in prompt
 
-    def test_static_rubric_renders_axis_name_with_spaces(self):
+    def test_static_rubric_renders_axis_name_from_the_pole_labels(self):
         spec = _make_axis_spec(
             axis_name="systems_thinker (+) vs analytical (-) [traits]",
         )
         prompt = ajc.build_static_prompt(
             spec, etype="traits", name="patient", content="x",
         )
-        # The pair-mode axis_name's underscored pole name is now
-        # rendered with a space.  ``[traits]`` (no underscores) is
-        # passed through unchanged.
-        assert "systems thinker (+) vs analytical (-) [traits]" in prompt
+        # The pair-mode axis_name is composed from the two poles' judge
+        # labels; ``(+)``, ``(-)`` and ``[traits]`` are kept.
+        assert "## Axis: systems-thinker (+) vs analytical (-) [traits]\n" in prompt
+
+    def test_standards_pair_header_nests_parentheses(self):
+        spec = _make_axis_spec(
+            axis_name="careless_hexaco (+) vs conscientious_hexaco (-) [traits]",
+            pos_examples=("careless_hexaco",), neg_examples=("conscientious_hexaco",),
+        )
+        prompt = ajc.build_static_prompt(
+            spec, etype="traits", name="secular_rational_inglehart_welzel", content="x",
+        )
+        assert ("## Axis: careless (from HEXACO) (+) vs conscientious (from HEXACO) (-) [traits]\n"
+                in prompt)
+        assert "traits that score near -3 include: conscientious (from HEXACO)\n" in prompt
+        assert "Traits that score near +3 include: careless (from HEXACO)\n" in prompt
+        assert "**secular-rational (from the Inglehart-Welzel map)**: x" in prompt
+
+    def test_role_entity_takes_its_override(self):
+        spec = _make_axis_spec(
+            axis_name="instrumentally_aligned_ai (+) vs paperclip_maximizer (-) [roles]",
+            pos_examples=("instrumentally_aligned_ai",), neg_examples=("paperclip_maximizer",),
+        )
+        prompt = ajc.build_static_prompt(spec, etype="roles", name="devils_advocate", content="x")
+        assert "**devil's advocate**: x" in prompt
+        assert ("## Axis: instrumentally-aligned AI (+) vs paperclip maximizer (-) [roles]\n"
+                in prompt)
+
+    def test_free_text_axis_name_keeps_the_mechanical_form(self):
+        spec = _make_axis_spec(axis_name="pc3_from_whitened_space")
+        prompt = ajc.build_static_prompt(spec, etype="traits", name="patient", content="x")
+        assert "## Axis: pc3 from whitened space\n" in prompt
+
+    def test_pair_header_is_the_v3_header_where_both_poles_are_plain(self):
+        """Every pair in the tracked pair lists: the v4 header equals the
+        v3 one (mechanical ``_`` -> space over the whole string) exactly
+        when both poles' judge labels equal their mechanical forms, which
+        is what the scoped v3 -> v4 equivalence edges rely on."""
+        from assistant_axis.entity_id import display_form_name, judge_label
+        root = Path(__file__).resolve().parents[2] / "roger" / "axis_judge_experiments"
+        pairs = set()
+        for path in root.glob("pair_list*.json"):
+            for p in json.loads(path.read_text()):
+                pairs.add((p["pos"], p["neg"], p.get("pair_type", "traits")))
+        assert len(pairs) > 30
+        for pos, neg, kind in pairs:
+            name = f"{pos} (+) vs {neg} (-) [{kind}]"
+            plain = (judge_label(pos, kind) == display_form_name(pos)
+                     and judge_label(neg, kind) == display_form_name(neg))
+            assert (ajc.judge_axis_name(name) == display_form_name(name)) == plain, name
 
     def test_static_rubric_strips_self_example(self):
         """Per-call leakage prevention: when scoring entity X, X is
@@ -1525,14 +1571,15 @@ class TestRubricsRenderDisplayForm:
         )
         # systems_thinker is the entity being scored -> removed from
         # the examples list.  But it still appears in the entity
-        # heading (``**systems thinker**: x``).
+        # heading (``**systems-thinker**: x``).
         # Count by looking at the example sentence.
         ex_line = next(
             line for line in prompt.split("\n")
             if "Traits that score near +3 include" in line
         )
-        assert "systems thinker" not in ex_line
-        assert "stream of consciousness" in ex_line
+        assert "systems-thinker" not in ex_line
+        assert "stream-of-consciousness" in ex_line
+        assert "**systems-thinker**: x" in prompt
 
     def test_response_rubric_renders_examples_with_spaces(self):
         """Response-mode rubric body anonymises ``{name}`` (v2+),
@@ -1552,10 +1599,10 @@ class TestRubricsRenderDisplayForm:
             name="patient",  # not in pos/neg examples
             items=items,
         )
-        # Header carries display-form; v2 body does not name entity.
-        assert "systems thinker" in prompt
+        # Header carries the judge form; v2 body does not name entity.
+        assert "systems-thinker" in prompt
         assert "systems_thinker" not in prompt
-        assert "systems thinker (+) vs analytical (-) [traits]" in prompt
+        assert "systems-thinker (+) vs analytical (-) [traits]" in prompt
 
     def test_response_rubric_no_name_leak_in_body(self):
         """Sanity check: v2 anonymisation still in effect (the entity
@@ -1595,11 +1642,12 @@ class TestRubricsRenderDisplayForm:
         assert "**patient**: x" in prompt
         assert "constructive (+) vs destructive (-) [traits]" in prompt
 
-    def test_rubric_version_is_v3(self):
+    def test_rubric_version_is_v5(self):
         """Bookkeeping: bumping behaviour MUST be paired with
-        bumping ``RUBRIC_VERSION`` so caches written under v3 are
-        identifiable in provenance."""
-        assert ajc.RUBRIC_VERSION == "v3"
+        bumping ``RUBRIC_VERSION`` so caches written under each version
+        are identifiable in provenance.  v5 (2026-10-12, walk-through
+        D5): the parser requires exactly one SCORE marker; was v4."""
+        assert ajc.RUBRIC_VERSION == "v5"
 
 
 # ---------------------------------------------------------------------------
@@ -1742,3 +1790,77 @@ class TestPoleInstructionPath:
             assert not p.exists()
         finally:
             clear_corpus_display_cache()
+
+
+# ---------------------------------------------------------------------------
+# Corpus content hashes in the recorded inputs (housekeeping item 3, 2026-10-10)
+# ---------------------------------------------------------------------------
+
+class TestCorpusContentInputs:
+    """``corpus_instructions`` and ``pole_instructions`` carry per-entity
+    hashes of the fields each mode reads, over the entities load_corpus reads
+    (a vector and a file)."""
+
+    @staticmethod
+    def _tree(tmp_path: Path):
+        data = tmp_path / "data"
+        vecs = tmp_path / "ds"
+        for kind in ("traits", "roles"):
+            (data / kind / "instructions").mkdir(parents=True)
+            (vecs / kind / "vectors").mkdir(parents=True)
+        for stem, doc in {
+            "lazy": {"positive_label": "lazy", "negative_label": "industrious",
+                     "description": "Doing little.", "instruction": [{"pos": "Rest.", "neg": "Work."}]},
+            "industrious": {"positive_label": "industrious", "negative_label": "lazy",
+                            "description": "Working hard.", "instruction": [{"pos": "Work.", "neg": "Rest."}]},
+            "no_vector": {"positive_label": "no vector", "description": "x", "instruction": [{"pos": "y"}]},
+        }.items():
+            (data / "traits" / "instructions" / f"{stem}.json").write_text(json.dumps(doc))
+        for stem in ("lazy", "industrious", "default", "no_file"):
+            (vecs / "traits" / "vectors" / f"{stem}.pt").write_bytes(b"0")
+        return data, vecs
+
+    @staticmethod
+    def _args(data: Path, vecs: Path) -> argparse.Namespace:
+        return argparse.Namespace(
+            provider="anthropic", judge_model="m", temperature=0.0, max_tokens=10,
+            axis_file=None, pair=("lazy", "industrious"), pair_type="traits",
+            pos_pole=None, neg_pole=None, instructions_dir=str(data),
+            data_dir=str(vecs), layer=25)
+
+    def test_fields_per_mode_and_entities_with_a_vector_only(self, tmp_path):
+        data, vecs = self._tree(tmp_path)
+        args = self._args(data, vecs)
+        assert ajc._corpus_entities(args) == [("traits", "industrious"), ("traits", "lazy")]
+        for mode in ("descriptions", "instructions"):
+            specs = {s.dep_key: s for s in ajc._build_axis_judge_inputs(args, mode=mode)}
+            corpus = specs["corpus_instructions"]
+            assert corpus.content["fields"] == list(ajc.CORPUS_CONTENT_FIELDS[mode])
+            assert list(corpus.content["entities"]) == ["industrious|T", "lazy|T"]
+            # the metadata set is still every instruction JSON
+            assert len(corpus.member_paths) == 3
+            pole = specs["pole_instructions"]
+            assert pole.content["fields"] == ["positive_label", "description"]
+            assert list(pole.content["entities"]) == ["industrious|T", "lazy|T"]
+        assert ajc.CORPUS_CONTENT_FIELDS["descriptions"] == ("positive_label", "description")
+        for mode in ("instructions", "responses", "correlations"):
+            assert "instruction[*].pos" in ajc.CORPUS_CONTENT_FIELDS[mode]
+        assert not any("neg" in f or "questions" in f
+                       for fs in ajc.CORPUS_CONTENT_FIELDS.values() for f in fs)
+
+    def test_a_neg_edit_leaves_the_instruction_cache_current(self, tmp_path):
+        import os
+        from assistant_axis.provenance import validate_recorded
+        data, vecs = self._tree(tmp_path)
+        specs = ajc._build_axis_judge_inputs(self._args(data, vecs), mode="instructions")
+        corpus = [s for s in specs if s.dep_key in ("corpus_instructions", "pole_instructions")]
+        p = data / "traits" / "instructions" / "lazy.json"
+        doc = json.loads(p.read_text())
+        doc["instruction"][0]["neg"] = "Toil."
+        doc["arrangement"] = {"kind": "pair", "members": ["industrious", "lazy"]}
+        p.write_text(json.dumps(doc))
+        st = os.stat(p)
+        os.utime(p, (st.st_atime + 10, st.st_mtime + 10))
+        check = validate_recorded(corpus)
+        assert check.ok
+        assert [s.status for s in check.statuses] == ["equivalent_content"] * 2

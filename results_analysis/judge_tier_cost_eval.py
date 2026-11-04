@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
 Score a new judge model against an EXISTING, already-computed axis, without
-recomputing activations, projections, or touching a GPU.
+recomputing activations, projections, or touching a GPU.  The Pareto investigation's
+tool: every rubric, batch size, transport and request setting can be varied.  To
+judge axes by the settled method, run judge_descriptions.py, which runs this.
 
 Motivation: `axis_judge_correlation.py` unconditionally recomputes
 projections from raw activation vectors (`--data_dir` is required), even
@@ -41,8 +43,8 @@ Transports (--transport, default auto; added 2026-11-01):
               <model>:batch, the real-time remainder under <model>.
   * realtime  Every request in real time through the rate limiter (the
               behaviour before 2026-11-01).
-  auto picks batch for an Anthropic model; for an OpenAI model, flex when
-  results_analysis/judge_tier_transport.py's MODEL_CAPABILITIES says OpenAI
+  auto picks batch for an Anthropic model, real time for a Gemini model; for an
+  OpenAI model, flex when assistant_axis/judge.py's MODEL_CAPABILITIES says OpenAI
   takes it, batch when it says OpenAI refuses it, and when it is untested,
   flex with a probe: the first request alone on Flex, and a service-tier
   HTTP 400 switches the model to batch for the run (that request goes into
@@ -50,11 +52,22 @@ Transports (--transport, default auto; added 2026-11-01):
   scores_descriptions.json _provenance (transport, request_settings,
   max_tokens).
 
-Request settings per model (reasoning effort, thinking, effort) come from
-judge_tier_transport.JUDGE_REQUEST_SETTINGS; for the models earlier cells used
-they reproduce the requests this tree's assistant_axis/judge.py sent, so new
-cells extend old ones.  --request_setting [MODEL_FRAGMENT:]key=<json> overrides
-the table for one run.
+Request settings per model (reasoning effort, thinking) come from
+assistant_axis/judge.py's JUDGE_REQUEST_SETTINGS, the requests pipeline step 3
+sends.  --request_setting [MODEL_FRAGMENT:]key=<json> overrides the table for one
+run.  Cells judged before the port of 2026-11-02 went by an adapted table, so to
+extend one: 'gpt-5.6:reasoning_effort=null' for the cells of GPT-5.6 with no @none
+in their label, and 'opus-5:output_config={"effort":"low"}' and the like for those
+of Claude 5.
+
+A batched reply that leaves members unread (a stop after the first lines, a form the parser cannot
+read) is followed by the same prompt again, up to PARSE_RETRIES times, on every transport; each member
+keeps the first reply that gives it a line, and what the last leaves unread goes unscored.  A refusal is
+split instead, and a reply cut at the cap has its repair.  scripts/judge_tier_reask.py does the same for
+cells already written.
+
+Entity names in prompts (--name_format): judge_label, the project's judge display
+form; "mechanical" reproduces the prompts of the cells judged before 2026-11-02.
 
 Reply cap (--max_tokens, default 300 since 2026-11-01, Roger: "200 is clearly
 too low for safety"; 200 before): a reply cut at the cap (Anthropic
@@ -71,8 +84,7 @@ in real time on the standard tier with the model's request settings, at
 replies that reach it), and patch the cell: those scores (a reply cut again
 scores as missing), correlations.json, usage.json (the re-asks under the plain
 model name) and a "repairs" record in the provenance.  The cut entities come
-from the provenance "truncated" list, or for batch cells made before that list
-existed from the batches' results; a cell with neither is reported and left
+from the provenance "truncated" list; a cell without one is reported and left
 alone.
 
 Resume rule: an axis whose <output_dir>/<model>/usage.json exists is skipped
@@ -89,6 +101,17 @@ run's budget), and refuses a log written under other settings.  Calls that
 failed without a charge are not saved and are asked again.  When the cell is
 written, the log is kept compressed as answers.jsonl.gz and removed.  So a run
 can be stopped at any moment and rerun losing at most the requests in flight.
+
+Instruction judging (2026-11-02; the is_* and i1_* rubrics): the same run with the entities' positive
+instructions for text, the scores in scores_instructions.json.  An i1_* cell is one round
+(--instruction_round R): one instruction per entity, each entity going through its instructions in its
+own seeded order, so that no batch holds two of one entity's.
+
+A batched call that comes back with nothing (a refusal, a content flag, an empty reply) has lost all
+its members' scores, usually to one of them, so its two halves are asked, and so on down, on any
+transport; the entity left alone without a score is listed under "refused" in the provenance, and each
+such call is a "refusal" line in the answer log.  Batch API replies are kept in
+batch_replies.jsonl.gz, since a batch's refusals are otherwise on record only as totals.
 
 Live and Flex calls go axis by axis, at most --max_in_flight (200) at a time; a
 progress line per model every five minutes; and when no answer arrives for
@@ -158,11 +181,14 @@ from results_analysis import judge_tier_transport as tt  # noqa: E402
 from results_analysis.judge_tier_transport import provider_for_model  # noqa: E402
 from results_analysis import judge_tier_rubrics as jr  # noqa: E402
 from assistant_axis.judge import RateLimiter, warn_if_low_parse_rate  # noqa: E402
-from assistant_axis.judge_pricing import BATCH_SUFFIX, MultiModelUsage, price_for_model  # noqa: E402
-from assistant_axis.entity_id import parse_entity_id  # noqa: E402
+from assistant_axis.judge_pricing import (  # noqa: E402
+    BATCH_SUFFIX, MultiModelUsage, TokenUsage, anthropic_usage, gemini_usage, openai_usage, price_for_model,
+)
+from assistant_axis.entity_id import entity_id, parse_entity_id  # noqa: E402
 from assistant_axis.atomic_io import atomic_write_bytes, atomic_write_text  # noqa: E402
 from assistant_axis.openai_batch import OpenAIBatchRunner  # noqa: E402
 from assistant_axis.anthropic_batch import AnthropicBatchRunner  # noqa: E402
+from assistant_axis.gemini_batch import GeminiBatchRunner  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -180,6 +206,14 @@ CUSTOM_ID_RE = re.compile(r"[A-Za-z0-9_|-]{1,64}")
 # Coarse, for planning only; the real run records ACTUAL tokens in usage.json.
 EST_IN_PER_ENTITY = 320 + 150
 EST_OUT_PER_ENTITY = 80
+#: With batched judging (the percentile rubric, measured November 2026): the shared prompt, then per entity.
+#: Output per entity is about 22 tokens on the Lunas, 30 on Gemini 3.1, 60 on Haiku 5.5.
+EST_BATCH_HEADER = 320
+EST_BATCH_IN_PER_ENTITY = 40
+EST_BATCH_OUT_PER_ENTITY = 30
+#: Input per entity by what the entity's text is (measured on the May corpus, 2026-11-02).
+EST_BATCH_IN_BY_SOURCE = {"descriptions": EST_BATCH_IN_PER_ENTITY, "instruction_sets": 140, "instruction_rounds": 35,
+                          "responses": 410}     # a kept response is about 392 tokens (May corpus, 2026-11-03)
 DEFAULT_BATCH_FALLBACK_MAX = 2000
 #: The judge's reply cap (--max_tokens); 200 until 2026-11-01 (Roger, 2026-11-01:
 #: "200 is clearly too low for safety").
@@ -206,14 +240,25 @@ EXIT_INCOMPLETE = 4
 #: apart, before leaving them for a rerun.
 REASK_ROUNDS = 3
 REASK_SLEEP_S = 60.0
+#: How many times a batched reply that left members unread is asked again, the same prompt, before they go
+#: unscored: these judges run at temperature 1, so a re-ask is a new sample (Roger, 2026-11-03: "at least a
+#: couple of times"; Luna stopped right after a score in words in 7 of 6,960 replies, Haiku wrote no colon in 3).
+PARSE_RETRIES = 3
 #: The environment variable that counts restarts after a stall across execs.
 RESTART_ENV = "JUDGE_TIER_EVAL_STALL_RESTARTS"
 #: Per-cell answer log (see "Saved answers" in the docstring).
 ANSWERS_PARTIAL = "answers.partial.jsonl"
 ANSWERS_ARCHIVE = "answers.jsonl.gz"
+#: Batch API replies as they are collected, kept apart from the answer log, which a rerun resumes from.
+BATCH_REPLIES = "batch_replies.partial.jsonl"
+BATCH_REPLIES_ARCHIVE = "batch_replies.jsonl.gz"
 CHECKPOINT_VERSION = 1
 #: Header fields an answer log must share with the run that resumes it.
-CHECKPOINT_KEYS = ("version", "judge_model", "cell_label", "rubric_version", "request_settings", "max_tokens")
+CHECKPOINT_KEYS = ("version", "judge_model", "cell_label", "rubric_version", "request_settings", "max_tokens",
+                   "name_format", "swap_poles", "directions", "direction_pass", "stack", "stack_seed")
+#: What an answer log's header means by leaving a key out: it predates the key.
+CHECKPOINT_DEFAULTS = {"name_format": "mechanical", "swap_poles": False, "directions": "own", "direction_pass": 0,
+                       "stack": 0, "stack_seed": 1}
 
 
 def load_pole_description(instructions_dir: Path, pair_type: str, name: str) -> str:
@@ -228,6 +273,137 @@ def load_entity_description(instructions_dir: Path, etype: str, name: str) -> Op
         return None
     with open(path) as f:
         return json.load(f).get("description")
+
+
+def load_entity_instructions(instructions_dir: Path, etype: str, name: str) -> Optional[Tuple[str, ...]]:
+    """An entity's positive instructions, in file order; None when it has no file or none."""
+    path = instructions_dir / etype / "instructions" / f"{name}.json"
+    if not path.exists():
+        return None
+    with open(path) as f:
+        return tuple(x["pos"] for x in json.load(f).get("instruction") or [] if x.get("pos")) or None
+
+
+def instruction_of_round(instructions: Sequence[str], etype: str, name: str, round_: int) -> str:
+    """The instruction an entity shows in a round: rounds 0 to n-1 go through all n in an order seeded
+    by the entity, so that one round's instructions are not all the first of their files, and every
+    arm and axis shows the same one."""
+    order = list(range(len(instructions)))
+    random.Random(f"instruction order|{etype}|{name}").shuffle(order)
+    return instructions[order[round_ % len(order)]]
+
+
+def cell_usage_path(d: Path) -> Path:
+    """The usage file that says what a cell's design costs: its own, or, for a cell re-asked in part from
+    another (``reasked_from``, scripts/judge_tier_reask.py), whose usage.json holds only the re-asks, that one's."""
+    d = Path(d)
+    source = json.loads(cell_scores_path(d).read_text()).get("_provenance", {}).get("reasked_from")
+    return d.parent / source / "usage.json" if source else d / "usage.json"
+
+
+#: Response judging (an r1_* rubric; set in main_async): the pipeline tree holding
+#: ``<kind>/responses/<entity>.jsonl`` and ``<kind>/scores/<entity>.json`` (--responses_dir); which third of
+#: an entity's questions this cell judges (--response_split M --response_part K: the questions with
+#: (q + entity rank) % M == K; part None for all); and a cut on the answer text in characters
+#: (--response_chars; None for whole).
+RESPONSES_DIR: Optional[Path] = None
+#: With --axes_per_call: judge only these members of each group (--axis_index), one axis per call with r1_pn,
+#: several with rk_pn, so that every run sends the same batches and a cached prefix is read back.
+AXIS_INDEX: Optional[Tuple[int, ...]] = None
+RESPONSE_SPLIT = 3
+RESPONSE_PART: Optional[int] = None
+RESPONSE_CHARS: Optional[int] = None
+RESPONSE_CUT_MARK = " […]"
+
+
+def load_entity_responses(responses_dir: Path, etype: str, name: str) -> Optional[List[Tuple[int, int, str, str]]]:
+    """An entity's kept responses, ``(instruction p, question q, question text, answer)`` for every ``pos``
+    item step 3 scored 3, in file order; None when the entity has no response file or nothing kept."""
+    path = responses_dir / etype / "responses" / f"{name}.jsonl"
+    scores_path = responses_dir / etype / "scores" / f"{name}.json"
+    if not path.exists() or not scores_path.exists():
+        return None
+    with open(scores_path) as f:
+        kept = json.load(f)
+    out: List[Tuple[int, int, str, str]] = []
+    with open(path) as f:
+        for line in f:
+            if not line.strip():
+                continue
+            rec = json.loads(line)
+            if rec.get("label") != "pos":
+                continue
+            p, q = int(rec["prompt_index"]), int(rec["question_index"])
+            if kept.get(f"pos_p{p}_q{q}") != 3:
+                continue
+            answer = rec["conversation"][-1]["content"]
+            if RESPONSE_CHARS is not None and len(answer) > RESPONSE_CHARS:
+                answer = answer[:RESPONSE_CHARS].rstrip() + RESPONSE_CUT_MARK
+            out.append((p, q, rec["question"], answer))
+    return out or None
+
+
+def response_item_key(name: str, p: int, q: int) -> str:
+    """The key of one response in a cell's scores: the entity's projection key, its instruction and question."""
+    return f"{name}|p{p}q{q}"
+
+
+def response_item_entity(key: str) -> str:
+    return key.rsplit("|", 1)[0]
+
+
+def response_question(key: str) -> int:
+    return int(key.rsplit("q", 1)[1])
+
+
+def entity_text_loader() -> Any:
+    """``load(instructions_dir, etype, name)``: the text this run's rubric judges an entity by."""
+    if RUBRIC.text_source == "descriptions":
+        return load_entity_description
+    if RUBRIC.text_source == "instruction_sets":
+        return load_entity_instructions
+    if RUBRIC.text_source == "responses":
+        return lambda _dir, etype, name: load_entity_responses(RESPONSES_DIR, etype, name)
+
+    def load(instructions_dir: Path, etype: str, name: str) -> Optional[str]:
+        instructions = load_entity_instructions(instructions_dir, etype, name)
+        return instruction_of_round(instructions, etype, name, INSTRUCTION_ROUND) if instructions else None
+    return load
+
+
+def response_items(entities: Sequence[Tuple[str, str, Any]], part: Optional[int],
+                   split: int = RESPONSE_SPLIT) -> List[Tuple[str, str, Any]]:
+    """The response items of ``entities`` (each ``(etype, name, [(p, q, question, answer), ...])``), one
+    ``(etype, key, (question, answer))`` per kept response: all of them, or, with ``part``, the entity's
+    questions with ``(q + rank) % split == part`` (Roger's coverage, 2026-11-03, with split 3: the thirds go
+    to the judges round-robin over the entities, ``rank`` the entity's place in the sorted names, so that
+    every response is judged once at the 1/3 level and each judge sees every entity on a third of its
+    questions; split 9's parts 0, 3 and 6 lie inside split 3's part 0, so a ninth is a subsample of a third)."""
+    ranks = {name: r for r, name in enumerate(sorted(name for _, name, _ in entities))}
+    out: List[Tuple[str, str, Any]] = []
+    for etype, name, items in entities:
+        for p, q, question, answer in items:
+            if part is None or (q + ranks[name]) % split == part:
+                out.append((etype, response_item_key(name, p, q), (question, answer)))
+    return out
+
+
+def entity_means(scores: Dict[str, float]) -> Dict[str, float]:
+    """Per-entity mean of response-item scores (``name|p..q..`` keys to ``name``)."""
+    sums: Dict[str, List[float]] = {}
+    for key, v in scores.items():
+        sums.setdefault(response_item_entity(key), []).append(v)
+    return {name: sum(v) / len(v) for name, v in sorted(sums.items())}
+
+
+def cell_scores_path(d: Path) -> Path:
+    """A finished cell's scores file: ``scores_instructions.json`` for instruction judging,
+    ``scores_responses.json`` for response judging, ``scores_descriptions.json`` otherwise."""
+    for mode in ("instructions", "responses"):
+        p = Path(d) / f"scores_{mode}.json"
+        if p.exists():
+            return p
+    return Path(d) / "scores_descriptions.json"
 
 
 # ---------------------------------------------------------------------------
@@ -247,7 +423,10 @@ class AxisJob:
     projections: Dict[int, Dict[str, Dict[str, float]]] = field(default_factory=dict, repr=False)
     entities: List[Tuple[str, str, str]] = field(default_factory=list, repr=False)
     missing: List[str] = field(default_factory=list, repr=False)
-    axis_spec: Optional[AxisSpec] = field(default=None, repr=False)
+    axis_spec: Optional[Any] = field(default=None, repr=False)
+    #: A multi-axis job (--axes_per_call, the rk_* rubrics): the axes judged together in each call; the
+    #: job's own cell holds the answer logs and every item's k scores, each member gets its own cell.
+    members: List["AxisJob"] = field(default_factory=list, repr=False)
 
     def map_entry(self) -> Dict[str, str]:
         """How the batch axis map records this axis (absolute paths, so a rerun
@@ -290,6 +469,47 @@ def jobs_from_axes_file(path: Path, experiments_dir: Path) -> List[AxisJob]:
             for axis_dir, pos, neg, pair_type in read_axes_file(path)]
 
 
+MULTI_DIRNAME = "_tier_eval_multi"
+
+
+def axis_indices(text: str) -> Tuple[int, ...]:
+    """``--axis_index``: distinct member indices, comma-separated (``0`` or ``0,3``)."""
+    try:
+        out = tuple(int(x) for x in text.split(","))
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{text!r}: comma-separated integers") from None
+    if len(set(out)) != len(out):
+        raise argparse.ArgumentTypeError(f"{text!r}: an index repeated")
+    return out
+
+
+#: The longest group directory name kept as the members joined; a longer one is shortened (twelve axes joined
+#: passed the file system's 255, 2026-11-04).
+GROUP_DIRNAME_MAX = 200
+
+
+def group_dirname(axis_dirs: Sequence[str]) -> str:
+    """A group's directory name: its axes joined by ``+``, or, past :data:`GROUP_DIRNAME_MAX` characters, the
+    first axis, the count and a digest of the whole list (``a+11more-<sha1:10>``), so that every group keeps
+    one stable name."""
+    joined = "+".join(axis_dirs)
+    if len(joined) <= GROUP_DIRNAME_MAX:
+        return joined
+    return f"{axis_dirs[0]}+{len(axis_dirs) - 1}more-{hashlib.sha1(joined.encode()).hexdigest()[:10]}"
+
+
+def group_jobs(jobs: Sequence[AxisJob], k: int, experiments_dir: Path) -> List[AxisJob]:
+    """Consecutive groups of ``k`` axes as multi-axis jobs (the last may be shorter): the group's own
+    cells go under ``<experiments_dir>/_tier_eval_multi/<axis>+<axis>.../``."""
+    out: List[AxisJob] = []
+    for i in range(0, len(jobs), k):
+        members = list(jobs[i:i + k])
+        gid = group_dirname([m.axis_dir for m in members])
+        out.append(AxisJob(gid, "", "", "mixed", members[0].projections_file,
+                           Path(experiments_dir) / MULTI_DIRNAME / gid, members=members))
+    return out
+
+
 def load_projections(path: Path, slots: str) -> Dict[int, Dict[str, Dict[str, float]]]:
     with open(path) as f:
         proj_data = json.load(f)
@@ -304,9 +524,10 @@ def load_projections(path: Path, slots: str) -> Dict[int, Dict[str, Dict[str, fl
     return projections
 
 
-def resolve_entities(entity_names: Sequence[str],
-                     instructions_dir: Path) -> Tuple[List[Tuple[str, str, str]], List[str]]:
-    """``(etype, name, description)`` per entity, and the names with no file.
+def resolve_entities(entity_names: Sequence[str], instructions_dir: Path,
+                     load: Any = load_entity_description) -> Tuple[List[Tuple[str, str, Any]], List[str]]:
+    """``(etype, name, text)`` per entity (``load``'s text, by default the description), and the names
+    with no file.
 
     We do NOT assume the axis's pair_type applies to every entity -- the corpus
     is mixed.  Projections may use disambiguated keys like "patient|R" or
@@ -323,11 +544,11 @@ def resolve_entities(entity_names: Sequence[str],
         except Exception:
             bare, kind_hint = name, None
         if kind_hint is not None:
-            desc, etype = load_entity_description(instructions_dir, kind_hint, bare), kind_hint
+            desc, etype = load(instructions_dir, kind_hint, bare), kind_hint
         else:
-            desc, etype = load_entity_description(instructions_dir, "roles", bare), "roles"
+            desc, etype = load(instructions_dir, "roles", bare), "roles"
             if desc is None:
-                desc, etype = load_entity_description(instructions_dir, "traits", bare), "traits"
+                desc, etype = load(instructions_dir, "traits", bare), "traits"
         if desc is None:
             missing.append(name)
             continue
@@ -335,8 +556,21 @@ def resolve_entities(entity_names: Sequence[str],
     return entities, missing
 
 
+def is_pole(name: str, spec: AxisSpec) -> bool:
+    """Whether the projection key ``name`` is one of the axis's poles: by entity id, so that on a
+    traits axis the role of a pole's name is judged like any other entity (production's rule,
+    ``AxisSpec.pole_entity_ids``).  A bare key's kind is unknown, so it goes by its name."""
+    ids = spec.pole_entity_ids()
+    return name in ids if "|" in name else name in spec.pole_pair_names
+
+
 def build_axis_spec(pos: str, neg: str, pair_type: str, instructions_dir: Path,
                     projections_file: Path) -> AxisSpec:
+    spec = _axis_spec(pos, neg, pair_type, instructions_dir, projections_file)
+    return jr.swap_axis(spec) if SWAP_POLES else spec
+
+
+def _axis_spec(pos: str, neg: str, pair_type: str, instructions_dir: Path, projections_file: Path) -> AxisSpec:
     return AxisSpec(
         axis_name=f"{pos} (+) vs {neg} (-) [{pair_type}]",
         neg_pole=load_pole_description(instructions_dir, pair_type, neg),
@@ -347,21 +581,50 @@ def build_axis_spec(pos: str, neg: str, pair_type: str, instructions_dir: Path,
         source_description=f"reused from {projections_file}",
         exclusions=[pos, neg],
         pole_pair_names=[pos, neg],
+        pole_kind=pair_type,
     )
 
 
 def load_axis(job: AxisJob, instructions_dir: Path, slots: str = "all", limit: Optional[int] = None) -> AxisJob:
+    if job.members:
+        # a multi-axis job: every entity of every member (the members' poles included; each member's
+        # cell leaves its own poles out), each with its response items
+        for m in job.members:
+            m.projections = load_projections(m.projections_file, slots)
+            m.axis_spec = build_axis_spec(m.pos, m.neg, m.pair_type, instructions_dir, m.projections_file)
+        job.projections = job.members[0].projections
+        job.axis_spec = jr.MultiAxisSpec(tuple((m.axis_spec, m.pair_type) for m in job.members))
+        if AXIS_INDEX is not None:
+            job.axis_spec = jr.MultiAxisSpec(tuple(job.axis_spec.members[i] for i in AXIS_INDEX))
+        # the members' projections key entities as bare names (the May caches) or as name|R / name|T:
+        # one canonical id per entity here, each member's cell written back in its own form
+        names = sorted(set().union(*(set(next(iter(m.projections.values()))) for m in job.members)))
+        resolved, job.missing = resolve_entities(names, instructions_dir, entity_text_loader())
+        by_id: Dict[str, Tuple[str, str, Any]] = {}
+        for etype, name, items in resolved:
+            cid = name if "|" in name else entity_id(name, etype)
+            if cid not in by_id or "|" in name:
+                by_id[cid] = (etype, cid, items)
+        entities = [by_id[k] for k in sorted(by_id)]
+        if limit is not None:
+            entities = entities[:limit]
+        job.entities = response_items(entities, RESPONSE_PART, RESPONSE_SPLIT)
+        if STACK:       # one copy of every item per slot (--stack)
+            job.entities = [(e, f"{n}{SLOT_MARK}{j}", t) for e, n, t in job.entities for j in range(stack_slots(job))]
+        return job
     job.projections = load_projections(job.projections_file, slots)
     any_slot = next(iter(job.projections.values()))
-    names = sorted(any_slot.keys())
+    job.axis_spec = build_axis_spec(job.pos, job.neg, job.pair_type, instructions_dir, job.projections_file)
+    names = sorted(n for n in any_slot if not is_pole(n, job.axis_spec))
     if limit is not None:
         names = names[:limit]
-    job.entities, job.missing = resolve_entities(names, instructions_dir)
+    job.entities, job.missing = resolve_entities(names, instructions_dir, entity_text_loader())
     if job.missing:
         logger.warning(f"{job.axis_dir}: {len(job.missing)} entities from the cached projections no longer "
                        f"have an instructions file under {instructions_dir} -- excluded: {job.missing[:10]}"
                        f"{'...' if len(job.missing) > 10 else ''}")
-    job.axis_spec = build_axis_spec(job.pos, job.neg, job.pair_type, instructions_dir, job.projections_file)
+    if RUBRIC.text_source == "responses":
+        job.entities = response_items(job.entities, RESPONSE_PART, RESPONSE_SPLIT)
     return job
 
 
@@ -370,10 +633,44 @@ def load_axis(job: AxisJob, instructions_dir: Path, slots: str = "all", limit: O
 #: off beside ``claude-opus-5`` (low effort), so cells made under different
 #: settings never overwrite or resume into each other.  Set in main_async.
 CELL_LABEL = ""
+#: --swap_poles: every axis judged with its ends exchanged (the first-named end, at the low number, is the
+#: positive pole), the scores mapped back (judge_tier_rubrics.with_poles_swapped); set in main_async.
+SWAP_POLES = False
+#: --directions: which way each call presents its axis (Roger, 2026-11-04, after the pole-order test: the order
+#: shifts the judges' placements, and a judge does better with the morally good pole at the high number, so a
+#: fixed order would put a valence asymmetry into every result; balance the directions instead).  "own": every
+#: call in the axis's own order.  "descriptions": a judge's passes alternate (--direction_pass, a coin per axis
+#: deciding which pass is swapped).  "instructions": INSTRUCTION_DIRECTIONS, per axis, judge and instruction.
+#: "responses": a coin per call (axis, judge and the call's members), so every entity and judge see both.
+#: A swapped call shows the axis with its poles exchanged and its scores are mapped back (build_group,
+#: parse_group); every answer record says which way its call went.  Set in main_async.
+DIRECTIONS = "own"
+DIRECTION_MODES = ("own", "descriptions", "instructions", "responses")
+DIRECTION_PASS = 0
+#: --stack k (Roger, 2026-11-04: stacked axes leak into one another, "if we shuffle it enough across different
+#: responses, we can make it into just noise"): a multi-axis group (--axes_per_call M, an rk_* rubric) judged k
+#: axes a call, each batch's axes partitioned afresh at random (STACK_SEED and the batch's members) into groups
+#: of k in a random letter order, each axis's direction a coin per call; every batch is sent once per group (a
+#: slot), its items named <key>#s<slot> so that the slots' scores stand apart.  0: off.  Set in main_async.
+STACK = 0
+STACK_SEED = 1
+SLOT_MARK = "#s"
+#: Roger's instruction design (2026-11-04): for instruction positions 1-5 (rows) the direction of each judge
+#: (Luna, Haiku, Gemini): A or B, and on the fifth a coin per axis, d.  Each instruction is judged both ways
+#: across the judges (2:1), each judge 3:2, and by weight (4:3:3) 27:23 or 23:27.  Per axis (seeded by its
+#: name) a coin decides which of A and B is the axis's own order, and the instruction positions are permuted; a
+#: later pass (rounds 5-9, ...) is the first reversed.
+INSTRUCTION_DIRECTIONS = (("B", "A", "A"), ("A", "B", "B"), ("A", "B", "A"), ("B", "A", "B"), ("d", "d", "-d"))
+INSTRUCTION_DIRECTION_JUDGES = ("gpt-5.6-luna", "claude-haiku-5-5", "gemini-3.1-flash-lite")
 #: The rubric of this run (--rubric, judge_tier_rubrics.RUBRICS); v3 unless set.  Set in main_async.
 RUBRIC: "jr.RubricSpec" = jr.RUBRICS["v3"]
+#: The round of an i1_* rubric's cell (--instruction_round); set in main_async.
+INSTRUCTION_ROUND = 0
 #: Batched judging of this run (--entities_per_call, --shuffle_seed); set in main_async.
 BATCHING = {"n": 1, "seed": 0, "design": "shuffle"}
+#: How this run's prompts show entity names (--name_format, judge_tier_rubrics.name_shower); set in main_async.
+NAME_FORMAT = jr.DEFAULT_NAME_FORMAT
+NAME_SHOW = jr.name_shower()
 
 
 def grid_batches(names: List[Any], n: int, design: str) -> List[List[Any]]:
@@ -398,9 +695,104 @@ def grid_batches(names: List[Any], n: int, design: str) -> List[List[Any]]:
     return out
 
 
+def _coin(*parts: Any) -> int:
+    """A fair, reproducible bit from ``parts`` (SHA-256 of their text)."""
+    return int(hashlib.sha256("|".join(map(str, parts)).encode()).hexdigest(), 16) & 1
+
+
+def instruction_positions(axis_dir: str) -> List[int]:
+    """The axis's permutation of the instruction positions: instruction i takes row ``[i]`` of
+    INSTRUCTION_DIRECTIONS."""
+    order = list(range(len(INSTRUCTION_DIRECTIONS)))
+    random.Random(f"directions|positions|{axis_dir}").shuffle(order)
+    return order
+
+
+def group_swapped(job: "AxisJob", names: Sequence[str], model: str) -> bool:
+    """Whether the call of ``names`` (an axis's entities or response items) by ``model`` shows the axis
+    with its poles swapped, under --directions; a pure function of its arguments and the run's settings,
+    so that every path that builds or reads a call agrees."""
+    if DIRECTIONS == "own":
+        return False
+    axis = job.axis_dir
+    if getattr(job, "members", None) and AXIS_INDEX is not None and len(AXIS_INDEX) == 1:
+        axis = job.members[AXIS_INDEX[0]].axis_dir      # the one axis judged on the group's shared batches
+    if DIRECTIONS == "descriptions":
+        return bool((DIRECTION_PASS + _coin("descriptions", axis)) % 2)
+    if DIRECTIONS == "instructions":
+        n = len(INSTRUCTION_DIRECTIONS)
+        row = INSTRUCTION_DIRECTIONS[instruction_positions(axis)[INSTRUCTION_ROUND % n]]
+        d = _coin("instructions", "d", axis)
+        letter = row[INSTRUCTION_DIRECTION_JUDGES.index(model)]
+        is_b = {"A": 0, "B": 1, "d": d, "-d": 1 - d}[letter]
+        return bool(is_b ^ _coin("instructions", "A", axis) ^ ((INSTRUCTION_ROUND // n) % 2))
+    if DIRECTIONS == "responses":
+        return bool(_coin("responses", axis, model, *sorted(names)))
+    raise ValueError(f"unknown --directions {DIRECTIONS!r}")
+
+
+def build_group(job: "AxisJob", group: Sequence[Tuple[str, str, Any]], model: str) -> Any:
+    """The prompt of one batched call, its axis swapped when :func:`group_swapped` says so."""
+    if STACK:
+        members, swapped = _group_plan(job, [g[1] for g in group], model)
+        spec = jr.MultiAxisSpec(tuple(((jr.swap_axis(job.members[m].axis_spec) if sw else job.members[m].axis_spec),
+                                       job.members[m].pair_type) for m, sw in zip(members, swapped)))
+        return RUBRIC.build_batch(spec, "mixed", group, show=NAME_SHOW)
+    spec = job.axis_spec
+    if group_swapped(job, [g[1] for g in group], model):
+        spec = (jr.MultiAxisSpec(tuple((jr.swap_axis(a), pt) for a, pt in spec.members))
+                if isinstance(spec, jr.MultiAxisSpec) else jr.swap_axis(spec))
+    return RUBRIC.build_batch(spec, job.pair_type, group, show=NAME_SHOW)
+
+
+def parse_group(job: "AxisJob", names: Sequence[str], model: str, text: Optional[str],
+                swapped: Optional[bool] = None) -> Dict[int, Optional[float]]:
+    """A batched reply's scores in the axis's own direction: mapped back (``lo + hi - v``) when the call
+    was swapped (``swapped``, from its answer record, or else :func:`group_swapped`)."""
+    parsed = RUBRIC.parse_batch(text, len(names))
+    lo, hi = RUBRIC.lo, RUBRIC.hi
+    if STACK:
+        # each item's scores, in letter order, onto its members' indices, each in its axis's own direction
+        members, ways = _group_plan(job, names, model)
+        out: Dict[int, Any] = {}
+        for k, v in parsed.items():
+            if v is not None and not isinstance(v, (list, tuple)):
+                v = [v]     # --stack 1: a one-axis rubric's scalar
+            ok = isinstance(v, (list, tuple)) and len(v) == len(members) and all(x is not None for x in v)
+            out[k] = {m: (lo + hi - x if sw else x) for m, sw, x in zip(members, ways, v)} if ok else None
+        return out
+    if not (group_swapped(job, names, model) if swapped is None else swapped):
+        return parsed
+    return {k: None if v is None else lo + hi - v for k, v in parsed.items()}
+
+
+def stack_real(name: str) -> str:
+    """A stacked item's own key, without its slot."""
+    return name.split(SLOT_MARK, 1)[0]
+
+
+def stack_slots(job: "AxisJob") -> int:
+    return -(-len(job.members) // STACK) if STACK else 1
+
+
+def stack_plan(job: "AxisJob", real_names: Sequence[str], slot: int, model: str) -> Tuple[List[int], List[bool]]:
+    """The members (indices into ``job.members``, in letter order) of one batch's slot under --stack, and each
+    one's direction (True: swapped): the batch's axes in a random order fixed by STACK_SEED and its members, cut
+    into groups of STACK; a coin per axis, call and judge."""
+    order = list(range(len(job.members)))
+    random.Random("|".join(["stack", job.axis_dir, str(STACK_SEED), *sorted(real_names)])).shuffle(order)
+    chunk = order[slot * STACK:(slot + 1) * STACK]
+    return chunk, [bool(_coin("stack", job.members[m].axis_dir, model, slot, STACK_SEED, *sorted(real_names)))
+                   for m in chunk]
+
+
+def _group_plan(job: "AxisJob", names: Sequence[str], model: str) -> Tuple[List[int], List[bool]]:
+    return stack_plan(job, [stack_real(n) for n in names], int(names[0].split(SLOT_MARK, 1)[1]), model)
+
+
 def build_prompt(job: "AxisJob", etype: str, name: str, desc: str) -> str:
     """The judge prompt of this run's rubric for one entity of ``job``."""
-    return RUBRIC.build(job.axis_spec, job.pair_type, etype, name, desc)
+    return RUBRIC.build(job.axis_spec, job.pair_type, etype, name, desc, show=NAME_SHOW)
 
 
 def parse_score(text: Optional[str]) -> Optional[float]:
@@ -435,8 +827,11 @@ class Cell:
     expected: Set[str]
     scores: Dict[str, Optional[int]] = field(default_factory=dict)
     truncated: Set[str] = field(default_factory=set)
+    refused: Set[str] = field(default_factory=set)      # no reply at all for the entity alone or in its group
+    parse_retries: int = 0                              # re-asks of a group whose reply left members unread
     usage: MultiModelUsage = field(default_factory=MultiModelUsage)
     written: bool = False
+    swapped: Dict[str, bool] = field(default_factory=dict)  # --directions: the direction each name was judged in
 
     @property
     def complete(self) -> bool:
@@ -468,6 +863,7 @@ class ModelRun:
     cells_incomplete: int = 0
     left_for_rerun: int = 0
     resumed: int = 0        # answers taken from the answer logs of earlier runs
+    parse_retries: int = 0  # re-asks of a group whose reply left members unread
     to_judge: int = 0       # live or Flex requests this run set out to send
     in_flight: int = 0
     error: Optional[BaseException] = None
@@ -480,17 +876,21 @@ class ModelRun:
 
 class _Charge:
     """Charges one call to several trackers (the cell's, the model's, the run's)
-    and keeps the charges, ``[key, prompt_tokens, completion_tokens]``, for the
-    answer log."""
+    and keeps the charges, ``[key, prompt_tokens, completion_tokens]`` and the
+    cache-written and cache-read tokens when there are any, for the answer log."""
 
     def __init__(self, *trackers: MultiModelUsage):
         self.trackers = trackers
         self.charges: List[List[Any]] = []
 
-    def charge(self, key: str, prompt_tokens: int, completion_tokens: int) -> None:
-        self.charges.append([key, int(prompt_tokens), int(completion_tokens)])
+    def charge_usage(self, key: str, usage: TokenUsage) -> None:
+        cached = [usage.cache_write_tokens, usage.cache_read_tokens] if usage.cache_write_tokens or usage.cache_read_tokens else []
+        self.charges.append([key, usage.prompt_tokens, usage.completion_tokens, *cached])
         for t in self.trackers:
-            t.charge(key, prompt_tokens, completion_tokens)
+            t.charge_usage(key, usage)
+
+    def charge(self, key: str, prompt_tokens: int, completion_tokens: int) -> None:
+        self.charge_usage(key, TokenUsage(int(prompt_tokens), int(completion_tokens)))
 
 
 @dataclass
@@ -537,12 +937,15 @@ class RunContext:
 _UNSET = object()
 
 
-def record(mrun: ModelRun, cell: Cell, name: str, reply: Any, score: Any = _UNSET) -> None:
+def record(mrun: ModelRun, cell: Cell, name: str, reply: Any, score: Any = _UNSET,
+           swapped: Optional[bool] = None) -> None:
     """Record one reply: its text, None (a failed call or a refusal), or a
     :class:`judge_tier_transport.Truncated` (cut at max_tokens), which scores
     None without being parsed and is listed in the cell's provenance.  With
     ``score`` given (batched judging), the reply is not parsed again."""
     mrun.attempted += 1
+    if swapped is not None:
+        cell.swapped[name] = swapped
     if isinstance(reply, tt.Truncated):
         cell.scores[name] = None
         cell.truncated.add(name)
@@ -551,6 +954,8 @@ def record(mrun: ModelRun, cell: Cell, name: str, reply: Any, score: Any = _UNSE
                        f"scored as missing")
         return
     cell.truncated.discard(name)
+    if reply is None:
+        cell.refused.add(name)
     score = (parse_score(reply) if reply else None) if score is _UNSET else score
     cell.scores[name] = score
     if score is None:
@@ -560,52 +965,161 @@ def record(mrun: ModelRun, cell: Cell, name: str, reply: Any, score: Any = _UNSE
 
 
 def write_cell(cell: Cell, mrun: ModelRun, max_tokens: int) -> None:
-    """Write the cell's scores_descriptions.json, correlations.json and, last,
+    """Write the cell's scores_<mode>.json, correlations.json and, last,
     usage.json (the file the resume rule looks for)."""
     job, model = cell.job, mrun.model
     d = cell_dir(job, model)
     d.mkdir(parents=True, exist_ok=True)
     scores = cell.parsed_scores()
     provenance = {"judge_model": model, "rubric_version": RUBRIC.version, "rubric": RUBRIC.name,
-                  "projections_file": str(job.projections_file),
+                  "projections_file": str(job.projections_file), "swap_poles": SWAP_POLES,
                   "transport": mrun.transport, "transport_reason": mrun.transport_reason,
                   "request_settings": mrun.settings, "max_tokens": max_tokens,
                   "cell_label": CELL_LABEL, "truncated": sorted(cell.truncated),
                   "entities_per_call": BATCHING["n"], "shuffle_seed": BATCHING["seed"],
-                  "batch_design": BATCHING["design"],
+                  "batch_design": BATCHING["design"], "name_format": NAME_FORMAT,
                   "n_entities": len(cell.expected), "n_scored": len(scores)}
-    atomic_write_text(json.dumps({"result": scores, "_provenance": provenance}, indent=2),
-                      d / "scores_descriptions.json", logger_obj=logger)
-    correlations = compute_correlations(
-        scores_by_mode={"descriptions": scores},
-        projections=job.projections,
-        slots=list(job.projections.keys()),
-        excluded_set=set(job.axis_spec.exclusions),
-    )
-    atomic_write_text(json.dumps(correlations, indent=2), d / "correlations.json", logger_obj=logger)
+    if DIRECTIONS != "own":
+        provenance.update(direction_summary(cell))
+    if cell.refused:
+        provenance["refused"] = sorted(cell.refused)
+    if cell.parse_retries:
+        provenance["parse_retries"] = cell.parse_retries
+    if RUBRIC.text_source != "descriptions":
+        provenance["text_source"] = RUBRIC.text_source
+    if RUBRIC.text_source == "instruction_rounds":
+        provenance["instruction_round"] = INSTRUCTION_ROUND
+    payload: Dict[str, Any] = {"result": scores, "_provenance": provenance}
+    correlations: Dict[str, Any] = {}
+    if RUBRIC.text_source == "responses":
+        provenance.update({"responses_dir": str(RESPONSES_DIR), "response_split": RESPONSE_SPLIT,
+                           "response_part": RESPONSE_PART, "response_chars": RESPONSE_CHARS,
+                           "n_items": len(cell.expected), "n_items_scored": len(scores)})
+        provenance["n_entities"] = len({response_item_entity(k) for k in cell.expected})
+        if job.members:
+            # the group's cell keeps every item's k scores; each member's cell is an ordinary response cell
+            provenance["multi_axis"] = [m.axis_dir for m in job.members]
+            provenance["axis_indices"] = list(AXIS_INDEX) if AXIS_INDEX is not None else None
+            payload = {"result": {}, "items": scores, "_provenance": provenance}
+            provenance["n_scored"] = 0
+            write_member_cells(cell, mrun, max_tokens, scores, provenance)
+        else:
+            # result: the per-entity means, what every consumer reads; items: each response's own score
+            payload = {"result": entity_means(scores), "items": scores, "_provenance": provenance}
+            provenance["n_scored"] = len(payload["result"])
+            scores = payload["result"]
+    atomic_write_text(json.dumps(payload, indent=2), d / f"scores_{RUBRIC.mode}.json", logger_obj=logger)
+    if not job.members:
+        correlations = compute_correlations(
+            scores_by_mode={RUBRIC.mode: scores},
+            projections=job.projections,
+            slots=list(job.projections.keys()),
+            excluded_set=job.axis_spec.pole_entity_ids(),
+        )
+        atomic_write_text(json.dumps(correlations, indent=2), d / "correlations.json", logger_obj=logger)
     log = d / ANSWERS_PARTIAL
+    replies = d / BATCH_REPLIES
     if log.exists():
         # the raw replies stay, compressed; the log itself goes once usage.json is written
         atomic_write_bytes(gzip.compress(log.read_bytes()), d / ANSWERS_ARCHIVE, logger_obj=logger)
+    if replies.exists():
+        atomic_write_bytes(gzip.compress(replies.read_bytes()), d / BATCH_REPLIES_ARCHIVE, logger_obj=logger)
     atomic_write_text(json.dumps(cell.usage.as_dict(), indent=2, sort_keys=True), d / "usage.json",
                       logger_obj=logger)
     log.unlink(missing_ok=True)
-    for stale in ("scores_descriptions.partial.json", "usage.partial.json"):
+    replies.unlink(missing_ok=True)
+    for stale in (f"scores_{RUBRIC.mode}.partial.json", "usage.partial.json"):
         (d / stale).unlink(missing_ok=True)
     cell.written = True
     mrun.cells_written += 1
-    logger.info(f"[{model}] {job.axis_dir}: scored {len(scores)}/{len(cell.expected)}"
+    logger.info(f"[{model}] {job.axis_dir}: scored {len(cell.parsed_scores())}/{len(cell.expected)}"
+                f"{' responses' if RUBRIC.text_source == 'responses' else ''}"
                 f"{f', {len(cell.truncated)} cut at max_tokens' if cell.truncated else ''}; "
                 f"cost ${cell.usage.total_cost_usd:.4f} (see {d / 'usage.json'})")
-    for slot, per_metric in correlations["descriptions"].items():
+    for slot, per_metric in correlations.get(RUBRIC.mode, {}).items():
         raw = per_metric["raw"]
         logger.info(f"[{model}] {job.axis_dir} slot={slot} raw: rho={raw['rho']:.4f} n={raw['n']}")
 
 
+def scale_usage(usage: Dict[str, Any], factor: float) -> Dict[str, Any]:
+    """A usage record's counts and costs times ``factor`` (a multi-axis call's cost shared by its axes)."""
+    def scale(v: Any) -> Any:
+        if isinstance(v, bool) or isinstance(v, str):
+            return v
+        if isinstance(v, int):
+            return int(round(v * factor))
+        if isinstance(v, float):
+            return v * factor
+        if isinstance(v, dict):
+            return {k: scale(x) for k, x in v.items()}
+        return v
+    return scale(usage)
+
+
+def write_member_cells(cell: Cell, mrun: ModelRun, max_tokens: int, items: Dict[str, Any],
+                       provenance: Dict[str, Any]) -> None:
+    """Each axis of a multi-axis cell as its own response cell, ``<axis>_tier_eval/<model><label>/``: its
+    scores of the items (the axis's own poles left out), the per-entity means, correlations.json and a
+    usage.json of the call's cost shared equally (so every consumer reads it as a cell judged alone)."""
+    job, model = cell.job, mrun.model
+    members = [(i, job.members[i]) for i in AXIS_INDEX] if AXIS_INDEX is not None else list(enumerate(job.members))
+    k = len(members)
+    usage = cell.usage.as_dict()
+    if STACK:
+        # --stack: an item's slot copies hold {member: score} for the axes of their calls; each member takes its
+        # one score of every item, under the item's own key
+        stacked = {key: v for key, v in items.items() if isinstance(v, dict)}
+        items = {}
+    else:
+        items = {key: (v if isinstance(v, (list, tuple)) else [v]) for key, v in items.items() if v is not None}
+        bad = sum(1 for v in items.values() if len(v) != k)
+        if bad:
+            logger.warning(f"[{model}] {job.axis_dir}: {bad} items without exactly {k} scores, left unscored")
+    for pos, (i, m) in enumerate(members):
+        pnames = set(next(iter(m.projections.values())))
+
+        def own_key(key: str) -> str:
+            """The item key in this member's form: the canonical id where its projections have it, else
+            the bare name (the May caches)."""
+            cid, rest = key.rsplit("|", 1)
+            return key if cid in pnames or parse_entity_id(cid).name not in pnames else f"{parse_entity_id(cid).name}|{rest}"
+
+        if STACK:
+            own = {own_key(stack_real(key)): int(v[i]) for key, v in stacked.items()
+                   if v.get(i) is not None and not is_pole(response_item_entity(own_key(stack_real(key))), m.axis_spec)}
+            expected = sorted({own_key(stack_real(key)) for key in cell.expected
+                               if not is_pole(response_item_entity(own_key(stack_real(key))), m.axis_spec)})
+            ways = [w[i] for key, w in cell.swapped.items() if isinstance(w, dict) and i in w and key in stacked]
+            way = {"stack": STACK, "stack_seed": STACK_SEED,
+                   "direction_counts": {"own": sum(not w for w in ways), "swapped": sum(bool(w) for w in ways)}}
+        else:
+            own = {own_key(key): int(v[pos]) for key, v in items.items()
+                   if len(v) == k and v[pos] is not None and not is_pole(response_item_entity(own_key(key)), m.axis_spec)}
+            expected = [own_key(key) for key in cell.expected if not is_pole(response_item_entity(own_key(key)), m.axis_spec)]
+            way = {}
+        result = entity_means(own)
+        prov = {**provenance, **way, "axis_index": i, "projections_file": str(m.projections_file),
+                "axis_letter": jr.AXIS_LETTERS[pos] if k > 1 and not STACK else None,
+                "n_items": len(expected), "n_items_scored": len(own),
+                "n_entities": len({response_item_entity(key) for key in expected}), "n_scored": len(result)}
+        dm = Path(m.output_dir) / cell_name(model)
+        dm.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(json.dumps({"result": result, "items": dict(sorted(own.items())), "_provenance": prov}, indent=2),
+                          dm / f"scores_{RUBRIC.mode}.json", logger_obj=logger)
+        corr = compute_correlations(scores_by_mode={RUBRIC.mode: result}, projections=m.projections,
+                                    slots=list(m.projections.keys()), excluded_set=m.axis_spec.pole_entity_ids())
+        atomic_write_text(json.dumps(corr, indent=2), dm / "correlations.json", logger_obj=logger)
+        atomic_write_text(json.dumps(scale_usage(usage, 1.0 / k), indent=2, sort_keys=True), dm / "usage.json",
+                          logger_obj=logger)
+        raw = corr[RUBRIC.mode].get("6", next(iter(corr[RUBRIC.mode].values())))["raw"]
+        logger.info(f"[{model}] {m.axis_dir} (axis {i} of {job.axis_dir}{'' if STACK else ', letter ' + jr.AXIS_LETTERS[pos]}): scored {len(own)}/{len(expected)} "
+                    f"responses, {len(result)} entities; slot 6 raw rho={raw['rho']:.4f}")
+
+
 def write_partial_cell(cell: Cell, mrun: ModelRun, max_tokens: int) -> None:
-    """A cell the budget stop left incomplete: its scores and spend under
-    ``*.partial.json`` (no usage.json, so a rerun judges the axis again; the
-    partial spend accumulates across runs)."""
+    """A cell left incomplete (a budget stop, or calls with no answer): its scores and spend so far
+    under ``*.partial.json`` (no usage.json, so a rerun judges the axis again).  The cell's usage
+    already holds what earlier runs spent, from the answer log, so the file is replaced, not added to."""
     job, model = cell.job, mrun.model
     d = cell_dir(job, model)
     d.mkdir(parents=True, exist_ok=True)
@@ -615,14 +1129,12 @@ def write_partial_cell(cell: Cell, mrun: ModelRun, max_tokens: int) -> None:
                   "n_attempted": len(cell.scores), "n_entities": len(cell.expected),
                   "truncated": sorted(cell.truncated)}
     atomic_write_text(json.dumps({"result": cell.parsed_scores(), "_provenance": provenance}, indent=2),
-                      d / "scores_descriptions.partial.json", logger_obj=logger)
-    acc = MultiModelUsage.load_or_create(d / "usage.partial.json")
-    acc.merge_from(cell.usage)
-    atomic_write_text(json.dumps(acc.as_dict(), indent=2, sort_keys=True), d / "usage.partial.json",
+                      d / f"scores_{RUBRIC.mode}.partial.json", logger_obj=logger)
+    atomic_write_text(json.dumps(cell.usage.as_dict(), indent=2, sort_keys=True), d / "usage.partial.json",
                       logger_obj=logger)
     mrun.cells_partial += 1
     logger.warning(f"[{model}] {job.axis_dir}: incomplete ({len(cell.scores)}/{len(cell.expected)} attempted); "
-                   f"written as {d / 'scores_descriptions.partial.json'}, no usage.json")
+                   f"written as {d / f'scores_{RUBRIC.mode}.partial.json'}, no usage.json")
 
 
 # ---------------------------------------------------------------------------
@@ -635,12 +1147,16 @@ class CheckpointMismatchError(RuntimeError):
 
 def checkpoint_header(mrun: "ModelRun", max_tokens: int) -> Dict[str, Any]:
     return {"kind": "header", "version": CHECKPOINT_VERSION, "judge_model": mrun.model, "cell_label": CELL_LABEL,
-            "rubric_version": RUBRIC.version, "request_settings": mrun.settings, "max_tokens": max_tokens}
+            "rubric_version": RUBRIC.version, "request_settings": mrun.settings, "max_tokens": max_tokens,
+            "name_format": NAME_FORMAT, "swap_poles": SWAP_POLES, "directions": DIRECTIONS,
+            "direction_pass": DIRECTION_PASS, "stack": STACK, "stack_seed": STACK_SEED}
 
 
 def prompt_digest(prompt: str) -> str:
-    """Identifies the exact prompt an answer replied to (corpus text and rubric included)."""
-    return hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:16]
+    """Identifies the exact prompt an answer replied to (corpus text and rubric included; a two-part prompt
+    by its parts)."""
+    text = prompt if isinstance(prompt, str) else "\x1e".join(prompt)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
 
 def read_answer_log(path: Path) -> Tuple[Optional[Dict[str, Any]], Dict[str, Dict[str, Any]]]:
@@ -668,6 +1184,21 @@ def read_answer_log(path: Path) -> Tuple[Optional[Dict[str, Any]], Dict[str, Dic
     return header, answers
 
 
+def read_reasks(path: Path) -> List[Dict[str, Any]]:
+    """The ``reask`` lines of an answer log: each a reply that left members unread and was asked again,
+    with that reply's charges, which no answer line carries."""
+    out = []
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            try:
+                rec = json.loads(line)
+            except ValueError:
+                continue
+            if rec.get("kind") == "reask":
+                out.append(rec)
+    return out
+
+
 def resume_cell(cell: Cell, mrun: "ModelRun", header: Dict[str, Any]) -> int:
     """Fill ``cell`` from its answer log: every saved answer to the very prompt
     this run would send, with its charges in the cell's usage (not this run's,
@@ -685,22 +1216,34 @@ def resume_cell(cell: Cell, mrun: "ModelRun", header: Dict[str, Any]) -> int:
         with open(path, "a", encoding="utf-8") as f:
             f.write("\n")   # a torn last line must not swallow the next answer
     found, answers = read_answer_log(path)
-    if not answers:
+    reasks = read_reasks(path)
+    if not answers and not reasks:
         return 0
     if found is None:
         raise CheckpointMismatchError(f"{path}: no header line, so its settings are unknown: move it aside to "
                                       f"judge {cell.job.axis_dir} afresh")
-    diffs = {k: (found.get(k), header.get(k)) for k in CHECKPOINT_KEYS if found.get(k) != header.get(k)}
+    diffs = {k: (found.get(k, CHECKPOINT_DEFAULTS.get(k)), header.get(k)) for k in CHECKPOINT_KEYS
+             if found.get(k, CHECKPOINT_DEFAULTS.get(k)) != header.get(k)}
     if diffs:
         raise CheckpointMismatchError(
             f"{path} was written under other settings than this run's ("
             + "; ".join(f"{k}: {a!r} there, {b!r} now" for k, (a, b) in diffs.items())
             + "): rerun with those settings to finish it, use another --cell_label, or move the file aside "
               f"to judge {cell.job.axis_dir} afresh")
+    for rec in reasks:
+        cell.parse_retries += 1
+        for key, *counts in rec.get("charges") or []:
+            cell.usage.charge(key, *counts)
     descs = {name: (etype, desc) for etype, name, desc in cell.job.entities}
     taken = stale = 0
     for name, rec in answers.items():
-        if name not in cell.expected or name in cell.scores:
+        if name not in cell.expected:
+            continue
+        if name in cell.scores:
+            # scored by a batch result, but this answer was billed all the same (and a group's charges
+            # are on its first member's record, whoever else the batch scored)
+            for key, *counts in rec.get("charges") or []:
+                cell.usage.charge(key, *counts)
             continue
         etype, desc = descs[name]
         if not rec.get("batch") and rec.get("prompt") != prompt_digest(build_prompt(cell.job, etype, name, desc)):
@@ -709,14 +1252,23 @@ def resume_cell(cell: Cell, mrun: "ModelRun", header: Dict[str, Any]) -> int:
         if rec.get("batch"):
             # a batched reply: this entity's line, by its position in the batch
             batch = rec["batch"]
+            sw = rec.get("swapped")
+            if sw is None:
+                sw = group_swapped(cell.job, batch, mrun.model)
             parsed = ({} if rec.get("truncated") or not rec.get("reply") or RUBRIC.parse_batch is None
-                      else RUBRIC.parse_batch(rec["reply"], len(batch)))
+                      else parse_group(cell.job, batch, mrun.model, rec["reply"], swapped=sw))
             restore_score(cell, name, parsed.get(batch.index(name) + 1) if parsed and name in batch else None,
                           bool(rec.get("truncated")))
+            if DIRECTIONS != "own":
+                cell.swapped[name] = bool(sw)
+            if STACK and rec.get("stack"):
+                cell.swapped[name] = dict(zip(rec["stack"]["members"], rec["stack"]["swapped"]))
         else:
             restore(cell, name, rec.get("reply"), bool(rec.get("truncated")))
-        for key, pt, ct in rec.get("charges") or []:
-            cell.usage.charge(key, pt, ct)
+        if rec.get("reply") is None:
+            cell.refused.add(name)
+        for key, *counts in rec.get("charges") or []:
+            cell.usage.charge(key, *counts)
         taken += 1
     if stale:
         logger.warning(f"{path}: {stale} saved answers replied to another prompt (corpus or rubric text "
@@ -750,18 +1302,137 @@ def append_answer(cell: Cell, model: str, header: Dict[str, Any], name: str, rep
     """Save one billed answer to the cell's answer log as soon as it arrives
     (the header first, when the log is new).  Calls that failed without a
     charge are not saved, so a rerun asks them again."""
+    truncated = isinstance(reply, tt.Truncated)
+    way = ({"swapped": group_swapped(cell.job, batch, model)} if batch and DIRECTIONS != "own" else {})
+    if STACK and batch:
+        members, ways = _group_plan(cell.job, batch, model)
+        way = {"stack": {"members": members, "swapped": ways}}
+        cell.swapped[name] = dict(zip(members, ways))
+    _append_log(cell, model, header, {
+        "kind": "answer", "name": name, "reply": reply.text if truncated else reply, "truncated": truncated,
+        "charges": charges, "prompt": prompt_digest(prompt), **({"batch": batch} if batch else {}), **way,
+        "at": _utc_now()})
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _append_log(cell: Cell, model: str, header: Dict[str, Any], rec: Dict[str, Any]) -> None:
     d = cell_dir(cell.job, model)
     d.mkdir(parents=True, exist_ok=True)
     path = d / ANSWERS_PARTIAL
-    truncated = isinstance(reply, tt.Truncated)
-    rec = {"kind": "answer", "name": name, "reply": reply.text if truncated else reply, "truncated": truncated,
-           "charges": charges, "prompt": prompt_digest(prompt), **({"batch": batch} if batch else {}),
-           "at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")}
     lines = [] if path.exists() else [json.dumps(header, sort_keys=True)]
     lines.append(json.dumps(rec, sort_keys=True))
     with open(path, "a", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
         f.flush()
+
+
+def append_batch_reply(cell: Cell, model: str, cid: str, members: List[str], text: Optional[str],
+                       finish: Optional[str], refused: bool) -> None:
+    """Keep one Batch API reply as it is collected, for the refusal counts and for reading afterwards."""
+    d = cell_dir(cell.job, model)
+    d.mkdir(parents=True, exist_ok=True)
+    with open(d / BATCH_REPLIES, "a", encoding="utf-8") as f:
+        f.write(json.dumps({"custom_id": cid, "members": members, "reply": text, "finish": finish,
+                            "refused": refused, "at": _utc_now()}, sort_keys=True) + "\n")
+
+
+def record_group_reply(mrun: "ModelRun", cell: Cell, header: Dict[str, Any], group: Sequence[Tuple[str, str, Any]],
+                       text: Any, charges: List[List[Any]], prompt: str) -> None:
+    """One batched reply into its cell: each member's line, the call's charges on the first member's record."""
+    names = [g[1] for g in group]
+    sw = group_swapped(cell.job, names, mrun.model) if DIRECTIONS != "own" else None
+    scores = ({} if isinstance(text, tt.Truncated) or not text else parse_group(cell.job, names, mrun.model, text))
+    for k, gname in enumerate(names, 1):
+        if charges:
+            append_answer(cell, mrun.model, header, gname, text, charges if k == 1 else [], prompt, batch=names)
+        record(mrun, cell, gname, text, score=scores.get(k) if scores else None, swapped=sw)
+
+
+async def read_group_reply(ctx: "RunContext", mrun: "ModelRun", cell: Cell, header: Dict[str, Any],
+                           group: Sequence[Tuple[str, str, Any]], text: Any, charges: List[List[Any]], prompt: str,
+                           call: Any) -> None:
+    """A batched reply into its cell, asking the same prompt again while replies leave members unread (up to
+    PARSE_RETRIES times).  Each member keeps the first reply that gives it a line; members a batch result has
+    already scored are left alone.  A failed re-ask leaves the unread open, and the cell with them.  Every
+    re-asked reply goes on a ``reask`` line with its charges, so a rerun still counts them."""
+    if text is None or isinstance(text, tt.Truncated):
+        record_group_reply(mrun, cell, header, group, text, charges, prompt)
+        return
+    names = [g[1] for g in group]
+    sw = group_swapped(cell.job, names, mrun.model) if DIRECTIONS != "own" else None
+    unread = [n for n in names if n not in cell.scores]
+    for attempt in range(PARSE_RETRIES + 1):
+        parsed = parse_group(cell.job, names, mrun.model, text) if text else {}
+        read = [n for n in unread if parsed.get(names.index(n) + 1) is not None]
+        unread = [n for n in unread if n not in read]
+        last = not unread or attempt == PARSE_RETRIES
+        for n in read:
+            append_answer(cell, mrun.model, header, n, text, charges if last else [], prompt, batch=names)
+            if last:
+                charges = []
+            record(mrun, cell, n, text, score=parsed[names.index(n) + 1], swapped=sw)
+        if last:
+            break
+        _append_log(cell, mrun.model, header, {
+            "kind": "reask", "batch": names, "unread": unread, "reply": text, "charges": charges,
+            "prompt": prompt_digest(prompt), "at": _utc_now()})
+        charge = _Charge(cell.usage, mrun.usage, ctx.run_usage)
+        mrun.to_judge += 1
+        ctx.add_pending(1)
+        mrun.in_flight += 1
+        cell.parse_retries += 1
+        mrun.parse_retries += 1
+        try:
+            text = await call(prompt, charge)
+        finally:
+            mrun.in_flight -= 1
+            ctx.live_pending -= 1
+        ctx.note_answer()
+        if text is tt.SKIPPED or text is tt.FAILED:
+            return      # no outcome for the unread: the cell stays open and they are asked again
+        charges = charge.charges
+        text = "" if text is None else text.text if isinstance(text, tt.Truncated) else text
+    for n in unread:    # the last reply left them unread: their outcome, on its record
+        append_answer(cell, mrun.model, header, n, text, charges, prompt, batch=names)
+        charges = []
+        record(mrun, cell, n, text, score=None, swapped=sw)
+
+
+async def judge_split_group(ctx: "RunContext", mrun: "ModelRun", cell: Cell, header: Dict[str, Any],
+                            group: Sequence[Tuple[str, str, Any]], call: Any, carried: Sequence[List[Any]] = ()) -> None:
+    """A group whose call came back with nothing (a refusal, a content flag, an empty reply) has lost
+    every member's score, usually to one of them: ask its two halves, and so on down, so that only the
+    entity that refuses goes without.  ``call(prompt, charge)`` sends a request as the caller's path
+    does.  ``carried``: the charges of the calls that came back with nothing, which go on the next
+    answer's record, so that a rerun still counts them."""
+    _append_log(cell, mrun.model, header, {
+        "kind": "refusal", "batch": [g[1] for g in group], "at": _utc_now(),
+        "prompt": prompt_digest(build_group(cell.job, group, mrun.model))})
+    pending = list(carried)
+    mid = len(group) // 2
+    for part in (group[:mid], group[mid:]):
+        prompt = build_group(cell.job, part, mrun.model)
+        charge = _Charge(cell.usage, mrun.usage, ctx.run_usage)
+        mrun.to_judge += 1
+        ctx.add_pending(1)
+        mrun.in_flight += 1
+        try:
+            text = await call(prompt, charge)
+        finally:
+            mrun.in_flight -= 1
+            ctx.live_pending -= 1
+        if text is tt.SKIPPED or text is tt.FAILED:
+            continue        # no outcome for these: the cell stays open and they are asked again
+        pending += charge.charges
+        if text is None and len(part) > 1:
+            await judge_split_group(ctx, mrun, cell, header, part, call, pending)
+        else:
+            await read_group_reply(ctx, mrun, cell, header, part, text, pending, prompt, call)
+        pending = []
+        ctx.note_answer()
 
 
 def saved_answers(job: AxisJob, model: str) -> int:
@@ -797,20 +1468,11 @@ async def run_bounded(worker, items: Sequence[Any], limit: int) -> None:
 
 def make_openai_client(service_tier: Optional[str] = None):
     import openai
-    # Diagnosed 2026-09-23: a mismatched httpx2/Brotli version pairing
-    # in the (ad-hoc, not uv.lock-pinned) environment this was first
-    # run in raised "TypeError: process() takes no keyword arguments"
-    # deep in response decompression for gpt-5.6-* (larger/brotli-
-    # encoded responses than the older gpt-4.1-mini ever triggered).
-    # Disabling response compression sidesteps it regardless of root
-    # cause; harmless here since judge payloads are a short prompt +
-    # a few hundred tokens, not documents worth compressing.
-    kwargs: Dict[str, Any] = {"default_headers": {"Accept-Encoding": "identity"}}
     if service_tier == "flex":
         # Flex calls can wait in a queue and be refused with an uncharged 429:
-        # a longer timeout and more SDK retries, as step 3's judge_client.
-        kwargs.update(timeout=tt.FLEX_TIMEOUT_S, max_retries=tt.FLEX_MAX_RETRIES)
-    return openai.AsyncOpenAI(**kwargs)
+        # a longer timeout and more SDK retries, as judge.judge_client.
+        return openai.AsyncOpenAI(timeout=tt.FLEX_TIMEOUT_S, max_retries=tt.FLEX_MAX_RETRIES)
+    return openai.AsyncOpenAI()
 
 
 def make_anthropic_client():
@@ -825,6 +1487,16 @@ def key_name(model: str) -> str:
 
 def make_gemini_client():
     return tt.make_gemini_client(os.environ["GEMINI_API_KEY"])
+
+
+def standard_client(model: str):
+    """The client for ``model``'s standard tier: its batch API, and real time."""
+    provider = provider_for_model(model)
+    if provider == "anthropic":
+        return make_anthropic_client()
+    if provider == "google":
+        return make_gemini_client()
+    return make_openai_client(None)
 
 
 # ---------------------------------------------------------------------------
@@ -885,12 +1557,17 @@ async def run_live(ctx: RunContext, mrun: ModelRun, todo: List[AxisJob], *, tier
     def gate() -> bool:
         return bool(fatal) or ctx.over_budget()
 
+    def call(prompt: str, charge: _Charge) -> Any:
+        return tt.call_model(model, prompt, ctx.max_tokens, rate_limiter, charge, client=client,
+                             settings=mrun.settings, service_tier=tier, fallback_client=fallback,
+                             stats=mrun.stats, gate=gate)
+
     async def one(item: Tuple[int, Any, Any, Any], *, probing: bool = False) -> None:
         nonlocal unfinished
         if n_per > 1:
             i, group = item[0], item[1]
             cell = cells[i]
-            prompt = RUBRIC.build_batch(cell.job.axis_spec, cell.job.pair_type, group)
+            prompt = build_group(cell.job, group, mrun.model)
         else:
             i, etype, name, desc = item
             cell = cells[i]
@@ -898,9 +1575,7 @@ async def run_live(ctx: RunContext, mrun: ModelRun, todo: List[AxisJob], *, tier
         charge = _Charge(cell.usage, mrun.usage, ctx.run_usage)
         mrun.in_flight += 1
         try:
-            text = await tt.call_model(model, prompt, ctx.max_tokens, rate_limiter, charge, client=client,
-                                       settings=mrun.settings, service_tier=tier, fallback_client=fallback,
-                                       stats=mrun.stats, gate=gate)
+            text = await call(prompt, charge)
         except tt.FlexRefusedError as e:
             if probing:
                 raise
@@ -916,14 +1591,14 @@ async def run_live(ctx: RunContext, mrun: ModelRun, todo: List[AxisJob], *, tier
         if text is tt.SKIPPED or text is tt.FAILED:
             return      # no outcome for these entities: the cell stays open and they are asked again
         if n_per > 1:
-            names = [g[1] for g in group]
-            scores = ({} if isinstance(text, tt.Truncated) or not text
-                      else RUBRIC.parse_batch(text, len(group)))
-            for k, (_etype, gname, _desc) in enumerate(group, 1):
-                if charge.charges:
-                    append_answer(cell, model, header, gname, text, charge.charges if k == 1 else [], prompt,
-                                  batch=names)
-                record(mrun, cell, gname, text, score=scores.get(k) if scores else None)
+            try:
+                if text is None and len(group) > 1:
+                    await judge_split_group(ctx, mrun, cell, header, group, call, charge.charges)
+                else:
+                    await read_group_reply(ctx, mrun, cell, header, group, text, charge.charges, prompt, call)
+            except tt.JudgeRequestError as e:
+                fatal.append(e)
+                return
         else:
             if charge.charges:
                 append_answer(cell, model, header, name, text, charge.charges, prompt)
@@ -940,12 +1615,12 @@ async def run_live(ctx: RunContext, mrun: ModelRun, todo: List[AxisJob], *, tier
             except tt.FlexRefusedError as e:
                 logger.warning(f"[{model}] probe: OpenAI refused Flex processing ({e}); judging {model} through "
                                f"the Batch API for this run.  Add {model!r}: {{'flex': False}} to "
-                               f"MODEL_CAPABILITIES in results_analysis/judge_tier_transport.py")
+                               f"MODEL_CAPABILITIES in assistant_axis/judge.py")
                 return False
             if not fatal:
                 mrun.transport_reason += "; the probe was answered on Flex"
                 logger.info(f"[{model}] probe: Flex accepted; add {model!r}: {{'flex': True}} to "
-                            f"MODEL_CAPABILITIES in results_analysis/judge_tier_transport.py")
+                            f"MODEL_CAPABILITIES in assistant_axis/judge.py")
         await run_bounded(one, items, ctx.max_in_flight)
     finally:
         ctx.live_pending -= unfinished   # requests never sent (a refused probe, a cancelled run)
@@ -1037,7 +1712,8 @@ def inflight_batches(work: Path) -> int:
 
 def batch_settings(ctx: RunContext, mrun: ModelRun) -> Dict[str, Any]:
     out = {"model": mrun.model, "max_tokens": ctx.max_tokens, "request_settings": mrun.settings,
-           "rubric_version": RUBRIC.version, "instructions_dir": str(Path(ctx.instructions_dir).resolve())}
+           "rubric_version": RUBRIC.version, "instructions_dir": str(Path(ctx.instructions_dir).resolve()),
+           "name_format": NAME_FORMAT}
     if ctx.entities_per_call > 1:
         out.update(entities_per_call=ctx.entities_per_call, shuffle_seed=ctx.shuffle_seed,
                    batch_design=ctx.batch_design)
@@ -1046,8 +1722,27 @@ def batch_settings(ctx: RunContext, mrun: ModelRun) -> Dict[str, Any]:
 
 def axis_groups(job: AxisJob, ctx: RunContext) -> List[List[Tuple[str, str, str]]]:
     """The batched-judging groups of an axis's full entity list, from the seed
-    and design (the same in every run with the same settings)."""
-    full = list(job.entities)
+    and design (the same in every run with the same settings).  Under --stack, the
+    groups of the items themselves, each sent once per slot, a group's slots in turn."""
+    if STACK:
+        real = [(e, stack_real(n), t) for e, n, t in job.entities if n.endswith(f"{SLOT_MARK}0")]
+        return [[(e, f"{n}{SLOT_MARK}{j}", t) for e, n, t in g]
+                for g in item_groups(real, ctx) for j in range(stack_slots(job))]
+    return item_groups(list(job.entities), ctx)
+
+
+def item_groups(full: List[Tuple[str, str, Any]], ctx: RunContext) -> List[List[Tuple[str, str, Any]]]:
+    if RUBRIC.text_source == "responses":
+        # a call's answers share their question: shuffle within each question, then cut into groups
+        by_q: Dict[int, List[Tuple[str, str, Any]]] = {}
+        for item in full:
+            by_q.setdefault(response_question(item[1]), []).append(item)
+        groups: List[List[Tuple[str, str, Any]]] = []
+        for q in sorted(by_q):
+            items = by_q[q]
+            random.Random(ctx.shuffle_seed * 1_000_003 + q + 1).shuffle(items)
+            groups += grid_batches(items, ctx.entities_per_call, "shuffle")
+        return groups
     random.Random(ctx.shuffle_seed * 1_000_003 + 0).shuffle(full)
     return grid_batches(full, ctx.entities_per_call, ctx.batch_design)
 
@@ -1057,16 +1752,20 @@ async def run_batch(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob]) -> Non
     provider's batch API: one submission for all axes, results collected into
     per-axis cells, each written as soon as its axis is complete."""
     model = mrun.model
-    anthropic = provider_for_model(model) == "anthropic"
+    provider = provider_for_model(model)
     work = batch_work_dir(ctx, model)
     collected_dir = work / "collected"
     if not (work / "batch_state.json").exists() and all(cell_done(job, model) for job in jobs):
         logger.info(f"[{model}] batch: nothing to submit")
         return
-    client = make_anthropic_client() if anthropic else make_openai_client(None)
-    if anthropic:
+    client = standard_client(model)
+    if provider == "anthropic":
+        # sibling cells submit batches of exactly this size, so a lost submission is never adopted
         runner = AnthropicBatchRunner(client, work / "chunks", work / "batch_state.json",
-                                      poll_seconds=ctx.batch_poll_seconds, logger=logger)
+                                      poll_seconds=ctx.batch_poll_seconds, adopt_lost_batches=False, logger=logger)
+    elif provider == "google":
+        runner = GeminiBatchRunner(client, work / "chunks", work / "batch_state.json", model=model,
+                                   poll_seconds=ctx.batch_poll_seconds, logger=logger)
     else:
         runner = OpenAIBatchRunner(client, work / "chunks", work / "batch_state.json",
                                    poll_seconds=ctx.batch_poll_seconds,
@@ -1146,39 +1845,60 @@ async def run_batch(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob]) -> Non
         """The member names of a group custom id (``a<idx>|g<k>``), from groups.json."""
         return groups.get(cid)
 
+    to_split: List[Tuple[Cell, List[str]]] = []     # groups that came back with nothing
+    to_reask: List[Tuple[Cell, List[str], str]] = []    # groups whose reply left members unread
+
     def record_group(cell: Cell, cid: str, reply: Any) -> None:
         members = group_members(cid)
         if members is None:
             logger.warning(f"[{model}] group {cid!r} is not in {groups_path}; its reply is dropped")
             return
-        parsed = ({} if isinstance(reply, tt.Truncated) or not reply else RUBRIC.parse_batch(reply, len(members)))
+        if reply is None and len(members) > 1:
+            to_split.append((cell, members))
+            return
+        parsed = ({} if isinstance(reply, tt.Truncated) or not reply else parse_group(cell.job, members, mrun.model, reply))
+        sw = group_swapped(cell.job, members, mrun.model) if DIRECTIONS != "own" else None
+        retry = bool(reply) and not isinstance(reply, tt.Truncated) and any(parsed.get(k) is None for k in range(1, len(members) + 1))
         for k, gname in enumerate(members, 1):
-            record(mrun, cell, gname, reply, score=parsed.get(k) if parsed else None)
+            if not retry or parsed.get(k) is not None:
+                record(mrun, cell, gname, reply, score=parsed.get(k) if parsed else None, swapped=sw)
+        if retry:
+            to_reask.append((cell, members, reply))
 
     def on_result(cid: str, body: Optional[dict], error: Optional[str]) -> None:
         if body is None:
             return   # unanswered: comes back from runner.run and is sent in real time
         idx, name = split_custom_id(cid)
-        if anthropic:
-            text, finish, n_in, n_out, refused = tt.anthropic_reply(body)
+        refused = False
+        if provider == "anthropic":
+            text, finish, _n_in, _n_out, refused = tt.anthropic_reply(body)
+            tokens = anthropic_usage(body)
             if refused:
                 details = body.get("stop_details") if isinstance(body, dict) else None
                 mrun.stats.note_refusal(model, (details or {}).get("category")
                                         if isinstance(details, dict) else None)
                 text = None
+        elif provider == "google":
+            text, finish, n_in, n_out = tt.gemini_reply(body)
+            tokens = gemini_usage(body)
+            finish = tt.CUT_AT_CAP if finish == "MAX_TOKENS" else finish
+            if text is None:        # a blocked prompt, as judge.call_gemini_judge counts it live
+                mrun.stats.content_flagged += 1
         else:
-            text, finish, n_in, n_out = tt.openai_reply(body)
-            refused = False
+            text, finish, _n_in, _n_out = tt.openai_reply(body)
+            tokens = openai_usage(body)
         reply: Any = tt.Truncated(text) if finish == tt.CUT_AT_CAP and not refused else text
         cell = cell_for(idx)
         if cell is None:
-            mrun.usage.charge(batch_key, n_in, n_out)
-            ctx.run_usage.charge(batch_key, n_in, n_out)
+            mrun.usage.charge_usage(batch_key, tokens)
+            ctx.run_usage.charge_usage(batch_key, tokens)
             logger.warning(f"[{model}] result {cid!r} is for an axis already done or unknown; dropped "
                            f"(its tokens are in this run's total only)")
             return
-        _Charge(cell.usage, mrun.usage, ctx.run_usage).charge(batch_key, n_in, n_out)
-        if name.startswith("g") and name[1:].isdigit() and n_per > 1:
+        _Charge(cell.usage, mrun.usage, ctx.run_usage).charge_usage(batch_key, tokens)
+        is_group = name.startswith("g") and name[1:].isdigit() and n_per > 1
+        append_batch_reply(cell, model, cid, (group_members(cid) or []) if is_group else [name], text, finish, refused)
+        if is_group:
             record_group(cell, cid, reply)
         else:
             record(mrun, cell, name, reply)
@@ -1231,7 +1951,7 @@ async def run_batch(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob]) -> Non
                     if cid in unanswered or cid in inflight or all(name in cell.scores for _, name, _ in group):
                         continue
                     groups[cid] = [name for _, name, _ in group]
-                    yield cid, idx, RUBRIC.build_batch(cell.job.axis_spec, cell.job.pair_type, group)
+                    yield cid, idx, build_group(cell.job, group, mrun.model)
                 continue
             for etype, name, desc in cell.job.entities:
                 if name in cell.scores:
@@ -1293,10 +2013,11 @@ async def run_batch(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob]) -> Non
                 return      # no outcome: left out of the cell, and a rerun submits it again
             if is_group:
                 members = group_members(cid) or []
-                for k, gname in enumerate(members, 1):
-                    if charge.charges:
-                        append_answer(cell, model, header, gname, text, charge.charges if k == 1 else [], prompt,
-                                      batch=members)
+                if text is not None or len(members) < 2:
+                    for k, gname in enumerate(members, 1):
+                        if charge.charges:
+                            append_answer(cell, model, header, gname, text, charge.charges if k == 1 else [], prompt,
+                                          batch=members)
                 record_group(cell, cid, text)
             else:
                 if charge.charges:
@@ -1314,6 +2035,29 @@ async def run_batch(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob]) -> Non
         logger.error(f"[{model}] {len(unanswered)} requests were not answered by their batches, more than "
                      f"--batch_fallback_max ({ctx.batch_fallback_max}) to send in real time; they stay "
                      f"unscored, and a rerun submits them again")
+
+    # 4. A group that came back with nothing: its halves in real time, on the standard tier; and a
+    # group whose reply left members unread: the same prompt again, the same way.
+    if to_split or to_reask:
+        logger.warning(f"[{model}] {len(to_split)} groups came back with nothing, asking their halves in real time; "
+                       f"{len(to_reask)} replies left members unread, asking them again in real time")
+        rate_limiter = RateLimiter(ctx.requests_per_second)
+
+        def call(prompt: str, charge: _Charge) -> Any:
+            return tt.call_model(model, prompt, ctx.max_tokens, rate_limiter, charge, client=client,
+                                 settings=mrun.settings, stats=mrun.stats, gate=ctx.over_budget)
+
+        for cell, members in to_split:
+            by_name = {e[1]: e for e in cell.job.entities}
+            await judge_split_group(ctx, mrun, cell, header, [by_name[n] for n in members if n in by_name], call)
+            touched.add(cell.idx)
+        for cell, members, reply in to_reask:
+            by_name = {e[1]: e for e in cell.job.entities}
+            group = [by_name[n] for n in members]
+            prompt = build_group(cell.job, group, mrun.model)
+            await read_group_reply(ctx, mrun, cell, header, group, reply, [], prompt, call)
+            touched.add(cell.idx)
+        flush()
     for idx in current:
         cell = cells[idx]
         if not cell.written:
@@ -1328,8 +2072,46 @@ async def run_batch(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob]) -> Non
 # Per model
 # ---------------------------------------------------------------------------
 
+def direction_summary(cell: Cell) -> Dict[str, Any]:
+    """A cell's directions for its provenance (--directions): the mode, the pass, how many of its scored names
+    each way went, and, for response items, the spread over entities of the share judged swapped."""
+    scored = [n for n, v in cell.scores.items() if v is not None]
+    ways = [cell.swapped.get(n) for n in scored]
+    out: Dict[str, Any] = {"directions": DIRECTIONS, "direction_pass": DIRECTION_PASS,
+                           "direction_counts": {"own": sum(w is False for w in ways), "swapped": sum(w is True for w in ways),
+                                                "unknown": sum(w is None for w in ways)}}
+    if RUBRIC.text_source == "responses":
+        per: Dict[str, List[bool]] = {}
+        for n in scored:
+            if n in cell.swapped:
+                per.setdefault(response_item_entity(n), []).append(cell.swapped[n])
+        shares = sorted(sum(v) / len(v) for v in per.values() if len(v) >= 10)
+        if shares:
+            out["direction_entity_share_swapped"] = {"n_entities": len(shares), "min": shares[0],
+                                                     "median": shares[len(shares) // 2], "max": shares[-1]}
+    return out
+
+
+def refuse_done_cells_of_another_direction(jobs: Sequence[AxisJob], model: str) -> None:
+    """A finished cell is skipped, so one judged under other --directions than this run's would pass for this
+    run's: stop instead, naming it (Roger, 2026-11-04: an unnoticed direction asymmetry could invalidate results)."""
+    for job in jobs:
+        if not cell_done(job, model):
+            continue
+        sp = cell_scores_path(cell_dir(job, model))
+        try:
+            prov = json.loads(sp.read_text()).get("_provenance", {}) if sp.exists() else {}
+        except (OSError, ValueError):
+            prov = {}
+        found = (prov.get("directions", "own"), int(prov.get("direction_pass", 0)))
+        if found != (DIRECTIONS, DIRECTION_PASS if DIRECTIONS == "descriptions" else 0):
+            raise SystemExit(f"{cell_dir(job, model)} was judged under --directions {found[0]} (pass {found[1]}), not this "
+                             f"run's {DIRECTIONS} (pass {DIRECTION_PASS}): use another --cell_label")
+
+
 async def run_model(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob]) -> None:
     model = mrun.model
+    refuse_done_cells_of_another_direction(jobs, model)
     todo = [job for job in jobs if not cell_done(job, model)]
     for job in jobs:
         if cell_done(job, model):
@@ -1376,6 +2158,8 @@ def summarise(mrun: ModelRun) -> str:
              f"truncated {s.truncated}", f"cells written {mrun.cells_written}"]
     if mrun.resumed:
         parts.append(f"resumed {mrun.resumed}")
+    if mrun.parse_retries:
+        parts.append(f"parse retries {mrun.parse_retries}")
     if mrun.cells_partial:
         parts.append(f"partial {mrun.cells_partial}")
     if mrun.cells_incomplete:
@@ -1444,98 +2228,6 @@ def restart_after_stall() -> None:
 # ---------------------------------------------------------------------------
 
 SOURCE_PROVENANCE = "provenance"
-SOURCE_BATCH = "batch results"
-_SHORT_ID_RE = re.compile(r"r(\d{6})")
-
-
-class BatchRecordError(RuntimeError):
-    """A model's batch results cannot be tied to its cells (a batch or output
-    file unreadable, or short ids that cannot be mapped back): its cells with
-    no truncation list in their provenance are left alone."""
-
-
-@dataclass
-class BatchReply:
-    """One succeeded batch result, as the repair needs it."""
-    text: Optional[str]
-    finish: Optional[str]
-    refused: bool
-    n_in: int
-
-    @property
-    def cut(self) -> bool:
-        return self.finish == tt.CUT_AT_CAP and not self.refused
-
-    def legacy_score(self) -> Optional[int]:
-        """The score this script recorded for the reply before 2026-11-01
-        (a cut reply parsed like any other)."""
-        return None if self.refused or not self.text else parse_score(self.text)
-
-
-def _get(obj: Any, name: str, default: Any = None) -> Any:
-    return obj.get(name, default) if isinstance(obj, dict) else getattr(obj, name, default)
-
-
-async def _items(x: Any):
-    """Items of a sync or async iterable, or of an awaitable giving one (the
-    SDKs' batch results decoder)."""
-    if asyncio.iscoroutine(x) or isinstance(x, asyncio.Future):
-        x = await x
-    if hasattr(x, "__aiter__"):
-        async for item in x:
-            yield item
-    else:
-        for item in x:
-            yield item
-
-
-def _content_text(content: Any) -> str:
-    """The text of an OpenAI ``files.content`` response."""
-    text = _get(content, "text")
-    if callable(text):
-        text = text()
-    if text is None and hasattr(content, "read"):
-        raw = content.read()
-        text = raw.decode("utf-8") if isinstance(raw, bytes) else raw
-    return text or ""
-
-
-async def _anthropic_batch_replies(client: Any, batch_id: str) -> Tuple[Dict[str, BatchReply], Set[str]]:
-    """``(short id -> reply for the succeeded results, every short id returned)``."""
-    replies: Dict[str, BatchReply] = {}
-    seen: Set[str] = set()
-    async for res in _items(client.messages.batches.results(batch_id)):
-        bcid = str(_get(res, "custom_id"))
-        seen.add(bcid)
-        result = _get(res, "result")
-        if _get(result, "type") != "succeeded":
-            continue
-        text, finish, n_in, _n_out, refused = tt.anthropic_reply(_get(result, "message"))
-        replies[bcid] = BatchReply(text, finish, refused, n_in)
-    return replies, seen
-
-
-async def _openai_batch_replies(client: Any, batch_id: str) -> Dict[str, BatchReply]:
-    """custom id -> reply for the succeeded lines of an OpenAI batch's output file."""
-    batch = await client.batches.retrieve(batch_id)
-    fid = _get(batch, "output_file_id")
-    if not fid:
-        raise BatchRecordError(f"batch {batch_id} has no output file")
-    try:
-        text = _content_text(await client.files.content(fid))
-    except Exception as e:  # noqa: BLE001 -- the runner deletes the file once collected
-        raise BatchRecordError(f"batch {batch_id}: output file {fid} unreadable ({type(e).__name__}: {e}; "
-                               f"the batch runner deletes it once the batch is collected)") from e
-    replies: Dict[str, BatchReply] = {}
-    for line in text.split("\n"):
-        if not line.strip():
-            continue
-        item = json.loads(line)
-        response = item.get("response") or {}
-        if item.get("error") is None and response.get("status_code") == 200:
-            t, finish, pt, _ct = tt.openai_reply(response.get("body") or {})
-            replies[str(item.get("custom_id"))] = BatchReply(t, finish, False, pt)
-    return replies
 
 
 @dataclass
@@ -1582,155 +2274,6 @@ def entities_to_reask(original: Set[str], repairs: Sequence[Dict[str, Any]], cel
         current.update(rec.get("still_truncated") or [])
     todo = sorted(n for n in current if cap > last_cap.get(n, cell_cap))
     return todo, sorted(current - set(todo))
-
-
-def _earlier_reasked(cell_data: Dict[str, Any]) -> Set[str]:
-    return {n for rec in (cell_data.get("_provenance") or {}).get("repairs") or []
-            for n in rec.get("reasked") or []}
-
-
-def _read_cell(job: AxisJob, model: str) -> Optional[Dict[str, Any]]:
-    p = cell_dir(job, model) / "scores_descriptions.json"
-    if not p.exists():
-        return None
-    return json.loads(p.read_text())
-
-
-async def read_batch_record(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob], client: Any,
-                            notes: List[str]) -> Dict[int, Dict[str, BatchReply]]:
-    """The model's batch results by axis index and entity, for every batch its
-    ``batch_state.json`` records, checked against the cells.
-
-    Custom ids are ``a<axis index>|<entity>``.  OpenAI results carry them; the
-    Anthropic runner sent short ids (``r000123``) and maps them back through
-    its chunk files, which it deletes once a batch is collected.  Without a
-    chunk file the short ids are rebuilt from the order the requests were
-    written in: the axes judged in batch in axis-map order, each axis's
-    entities in load order, chunks in their recorded order, as a run (or a
-    rerun that collected the batches in flight first and submitted the rest)
-    writes them.  Either way every result must agree with the cell it maps to
-    (its score as this script recorded it, a cut reply's either that or none),
-    or :class:`BatchRecordError` is raised."""
-    model = mrun.model
-    work = batch_work_dir(ctx, model)
-    state_path = work / "batch_state.json"
-    if not state_path.exists():
-        raise BatchRecordError(f"no {state_path}")
-    chunks = [r for r in json.loads(state_path.read_text()).get("chunks", []) if r.get("batch_id")]
-    if not chunks:
-        raise BatchRecordError(f"{state_path} records no batch")
-    if any(not r.get("collected") for r in chunks):
-        raise BatchRecordError(f"{state_path} records batches not yet collected: finish the run first")
-    amap = AxisMap(work / "axis_map.json")
-    rec_settings = amap.settings or {}
-    if rec_settings.get("model") not in (None, model):
-        raise BatchRecordError(f"{work / 'axis_map.json'} was requested with {rec_settings.get('model')}, "
-                               f"not {model}")
-    recorded_dir = rec_settings.get("instructions_dir")
-    if recorded_dir and Path(recorded_dir).resolve() != Path(ctx.instructions_dir).resolve():
-        notes.append(f"the batches were requested with --instructions_dir {recorded_dir}, this run reads "
-                     f"{ctx.instructions_dir}")
-
-    # The axis map's axes: the repair's own job for an axis it names, else the map's entry.
-    by_name = {(j.axis_dir, j.pos, j.neg, j.pair_type): j for j in jobs}
-    axis_jobs: Dict[int, AxisJob] = {}
-    for idx, entry in amap.axes.items():
-        key = (entry["axis_dir"], entry["pos"], entry["neg"], entry["pair_type"])
-        axis_jobs[idx] = by_name.get(key) or AxisJob.from_map_entry(entry)
-    cells_data = {idx: _read_cell(job, model) for idx, job in axis_jobs.items()}
-    batch_axes = sorted(idx for idx, data in cells_data.items()
-                        if data is not None and (data.get("_provenance") or {}).get("transport") == "batch")
-    loaded: Dict[int, AxisJob] = {}
-
-    def entities_of(idx: int) -> List[str]:
-        if idx not in loaded:
-            job = axis_jobs[idx]
-            loaded[idx] = job if job.entities else load_axis(job, ctx.instructions_dir)
-        return [name for _, name, _ in loaded[idx].entities]
-
-    anthropic = provider_for_model(model) == "anthropic"
-    by_cid: Dict[str, BatchReply] = {}
-    if anthropic:
-        per_chunk = []
-        for rec in chunks:
-            try:
-                replies, seen = await _anthropic_batch_replies(client, rec["batch_id"])
-            except Exception as e:  # noqa: BLE001
-                raise BatchRecordError(f"batch {rec['batch_id']}: results unreadable "
-                                       f"({type(e).__name__}: {e})") from e
-            per_chunk.append((rec, replies, seen))
-        if all(Path(rec["path"]).exists() for rec, _, _ in per_chunk):
-            how = "through the chunk files"
-            for rec, replies, _seen in per_chunk:
-                with open(rec["path"], encoding="utf-8") as f:
-                    lines = [json.loads(x) for x in f if x.strip()]
-                to_cid = {line["batch_custom_id"]: line["custom_id"] for line in lines}
-                for bcid, reply in replies.items():
-                    if bcid not in to_cid:
-                        raise BatchRecordError(f"batch {rec['batch_id']}: result {bcid} is not in {rec['path']}")
-                    by_cid[to_cid[bcid]] = reply
-        else:
-            how = "by rebuilding the order the requests were written in (chunk files deleted at collection)"
-            sequence = [custom_id(idx, name) for idx in batch_axes for name in entities_of(idx)]
-            total = sum(int(rec.get("n_requests") or 0) for rec in chunks)
-            if total != len(sequence):
-                raise BatchRecordError(
-                    f"the chunk files are gone and the {total} requests the batches recorded are not the "
-                    f"{len(sequence)} entities of the {len(batch_axes)} axes judged in batch, so the short ids "
-                    f"cannot be mapped back")
-            offset = 0
-            for rec, replies, seen in per_chunk:
-                n = int(rec.get("n_requests") or 0)
-                ids = sequence[offset:offset + n]
-                if Path(rec["path"]).exists():
-                    with open(rec["path"], encoding="utf-8") as f:
-                        if [json.loads(x)["custom_id"] for x in f if x.strip()] != ids:
-                            raise BatchRecordError(f"{rec['path']} does not hold the requests the rebuilt "
-                                                   f"order gives it")
-                for bcid in seen:
-                    m = _SHORT_ID_RE.fullmatch(bcid)
-                    if m is None or int(m.group(1)) >= n:
-                        raise BatchRecordError(f"batch {rec['batch_id']}: short id {bcid!r} is outside "
-                                               f"r000000..r{n - 1:06d}")
-                for bcid, reply in replies.items():
-                    by_cid[ids[int(bcid[1:])]] = reply
-                offset += n
-    else:
-        how = "by their custom ids"
-        for rec in chunks:
-            by_cid.update(await _openai_batch_replies(client, rec["batch_id"]))
-
-    out: Dict[int, Dict[str, BatchReply]] = {}
-    for cid, reply in by_cid.items():
-        idx, name = split_custom_id(cid)
-        out.setdefault(idx, {})[name] = reply
-
-    # Every result must agree with the cell it maps to.
-    checked = 0
-    mismatches: List[str] = []
-    for idx, replies in out.items():
-        data = cells_data.get(idx)
-        if idx not in batch_axes or data is None:
-            continue
-        result = data.get("result") or {}
-        skip = _earlier_reasked(data)
-        for name, reply in replies.items():
-            if name in skip:
-                continue
-            checked += 1
-            have = result.get(name)
-            ok = have in (reply.legacy_score(), None) if reply.cut else have == reply.legacy_score()
-            if not ok:
-                mismatches.append(f"{axis_jobs[idx].axis_dir}/{name}: cell {have}, batch "
-                                  f"{reply.legacy_score()}")
-    if mismatches:
-        raise BatchRecordError(f"{len(mismatches)} of {checked} batch results, mapped {how}, disagree with "
-                               f"the cells' scores (e.g. {'; '.join(mismatches[:5])}): the record does not "
-                               f"describe these cells")
-    n_cut = sum(r.cut for replies in out.values() for r in replies.values())
-    logger.info(f"[{model}] batch record: {len(by_cid)} results from {len(chunks)} batch(es), mapped {how}; "
-                f"{checked} checked against the cells, all agree; {n_cut} cut at max_tokens")
-    return out
 
 
 def _same_correlations(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
@@ -1795,7 +2338,7 @@ def patch_cell(rc: RepairCell, mrun: ModelRun, max_tokens: int) -> Tuple[List[st
         scores_by_mode={"descriptions": result},
         projections=job.projections,
         slots=rc.slots,
-        excluded_set=set(job.axis_spec.exclusions),
+        excluded_set=job.axis_spec.pole_entity_ids(),
     )
     usage = merge_usage_dict(json.loads((d / "usage.json").read_text()), rc.usage)
     atomic_write_text(json.dumps(new_data, indent=2), d / "scores_descriptions.json", logger_obj=logger)
@@ -1818,6 +2361,19 @@ def prepare_repair_cell(rc: RepairCell, mrun: ModelRun, ctx: RunContext, notes: 
         notes.append(f"{job.axis_dir}: recorded request settings {json.dumps(prov.get('request_settings'))} "
                      f"differ from this run's {json.dumps(mrun.settings)} (pass the run's --request_setting "
                      f"and --cell_label); left alone")
+        return False
+    if int(prov.get("entities_per_call") or 1) > 1:
+        notes.append(f"{job.axis_dir}: judged {prov['entities_per_call']} entities per call, and a repair re-asks one "
+                     f"at a time, a different prompt; left alone")
+        return False
+    if prov.get("rubric", "v3") != RUBRIC.name:
+        notes.append(f"{job.axis_dir}: judged under rubric {prov.get('rubric', 'v3')}, not this run's {RUBRIC.name} "
+                     f"(pass the run's --rubric); left alone")
+        return False
+    recorded_names = prov.get("name_format", CHECKPOINT_DEFAULTS["name_format"])
+    if recorded_names != NAME_FORMAT:
+        notes.append(f"{job.axis_dir}: its prompts show names as {recorded_names}, this run's as {NAME_FORMAT} "
+                     f"(pass the run's --name_format); left alone")
         return False
     cell_cap = int(prov.get("max_tokens") or 0)
     rc.todo, already = entities_to_reask(rc.original, prov.get("repairs") or [], cell_cap, ctx.max_tokens)
@@ -1851,7 +2407,7 @@ def prepare_repair_cell(rc: RepairCell, mrun: ModelRun, ctx: RunContext, notes: 
     job.projections = {s: all_proj[s] for s in rc.slots}
     again = compute_correlations(scores_by_mode={"descriptions": rc.data.get("result") or {}},
                                  projections=job.projections, slots=rc.slots,
-                                 excluded_set=set(job.axis_spec.exclusions))
+                                 excluded_set=job.axis_spec.pole_entity_ids())
     if not _same_correlations(json.loads(json.dumps(again)), on_disk):
         notes.append(f"{job.axis_dir}: the correlations recomputed from the cell's scores and "
                      f"{job.projections_file} are not those on disk; left alone")
@@ -1867,7 +2423,6 @@ async def repair_model(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob], *, 
     stats = RepairStats()
     notes: List[str] = []
     cells: List[RepairCell] = []
-    need_batch: List[RepairCell] = []
     for job in jobs:
         d = cell_dir(job, model)
         if not cell_done(job, model):
@@ -1879,49 +2434,9 @@ async def repair_model(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob], *, 
         if "truncated" in prov:
             rc.source, rc.original = SOURCE_PROVENANCE, set(prov.get("truncated") or [])
             cells.append(rc)
-        elif prov.get("transport") == "batch":
-            rc.source = SOURCE_BATCH
-            need_batch.append(rc)
         else:
-            notes.append(f"{job.axis_dir}: no truncation record (made "
-                         f"{'by ' + prov['transport'] if prov.get('transport') else 'by an earlier version of this script'}, "
-                         f"no truncation list in its provenance); left alone")
-
-    client = None
-    if need_batch or not dry_run:
-        client = make_anthropic_client() if provider_for_model(model) == "anthropic" else make_openai_client(None)
-    if need_batch:
-        try:
-            record_ = await read_batch_record(ctx, mrun, jobs, client, notes)
-        except BatchRecordError as e:
-            logger.error(f"[{model}] batch record unusable: {e}")
-            for rc in need_batch:
-                notes.append(f"{rc.job.axis_dir}: no usable truncation record ({e}); left alone")
-            record_ = None
-        if record_ is not None:
-            amap = AxisMap(batch_work_dir(ctx, model) / "axis_map.json")
-            requested = amap.settings or {}
-            for rc in need_batch:
-                if (requested.get("max_tokens"), requested.get("request_settings")) != (
-                        rc.prov.get("max_tokens"), rc.prov.get("request_settings")):
-                    notes.append(f"{rc.job.axis_dir}: the batches were requested with max_tokens "
-                                 f"{requested.get('max_tokens')} and {json.dumps(requested.get('request_settings'))}, "
-                                 f"the cell records {rc.prov.get('max_tokens')} and "
-                                 f"{json.dumps(rc.prov.get('request_settings'))}; left alone")
-                    continue
-                entry = rc.job.map_entry()
-                idx = next((i for i, e in amap.axes.items() if e == entry), None)
-                if idx is None:
-                    idx = next((i for i, e in amap.axes.items()
-                                if (e["axis_dir"], e["pos"], e["neg"], e["pair_type"])
-                                == (rc.job.axis_dir, rc.job.pos, rc.job.neg, rc.job.pair_type)), None)
-                if idx is None or idx not in record_:
-                    notes.append(f"{rc.job.axis_dir}: not in the batch record; left alone")
-                    continue
-                replies = record_[idx]
-                rc.original = {n for n, r in replies.items() if r.cut}
-                rc.est_in = {n: r.n_in for n, r in replies.items() if r.cut}
-                cells.append(rc)
+            notes.append(f"{job.axis_dir}: no truncation record (no truncation list in its provenance, as in "
+                         f"cells made before 2026-11-01); left alone")
 
     work_cells = [rc for rc in cells if prepare_repair_cell(rc, mrun, ctx, notes)]
     rate_in, rate_out = price_for_model(model)
@@ -1934,9 +2449,7 @@ async def repair_model(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob], *, 
     print(f"\n{model}{CELL_LABEL}: {len(work_cells)} cell(s) with replies cut at the cap to re-ask, {n_todo} "
           f"entities, at max_tokens {ctx.max_tokens}; est. cost ${stats.est_cost:.4f} (real time at "
           f"${rate_in:.2f}/${rate_out:.2f} per 1M; input as measured where known, output at the cap)")
-    print(f"  {len(cells)} finished cell(s) with a truncation record "
-          f"({sum(rc.source == SOURCE_PROVENANCE for rc in cells)} from their provenance, "
-          f"{sum(rc.source == SOURCE_BATCH for rc in cells)} from batch results), "
+    print(f"  {len(cells)} finished cell(s) with a truncation record, "
           f"{sum(len(rc.original) for rc in cells)} replies cut in their own runs")
     for rc in work_cells:
         print(f"  {rc.job.axis_dir:55s} {len(rc.todo):4d}  (source: {rc.source}; cell cap "
@@ -1946,6 +2459,7 @@ async def repair_model(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob], *, 
     if dry_run or not work_cells:
         return stats
 
+    client = standard_client(model)
     rate_limiter = RateLimiter(ctx.requests_per_second)
     fatal: List[BaseException] = []
 
@@ -2018,7 +2532,7 @@ async def repair_main(args: argparse.Namespace, jobs: List[AxisJob], runs: List[
     if args.dry_run:
         total = sum(st.est_cost for _, st in results if st is not None)
         print(f"\nTotal estimated cost: ${total:.4f}")
-        print("Dry run only -- no judge calls made, nothing written (batch results were read).")
+        print("Dry run only -- no judge calls made, nothing written.")
         return 1 if failed else 0
     print("\nRepair summary:")
     for mrun, st in results:
@@ -2063,14 +2577,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output_dir", type=str)
     parser.add_argument("--instructions_dir", type=str, default="data")
     parser.add_argument("--judge_model", action="append", required=True,
-                        help="Repeatable. Any model axis_judge_correlation.py itself accepts "
-                             "(gpt-/o1-/o3-/o4- -> OpenAI, claude- -> Anthropic).")
+                        help="Repeatable.  gpt-/o1-/o3-/o4- -> OpenAI, claude- -> Anthropic, gemini- -> Google.")
     parser.add_argument("--transport", choices=list(tt.TRANSPORT_CHOICES), default="auto",
                         help="auto (default): Anthropic -> batch; OpenAI -> flex when MODEL_CAPABILITIES says "
                              "OpenAI takes Flex for the model, batch when it says OpenAI refuses it, flex with "
                              "a probe when untested.  flex / batch / realtime force one for every model.")
     parser.add_argument("--request_setting", action="append", default=[], metavar="[MODEL:]KEY=JSON",
-                        help="Repeatable.  A request field set on top of judge_tier_transport's "
+                        help="Repeatable.  A request field set on top of assistant_axis/judge.py's "
                              "JUDGE_REQUEST_SETTINGS, for every model or only those matching MODEL "
                              "(e.g. 'gpt-6:reasoning_effort=\"low\"'); a null value removes a field.")
     parser.add_argument("--slots", type=str, default="all",
@@ -2087,6 +2600,11 @@ def build_parser() -> argparse.ArgumentParser:
                              "c1-c4 (contemporary rubrics: the score's purpose stated, 0 only for balanced "
                              "entities, -3..+3 or -10..+10, one or two sentences of reasoning).  Give a "
                              "non-default rubric its own --cell_label; the rubric is recorded in each cell.")
+    parser.add_argument("--name_format", choices=list(jr.NAME_FORMATS), default=jr.DEFAULT_NAME_FORMAT,
+                        help="How prompts show entity names: judge_label (default), the project's judge display "
+                             "form; mechanical, underscores to spaces, reproduces the prompts of the cells judged "
+                             "before 2026-11-02, to extend one of them.  Not the v3 rubrics, which are "
+                             "build_static_prompt's.")
     parser.add_argument("--cell_label", type=str, default="",
                         help="Suffix for this run's cell directories, e.g. @t0 or @nothink: cells go to "
                              "<axis>_tier_eval/<model><label>/ (and batches to _tier_eval_batches/<model><label>/), "
@@ -2124,6 +2642,55 @@ def build_parser() -> argparse.ArgumentParser:
                              "groups of a seeded shuffle; 'rows' / 'cols', the rows or the columns of N x N squares "
                              "of the same seeded shuffle, so that the two passes share no batch-mate (judge both, "
                              "under two labels, and average them).")
+    parser.add_argument("--instruction_round", type=int, default=None,
+                        help="With an i1_* rubric (required): which round of one instruction per entity this cell "
+                             "judges, from 0; each entity goes through its instructions in its own seeded order.")
+    parser.add_argument("--responses_dir", type=str, default=None,
+                        help="With an r1_* rubric (required): the pipeline tree with <kind>/responses/<entity>.jsonl "
+                             "and <kind>/scores/<entity>.json (e.g. 'runpod_workspace/qwen/qwen-3-32b Roger 8slot'); "
+                             "the entity's pos responses step 3 scored 3 are the items, one score each, the cell's "
+                             "result their per-entity means.  A call holds --entities_per_call answers to one question.")
+    parser.add_argument("--response_split", type=int, default=3,
+                        help="With an r1_* rubric: the number of parts each entity's questions are split into "
+                             "(default 3, the thirds of the round-robin coverage; 9 for a ninth, whose parts 0, 3 "
+                             "and 6 are the thirds of third 0).")
+    parser.add_argument("--response_part", type=int, default=None,
+                        help="With an r1_* rubric: judge only the part of each entity's questions with "
+                             "(question + entity rank) %% --response_split equal to this (the round-robin "
+                             "coverage: the judges' thirds together judge every response once).  Default: every "
+                             "kept response.")
+    parser.add_argument("--axes_per_call", type=int, default=1,
+                        help="With an rk_* rubric (required) and --axes_file: judge this many consecutive axes of the "
+                             "file in each call (the response text paid once for all of them); each axis still gets "
+                             "its own cell, and the group's answer log lives under _tier_eval_multi/.  Live and Flex only.")
+    parser.add_argument("--directions", choices=DIRECTION_MODES, default="own",
+                        help="Which way each call presents its axis (Roger, 2026-11-04: balance the directions so that "
+                             "no valence asymmetry enters a result).  own (default): the axis's order.  descriptions: "
+                             "a judge's passes alternate (--direction_pass).  instructions: Roger's table per judge and "
+                             "instruction (an i1_* rubric; the three tier judges).  responses: a coin per call.  "
+                             "Swapped calls' scores are mapped back; every answer record and the cell say which way.  "
+                             "Batched rubrics only; not with --swap_poles or several axes per call.")
+    parser.add_argument("--stack", type=int, default=0,
+                        help="With --axes_per_call M and an rk_* rubric: judge k axes a call (or --stack 1 with r1_pn: "
+                             "one axis a call, a batch's M calls one after another, so its prefix stays cached), each batch's M axes "
+                             "partitioned afresh at random into groups of k (a random letter order, each axis's "
+                             "direction a coin per call), so that leakage between stacked axes is noise, not a fixed "
+                             "bias; every batch sent once per group.  Live and Flex only.")
+    parser.add_argument("--stack_seed", type=int, default=1, help="With --stack: the seed of the partitions.")
+    parser.add_argument("--direction_pass", type=int, default=0,
+                        help="With --directions descriptions: which of the judge's passes this run is, from 0.")
+    parser.add_argument("--swap_poles", action="store_true",
+                        help="Judge every axis with its ends exchanged: the positive pole named first and at the low "
+                             "number.  Scores are mapped back to the axis's own direction, so the cells read like any "
+                             "other; for testing what the order does.  Needs --cell_label.")
+    parser.add_argument("--axis_index", type=axis_indices, default=None,
+                        help="With --axes_per_call and a cached-prefix response rubric: judge only these members of "
+                             "each group, from 0, comma-separated: one with r1_pn (one axis per call), two or more "
+                             "with rk_pn (judged together).  Every run on the group then sends the same batches, so "
+                             "a cached prefix (the question and the answers) is read back by the next run.")
+    parser.add_argument("--response_chars", type=int, default=None,
+                        help="With an r1_* rubric: cut each answer to this many characters (about 4 a token) with "
+                             "a mark.  Default: whole.")
     parser.add_argument("--shuffle_seed", type=int, default=0,
                         help="Seed of the batch shuffle (--entities_per_call); another seed gives every entity "
                              "different batch-mates, which measures the crosstalk.")
@@ -2144,11 +2711,9 @@ def build_parser() -> argparse.ArgumentParser:
                              "model's request settings as in a normal run, --max_tokens) exactly the entities "
                              "whose reply was cut at the cap, and patch each cell (those scores, its "
                              "correlations.json, usage.json, and a 'repairs' record in its provenance).  The "
-                             "cut entities come from the cell's provenance 'truncated' list, or, for a batch "
-                             "cell made before 2026-11-01, from its batches' results "
-                             f"({BATCH_DIRNAME}/<model><label>/batch_state.json); a cell with neither is left "
-                             "alone.  With --dry_run: report the cells, counts and estimated cost (batch results "
-                             "are read; no judge calls).")
+                             "cut entities come from the cell's provenance 'truncated' list; a cell without one "
+                             "is left alone.  With --dry_run: report the cells, counts and estimated cost (no "
+                             "judge calls).")
     return parser
 
 
@@ -2159,7 +2724,15 @@ def build_jobs(args: argparse.Namespace, parser: argparse.ArgumentParser) -> Lis
         given = [k for k, v in single.items() if v is not None]
         if given:
             parser.error(f"--axes_file excludes {', '.join(given)}")
-        return jobs_from_axes_file(Path(args.axes_file), Path(args.experiments_dir))
+        jobs = jobs_from_axes_file(Path(args.axes_file), Path(args.experiments_dir))
+        if args.axes_per_call == 1:
+            return jobs
+        groups = group_jobs(jobs, args.axes_per_call, Path(args.experiments_dir))
+        short = [g.axis_dir for g in groups if args.axis_index and max(args.axis_index) >= len(g.members)]
+        if short:
+            parser.error(f"--axis_index {','.join(map(str, args.axis_index))}: the group {short[0]} has fewer members "
+                         f"(the axes file's rows come in groups of --axes_per_call; the last may be shorter)")
+        return groups
     missing = [k for k, v in single.items() if v is None]
     if missing:
         parser.error(f"without --axes_file, {', '.join(missing)} {'is' if len(missing) == 1 else 'are'} required")
@@ -2189,8 +2762,11 @@ def dry_run_report(jobs: List[AxisJob], runs: List[ModelRun], skipped_axes: List
         if per_call > 1:
             n_calls = sum(math.ceil((len(job.entities) - saved_answers(job, model)) / per_call) for job in todo)
         rate_in, rate_out = price_for_model(tt.price_key(model, choice.transport))
-        est = n_calls * ((EST_IN_PER_ENTITY + 150 * (per_call - 1)) * rate_in
-                         + EST_OUT_PER_ENTITY * per_call * rate_out) / 1e6
+        if per_call > 1:
+            est = n_calls * ((EST_BATCH_HEADER + EST_BATCH_IN_BY_SOURCE[RUBRIC.text_source] * per_call) * rate_in
+                             + EST_BATCH_OUT_PER_ENTITY * per_call * rate_out) / 1e6
+        else:
+            est = n_calls * (EST_IN_PER_ENTITY * rate_in + EST_OUT_PER_ENTITY * rate_out) / 1e6
         total += est
         print(f"{model:22s} provider={provider_for_model(model):9s} transport={choice.transport}"
               f"{' (probe)' if choice.probe else '':8s} rate=${rate_in:.3f}/${rate_out:.3f} per 1M  "
@@ -2202,17 +2778,87 @@ def dry_run_report(jobs: List[AxisJob], runs: List[ModelRun], skipped_axes: List
         if choice.transport == "flex":
             print(f"{'':22s} (Flex at batch prices; a request sent to the standard tier after "
                   f"{tt.FLEX_FALLBACK_AFTER_S:.0f} s of Flex failures costs the full rate)")
-    print(f"\nTotal estimated cost: ${total:.2f}  (token model: {EST_IN_PER_ENTITY} in / {EST_OUT_PER_ENTITY} "
-          f"out per entity, coarse)")
+    tokens = (f"{EST_BATCH_HEADER} + {EST_BATCH_IN_BY_SOURCE[RUBRIC.text_source]} per entity in, "
+              f"{EST_BATCH_OUT_PER_ENTITY} per entity out"
+              if BATCHING["n"] > 1 else f"{EST_IN_PER_ENTITY} in / {EST_OUT_PER_ENTITY} out per entity")
+    print(f"\nTotal estimated cost: ${total:.2f}  (token model: {tokens}, coarse)")
     print("Dry run only -- no API calls made, no cost incurred, nothing written.")
 
 
 async def main_async(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    global CELL_LABEL, RUBRIC
+    global CELL_LABEL, RUBRIC, NAME_FORMAT, NAME_SHOW, INSTRUCTION_ROUND, RESPONSES_DIR, RESPONSE_SPLIT, RESPONSE_PART, \
+        RESPONSE_CHARS, AXIS_INDEX, SWAP_POLES, DIRECTIONS, DIRECTION_PASS, STACK, STACK_SEED
     CELL_LABEL = args.cell_label or ""
-    RUBRIC = jr.get(args.rubric)
+    SWAP_POLES = bool(args.swap_poles)
+    DIRECTIONS, DIRECTION_PASS = args.directions, args.direction_pass
+    STACK, STACK_SEED = args.stack, args.stack_seed
+    if STACK:
+        rubric = jr.get(args.rubric)
+        if rubric.text_source != "responses" or (STACK == 1) == rubric.multi_axis:
+            parser.error("--stack goes with a multi-axis response rubric (rk_pn, rk_pl, rk_pa), or --stack 1 with a "
+                         "one-axis one (r1_pn: every axis of the group a call of its own, a batch's calls in turn)")
+        if not 1 <= STACK <= args.axes_per_call:
+            parser.error("--stack k needs 1 <= k <= --axes_per_call")
+        if args.axis_index is not None or DIRECTIONS != "own" or args.swap_poles:
+            parser.error("--stack makes its own groups and directions: not with --axis_index, --directions or --swap_poles")
+        if not args.cell_label:
+            parser.error("--stack needs a --cell_label")
+    if DIRECTIONS != "own":
+        need = {"descriptions": "descriptions", "instructions": "instruction_rounds", "responses": "responses"}[DIRECTIONS]
+        rubric = jr.get(args.rubric)
+        if SWAP_POLES:
+            parser.error("--directions and --swap_poles exclude each other")
+        if rubric.text_source != need:
+            parser.error(f"--directions {DIRECTIONS} goes with a rubric judging {need}, not {rubric.name}")
+        if rubric.build_batch is None or args.entities_per_call < 2 or rubric.multi_axis:
+            parser.error(f"--directions {DIRECTIONS}: a batched one-axis rubric with --entities_per_call 2 or more")
+        if DIRECTIONS == "instructions":
+            unknown = [m for m in args.judge_model if m not in INSTRUCTION_DIRECTION_JUDGES]
+            if unknown:
+                parser.error(f"--directions instructions: no column for {', '.join(unknown)} in INSTRUCTION_DIRECTIONS "
+                             f"({', '.join(INSTRUCTION_DIRECTION_JUDGES)})")
+        if not CELL_LABEL:
+            parser.error(f"--directions {DIRECTIONS} needs a --cell_label, so that its cells stand apart")
+    if DIRECTION_PASS and DIRECTIONS != "descriptions":
+        parser.error("--direction_pass goes with --directions descriptions")
+    RUBRIC = jr.with_poles_swapped(jr.get(args.rubric)) if SWAP_POLES else jr.get(args.rubric)
+    if SWAP_POLES and not CELL_LABEL:
+        parser.error("--swap_poles needs a --cell_label, so that its cells stand apart from the axis's own")
+    if (RUBRIC.text_source == "instruction_rounds") != (args.instruction_round is not None):
+        parser.error("--instruction_round goes with an i1_* rubric, and an i1_* rubric needs it")
+    INSTRUCTION_ROUND = args.instruction_round or 0
+    if (RUBRIC.text_source == "responses") != (args.responses_dir is not None):
+        parser.error("--responses_dir goes with an r1_* rubric, and an r1_* rubric needs it")
+    if RUBRIC.text_source != "responses" and (args.response_part is not None or args.response_chars is not None):
+        parser.error("--response_part and --response_chars go with an r1_* rubric")
+    if RUBRIC.text_source == "responses" and args.entities_per_call < 2:
+        parser.error("an r1_* rubric judges several answers to one question per call: give --entities_per_call")
+    if args.response_split < 1 or (args.response_part is not None and not 0 <= args.response_part < args.response_split):
+        parser.error("--response_part must be from 0 to --response_split - 1")
+    if RUBRIC.multi_axis and args.axes_per_call < 2:
+        parser.error("an rk_* rubric needs --axes_per_call (2 or more)")
+    if args.axes_per_call > 1 and not (RUBRIC.multi_axis or args.axis_index is not None or args.stack == 1):
+        parser.error("--axes_per_call goes with an rk_* rubric, or with --axis_index or --stack 1 and a one-axis "
+                     "response rubric")
+    if args.axis_index is not None:
+        if (RUBRIC.text_source != "responses" or args.axes_per_call < 2
+                or not all(0 <= i < args.axes_per_call for i in args.axis_index)):
+            parser.error("--axis_index needs --axes_per_call, a response rubric, and 0 <= each index < axes per call")
+        if RUBRIC.multi_axis and len(args.axis_index) < 2:
+            parser.error(f"--axis_index with {RUBRIC.name}: two or more members (one axis per call is r1_pn)")
+        if not RUBRIC.multi_axis and len(args.axis_index) != 1:
+            parser.error(f"--axis_index with {RUBRIC.name}: one member (several judged together is rk_pn)")
+    if args.axes_per_call > 1 and not args.axes_file:
+        parser.error("--axes_per_call needs --axes_file (the axes judged together are consecutive rows)")
+    AXIS_INDEX = args.axis_index
+    RESPONSES_DIR = Path(args.responses_dir) if args.responses_dir else None
+    RESPONSE_SPLIT, RESPONSE_PART, RESPONSE_CHARS = args.response_split, args.response_part, args.response_chars
+    if args.repair_truncated and RUBRIC.text_source != "descriptions":
+        parser.error("--repair_truncated repairs description cells only")
+    NAME_FORMAT = args.name_format
+    NAME_SHOW = jr.name_shower(NAME_FORMAT, Path(args.instructions_dir))
     BATCHING["n"], BATCHING["seed"], BATCHING["design"] = max(1, args.entities_per_call), args.shuffle_seed, args.batch_design
     if args.entities_per_call > 1:
         if RUBRIC.build_batch is None:
@@ -2240,6 +2886,8 @@ async def main_async(argv: Optional[Sequence[str]] = None) -> int:
                 choice = tt.choose_transport(model, args.transport)
             except (tt.JudgeRequestError, ValueError) as e:
                 parser.error(str(e))
+        if args.axes_per_call > 1 and choice.transport == "batch":
+            parser.error(f"{model}: --axes_per_call is not wired for the Batch API yet; --transport flex or realtime")
         runs.append(ModelRun(model=model, settings=tt.judge_request_settings(model, overrides), choice=choice))
 
     if args.repair_truncated:
@@ -2266,7 +2914,7 @@ async def main_async(argv: Optional[Sequence[str]] = None) -> int:
         logger.warning(f"--limit {args.limit}: only scoring the first {args.limit} entities of each axis "
                        f"(correlations below are NOT meaningful at this n, validation only)")
     logger.info(f"{len(jobs)} axes, {sum(len(j.entities) for j in jobs)} (axis, entity) pairs scorable "
-                f"(description mode)")
+                f"({RUBRIC.mode} mode)")
 
     # Every usage key a run may charge must be priced before anything is sent.
     for mrun in runs:

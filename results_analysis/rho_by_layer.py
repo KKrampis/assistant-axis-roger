@@ -130,6 +130,9 @@ from results_analysis.canonical_angles.whitening import (
     WhiteningBasis,
     fit_shear,
 )
+from results_analysis.pair_list_guard import (  # noqa: E402
+    STATIC_DI_CACHES, check_pair_list, loader_response_caches,
+)
 
 
 def _load_rho_json(
@@ -425,8 +428,10 @@ def main() -> int:
                    help=f"L values to plot in --regime soft_shear; 0 = "
                         f"raw, L>0 = soft-shear truncation depth "
                         f"(default: {DEFAULT_LS}).")
+    # Choices = the kinds build_goal_nogoal_subspaces accepts (the old
+    # "traits"/"roles" were rejected by it; review 2026-10-12).
     p.add_argument("--ca_kind", default="combined",
-                   choices=("combined", "traits", "roles"),
+                   choices=("combined", "r_only", "t_only"),
                    help="Goal/no-goal subspaces for --regime soft_shear "
                         "(passed to ``build_goal_nogoal_subspaces``).  "
                         "Ignored in --regime soft_K.")
@@ -455,6 +460,11 @@ def main() -> int:
                         "merged result is rewritten to --rhos_json.")
     add_di_weights_arg(p)
     args = p.parse_args()
+    # Qwen3's slot numbers and names, used on every run (multi-model plan § 5.6)
+    from assistant_axis.axis import require_tree_header_layout
+    require_tree_header_layout(
+        args.data_dir, where="rho_by_layer.py",
+        hint="its SLOTS (0, 3, 6, 7) and SLOT_LABELS are Qwen3's 8-slot layout")
     di_weights = parse_di_weights_arg(args.di_weights)
 
     experiment_dir = Path(args.experiment_dir).resolve()
@@ -537,6 +547,16 @@ def main() -> int:
     )
     print(f"Loaded {len(pairs_di)} desc+inst axis pairs from {args.pairs_di}")
     print(f"Loaded {len(pairs_resp)} responses axis pairs from {args.pairs_resp}")
+    # Walk-through A2: every listed axis needs its pole vectors and the
+    # caches read below; one missing used to drop the axis silently.
+    check_pair_list(pairs_di, pair_list=experiment_dir / args.pairs_di,
+                    script="rho_by_layer.py", data_dir=data_dir,
+                    experiment_dir=experiment_dir, caches_all=STATIC_DI_CACHES)
+    check_pair_list(pairs_resp, pair_list=experiment_dir / args.pairs_resp,
+                    script="rho_by_layer.py", data_dir=data_dir,
+                    experiment_dir=experiment_dir,
+                    caches_any=[("GPT response cache", loader_response_caches("gpt")),
+                                ("Haiku response cache", loader_response_caches("haiku"))])
 
     print("Loading entity tensors (all kept slots, all layers)...", flush=True)
     entity_vecs, default_arr, n_layers, kinds_for_name = _build_entity_cache(data_dir)

@@ -290,6 +290,13 @@ class TestParseJudgeScore:
         assert parse_judge_score("score: 4") is None
         assert parse_judge_score("Some reasoning. SCORE: 99") is None
 
+    def test_marker_out_of_range_does_not_fall_back_to_reasoning_digits(self):
+        # Regression (2026-10-12): with an in-range integer in the
+        # reasoning, the invalid marker used to fall through to stage 2,
+        # which returned that integer (2 here) as the score.
+        assert parse_judge_score("The reply shows 2 of the role's traits.\nSCORE: 4") is None
+        assert parse_judge_score("Fits 1 of 3 cues.\nSCORE: 12") is None
+
     def test_marker_beats_out_of_range_first_integer(self):
         # Out-of-range integer earlier in the text doesn't poison the
         # parser when an in-range marker is present.
@@ -306,3 +313,78 @@ class TestParseJudgeScore:
     def test_no_digits(self):
         assert parse_judge_score("REFUSAL") is None
         assert parse_judge_score("the model refused") is None
+
+
+def test_score_responses_defaults_fit_the_reasoning_first_rubrics():
+    """The library helpers' max_tokens default was 10, which truncates every
+    reasoning-first reply (pipeline/3_judge.py uses 200)."""
+    import inspect
+    from assistant_axis.judge import score_responses, score_responses_sync
+    for fn in (score_responses, score_responses_sync):
+        assert inspect.signature(fn).parameters["max_tokens"].default == 200
+
+
+# ---------------------------------------------------------------------------
+# Step 3's strict reading (walk-through P4 / D5, 2026-10-12)
+# ---------------------------------------------------------------------------
+
+class TestRequireMarker:
+    """``require_marker=True``: exactly one ``SCORE: <int>`` is the answer;
+    none or several is None, never a digit of the reasoning (review P3 D1:
+    "...lists 3 examples" was read as 3)."""
+
+    def test_one_marker_is_the_answer(self):
+        assert parse_judge_score("Fits the role.\nSCORE: 3", require_marker=True) == 3
+        assert parse_judge_score("score : 0", require_marker=True) == 0
+
+    def test_no_marker_is_unparseable(self):
+        for text in ("The reply lists 3 examples of the trait and", "2", "After analysis, 1."):
+            assert parse_judge_score(text, require_marker=True) is None
+            assert parse_judge_score(text) is not None          # the default still reads it
+
+    def test_several_markers_are_unparseable(self):
+        text = "SCORE: 2 at first glance.\nOn reflection...\nSCORE: 3"
+        assert parse_judge_score(text, require_marker=True) is None
+        assert parse_judge_score(text) == 2                     # the default takes the first
+
+    def test_out_of_range_stays_none(self):
+        assert parse_judge_score("SCORE: 4", require_marker=True) is None
+
+
+class TestRejectTruncated:
+    @staticmethod
+    def _client(text, finish_reason):
+        import types
+
+        async def create(**kw):
+            return types.SimpleNamespace(
+                choices=[types.SimpleNamespace(message=types.SimpleNamespace(content=text),
+                                               finish_reason=finish_reason)],
+                usage=types.SimpleNamespace(prompt_tokens=10, completion_tokens=5))
+        return types.SimpleNamespace(chat=types.SimpleNamespace(
+            completions=types.SimpleNamespace(create=create)))
+
+    def test_a_reply_cut_at_max_tokens_is_none_and_counted(self, monkeypatch):
+        import asyncio
+        from assistant_axis import judge as J
+        from assistant_axis.judge_pricing import MultiModelUsage
+        monkeypatch.setattr(J, "TRUNCATED_REPLIES", {})
+        usage = MultiModelUsage()
+        client = self._client("Reasoning that runs on and SCORE: 3", "length")
+        out = asyncio.run(J.call_judge_batch(client, ["p1", "p2"], "gpt-4.1-mini", 200,
+                                             J.RateLimiter(1000), usage=usage,
+                                             reject_truncated=True))
+        assert out == [None, None]
+        assert J.TRUNCATED_REPLIES == {"gpt-4.1-mini": 2}
+        assert usage.n_calls == 2                               # paid for all the same
+        # without the flag the text comes back, as before
+        out = asyncio.run(J.call_judge_batch(client, ["p"], "gpt-4.1-mini", 200, J.RateLimiter(1000)))
+        assert out == ["Reasoning that runs on and SCORE: 3"]
+
+    def test_a_reply_that_stopped_is_returned(self):
+        import asyncio
+        from assistant_axis import judge as J
+        client = self._client("Fine.\nSCORE: 2", "stop")
+        out = asyncio.run(J.call_judge_single(client, "p", "gpt-4.1-mini", 200,
+                                              J.RateLimiter(1000), reject_truncated=True))
+        assert out == "Fine.\nSCORE: 2"

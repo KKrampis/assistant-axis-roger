@@ -162,9 +162,10 @@ from assistant_axis import entity_id, json_metadata, png_metadata  # noqa: E402
 from assistant_axis.entity_id import parse_entity_id  # noqa: E402
 from assistant_axis.judge_loaders import migrate_v1_static_scores  # noqa: E402
 from assistant_axis.judge_pricing import (  # noqa: E402
-    GPT_MINI_RATE_IN, GPT_MINI_RATE_OUT, SONNET4_RATE_IN, SONNET4_RATE_OUT,
+    GPT_MINI_RATE_IN, GPT_MINI_RATE_OUT, SONNET_RATE_IN, SONNET_RATE_OUT,
 )
 from assistant_axis.provenance import (  # noqa: E402
+    CACHE_POLICIES,
     InputSpec,
     current_data_subtree_input,
     current_file_input,
@@ -186,6 +187,7 @@ from results_analysis.judge_tier_cost_plot_pooled import (  # noqa: E402
     display_name,
     label_key,
     place_labels as _place_labels,
+    DEFAULT_PRICE_BASIS,
     PRICE_BASES,
     PRICE_BASIS_LABEL,
     PROVIDER_COLOR,
@@ -193,6 +195,7 @@ from results_analysis.judge_tier_cost_plot_pooled import (  # noqa: E402
     estimate_cost,
     load_measured_cost,
     pareto_frontier,
+    price_factor,
     provider_of,
 )
 
@@ -202,7 +205,9 @@ DEFAULT_SLOTS = [0, 6]
 DEFAULT_LAYERS = [25, 49]
 REGIMES = ("raw", "soft_K", "soft_shear")
 DEFAULT_VARIANT = "s6_l25_raw"   # Konstantinos' projections: slot 6, layer 25, raw
-DEFAULT_PRICE_BAND = 0.25        # USD per axis
+#: USD per axis at DEFAULT_PRICE_BASIS: $0.25 at list price until 2026-11-03, halved with the move to the
+#: real price (every judge here half price), so that the band holds the same judges.
+DEFAULT_PRICE_BAND = 0.125
 DEFAULT_BOOTSTRAP_DRAWS = 2000
 DEFAULT_BOOTSTRAP_SEED = 20261101
 TIER_EVAL_SUFFIX = "_tier_eval"
@@ -214,7 +219,7 @@ LEGACY_CELLS = (
     # "(May)": the May 2026 cells (T=0, max_tokens 1024), kept apart from a tier-eval cell of the
     # same model (gpt-4.1-mini at T=0 and max_tokens 200, <axis>_tier_eval/gpt-4.1-mini/).
     ("gpt-4.1-mini (May)", "gpt", GPT_MINI_RATE_IN, GPT_MINI_RATE_OUT),
-    ("claude-sonnet-4 (May)", "sonnet", SONNET4_RATE_IN, SONNET4_RATE_OUT),
+    ("claude-sonnet-4 (May)", "sonnet", SONNET_RATE_IN, SONNET_RATE_OUT),
 )
 
 
@@ -393,17 +398,16 @@ def _bare(key: str) -> str:
 
 
 def load_cells(axes: Sequence[AxisDef], experiments_dir: Path, tier_eval_dir: Path,
-               kinds_for_name: Dict[str, set], price_basis: str = "list",
+               kinds_for_name: Dict[str, set], price_basis: str = DEFAULT_PRICE_BASIS,
                inputs: Optional[list] = None,
-               include_legacy: bool = True) -> Tuple[Dict[str, Dict[str, Cell]], List[dict]]:
+               include_legacy: bool = True, policy: str = "warn") -> Tuple[Dict[str, Dict[str, Cell]], List[dict]]:
     """``({model: {axis_dir: Cell}}, skipped)``.  Tier cells first; a legacy
     cell fills an axis only where no tier cell of the same label exists."""
     cells: Dict[str, Dict[str, Cell]] = {}
     skipped: List[dict] = []
-    factor = 0.5 if price_basis == "batch" else 1.0
 
     def _load(path: Path, dep_key: str) -> dict:
-        payload, _spec, _check = load_and_register(path, dep_key=dep_key, inputs=inputs, policy="off")
+        payload, _spec, _check = load_and_register(path, dep_key=dep_key, inputs=inputs, policy=policy)
         return _unwrap(payload)
 
     for ax in axes:
@@ -437,7 +441,7 @@ def load_cells(axes: Sequence[AxisDef], experiments_dir: Path, tier_eval_dir: Pa
             n_scored = sum(1 for k in raw if _bare(k) not in poles)
             cells.setdefault(model, {})[ax.axis_dir] = Cell(
                 model, ax.axis_dir, lift_scores(raw, kinds_for_name), n_scored,
-                estimate_cost(n_scored, rin, rout) * factor, False, sp)
+                estimate_cost(n_scored, rin, rout) * price_factor(model.split(" (")[0], price_basis), False, sp)
     return cells, skipped
 
 
@@ -751,7 +755,7 @@ def bootstrap_keep_order(rho: Dict[str, Dict[str, Dict[str, float]]], top: str, 
 
 def check_vs_cached(cells: Dict[str, Dict[str, Cell]], models: Sequence[str],
                     rho: Dict[str, Dict[str, Dict[str, float]]], n: Dict[str, Dict[str, int]],
-                    vkey: str = "s6_l25_raw", inputs: Optional[list] = None) -> dict:
+                    vkey: str = "s6_l25_raw", inputs: Optional[list] = None, policy: str = "warn") -> dict:
     """Compare the ``s6_l25_raw`` rho with each cell's cached
     ``correlations.json`` (slot 6, raw, layer 25 from projections.json)."""
     rows = []
@@ -762,7 +766,7 @@ def check_vs_cached(cells: Dict[str, Dict[str, Cell]], models: Sequence[str],
             cp = c.scores_path.parent / "correlations.json"
             cached = None
             if cp.exists():
-                payload, _s, _c = load_and_register(cp, dep_key=f"corr_{axis}_{m}", inputs=inputs, policy="off")
+                payload, _s, _c = load_and_register(cp, dep_key=f"corr_{axis}_{m}", inputs=inputs, policy=policy)
                 try:
                     cell = _unwrap(payload)["descriptions"]["6"]["raw"]
                     cached = (float(cell["rho"]), int(cell["n"]))
@@ -963,7 +967,7 @@ def render_figure(out_png: Path, models_by_rho: Sequence[str], variants: Sequenc
     if not all(measured[m] for m in models_by_rho):
         handles.insert(3, plt.Line2D([0], [0], marker="o", color="w", markerfacecolor="none", markeredgecolor="#888888",
                                      markersize=8, label="hollow = estimated cost"))
-    for provider, name in (("google", "Google"), ("blend", "Blend of judges")):
+    for provider, name in (("google", "Google"), ("typesafe", "TypeSafe (Jev)"), ("blend", "Blend of judges")):
         if any(provider_of(m) == provider for m in models_by_rho):
             handles.insert(2, plt.Line2D([0], [0], marker="o", color="w", markerfacecolor=PROVIDER_COLOR[provider],
                                          markeredgecolor=PROVIDER_COLOR[provider], markersize=8, label=name))
@@ -1034,8 +1038,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Goal/no-goal subspaces for the shear (default: combined).")
     p.add_argument("--default_variant", default=DEFAULT_VARIANT,
                    help=f"The variant the others are compared with (default: {DEFAULT_VARIANT}).")
-    p.add_argument("--price_basis", choices=PRICE_BASES, default="list",
-                   help="Cost basis, as judge_tier_cost_plot_pooled.py (default: list).")
+    p.add_argument("--price_basis", choices=PRICE_BASES, default=DEFAULT_PRICE_BASIS,
+                   help=f"Cost basis, as judge_tier_cost_plot_pooled.py (default: {DEFAULT_PRICE_BASIS}, the real "
+                        f"price, since 2026-11-03; list before).")
     p.add_argument("--legacy", action="store_true",
                    help="Also compare the May 2026 cells, \"gpt-4.1-mini (May)\" and \"claude-sonnet-4 (May)\" "
                         "(T=0, max_tokens 1024, mixed rubric versions; the Sonnet cells mix two models).  Off "
@@ -1055,6 +1060,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--cache_dir", default=None,
                    help=f"Slice cache (default: <output_dir>/{OUTPUT_STEM}_cache).")
     p.add_argument("--no_cache", action="store_true", help="Neither read nor write the slice cache.")
+    p.add_argument("--cache-policy", dest="cache_policy", choices=CACHE_POLICIES, default="warn",
+                   help="What to do when a judge cache's recorded inputs have changed: strict | warn (default) | "
+                        "rebuild | off.  The slice cache has its own check: built from other files, it is rebuilt.")
+    p.add_argument("--stem", default=OUTPUT_STEM,
+                   help=f"Name of the output files, <stem>.json and <stem>.png (default {OUTPUT_STEM}).")
     return p
 
 
@@ -1096,7 +1106,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         inputs.append(current_file_input("axes_file", Path(args.axes_file)))
 
     cells, skipped = load_cells(axes, experiments_dir, tier_eval_dir, kinds_for_name,
-                                args.price_basis, inputs, include_legacy=args.legacy)
+                                args.price_basis, inputs, include_legacy=args.legacy, policy=args.cache_policy)
     if args.include_models:
         for m in args.include_models:
             if m not in cells:
@@ -1159,7 +1169,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     bands = {k: price_bands(per_variant[k], frontiers[k], models, args.price_band) for k in vkeys}
     boot = (bootstrap_keep_order(rho, default_rank[0], default_rank[1], vkeys,
                                  args.bootstrap_draws, args.seed) if len(models) >= 2 else None)
-    check = check_vs_cached(cells, models, rho, n, inputs=inputs) if "s6_l25_raw" in vkeys else None
+    check = check_vs_cached(cells, models, rho, n, inputs=inputs, policy=args.cache_policy) if "s6_l25_raw" in vkeys else None
     t_stats = time.time()
 
     # Print
@@ -1226,8 +1236,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                       "stats": round(t_stats - t_rho, 2)},
     }
     output_dir.mkdir(parents=True, exist_ok=True)
-    title = f"{OUTPUT_STEM}: {len(axes_used)} axes, {len(models)} judges, {len(vkeys)} variants"
-    json_path = output_dir / f"{OUTPUT_STEM}.json"
+    title = f"{args.stem}: {len(axes_used)} axes, {len(models)} judges, {len(vkeys)} variants"
+    json_path = output_dir / f"{args.stem}.json"
     tmp = json_path.with_name(json_path.name + ".tmp")
     tmp.write_text(json.dumps(_clean(json_metadata(payload, title=title, inputs=inputs)), indent=2))
     tmp.replace(json_path)
@@ -1240,7 +1250,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                                                                            for m, k in excluded.items())
     if left_out:
         subtitle += "\nleft out (--exclude_models): " + ", ".join(display_name(m) for m in left_out)
-    png_path = output_dir / f"{OUTPUT_STEM}.png"
+    png_path = output_dir / f"{args.stem}.png"
     render_figure(png_path, default_rank, variants, per_variant, frontiers, measured,
                   args.default_variant, len(axes_used), subtitle, inputs)
     print(f"Wrote {png_path}")
