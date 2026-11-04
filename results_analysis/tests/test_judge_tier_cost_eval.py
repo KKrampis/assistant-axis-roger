@@ -3010,6 +3010,43 @@ def test_jev_entities_resumes_an_alias_log_under_the_pinned_version(world, monke
         run()                                                   # pinned to 1.14.0: the log's 1.13.0 answers refuse it
 
 
+class _NetworkJev(FakeJevBatch):
+    """FakeJevBatch that yields to the event loop before answering, as a real request does while it waits on the
+    network: without that, each request's coroutine ran to its end before the next one started, and a check made
+    before the slot was taken looked right."""
+
+    async def post(self, url, json):
+        await asyncio.sleep(0)
+        return await super().post(url, json)
+
+
+class _RefusingJev(FakeJevBatch):
+    """A Jev that refuses every request (HTTP 400): judge_responses_jev.ask raises JevRequestError."""
+
+    async def post(self, url, json):
+        self.calls.append(json)
+        await asyncio.sleep(0)
+        return SimpleNamespace(status_code=400, text="bad request", json=lambda: {})
+
+
+def test_jev_entities_budget_and_a_refusal_stop_the_requests_not_yet_sent(world, monkeypatch):
+    """The budget and a refusal are checked when a request gets its slot, not when its coroutine starts: gather
+    starts them all before any reply, so a check made then passed for every request (found by the response-judging
+    session, 2026-11-04).  With one slot, a budget of 0 lets the first request through and no other, and a refusal
+    stops the rest."""
+    mod, _, run = _jev_entities(world, monkeypatch, "--mode", "descriptions", "--question", "noul",
+                                "--entities_per_call", "3", "--max_in_flight", "1", "--cell_label", "@jd_budget")
+    fake = _NetworkJev()
+    monkeypatch.setattr(mod.jrj, "make_client", lambda: fake)
+    assert run(["--budget_usd", "0"]) == 4 and len(fake.calls) == 1       # the rest unanswered: no cell
+    assert not list(world.exp.glob("*_tier_eval/jev-*@jd_budget"))
+    mod, fake, run = _jev_entities(world, monkeypatch, "--mode", "descriptions", "--question", "noul",
+                                   "--entities_per_call", "3", "--max_in_flight", "1", "--cell_label", "@jd_refused")
+    refusing = _RefusingJev()
+    monkeypatch.setattr(mod.jrj, "make_client", lambda: refusing)
+    assert run() == 1 and len(refusing.calls) == 1
+
+
 def test_jev_entities_instruction_round_puts_that_rounds_instruction_in_the_state(world, monkeypatch):
     for name in ("calm", "bold", "shy", "kind", "alpha", "beta"):
         p = world.data / "traits" / "instructions" / f"{name}.json"

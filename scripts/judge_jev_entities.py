@@ -480,9 +480,12 @@ async def main_async(argv=None) -> int:
     async def one(req) -> None:
         nonlocal failed
         job, key, names, body, swapped = req
-        if fatal or (args.budget_usd is not None and usage.total_cost_usd - spent0 > args.budget_usd):
-            return
         async with sem:
+            # checked once the request has its slot: gather starts every coroutine before any reply comes back, so
+            # a check made before the slot passed for all of them, and neither the budget nor a refusal stopped
+            # anything (found by the response-judging session, 2026-11-04)
+            if fatal or (args.budget_usd is not None and usage.total_cost_usd - spent0 > args.budget_usd):
+                return
             try:
                 reply = await jrj.ask(client, body)
             except jrj.JevRequestError as e:
