@@ -18,6 +18,12 @@ the axes), so the pilot readouts compare them with the other arms.  Every answer
 header line, and a run under other settings is refused.  The key is TYPESAFE_API_KEY, from the environment or
 a .env, never printed or written.
 
+The version is pinned: --model defaults to jev-1.14.0, and a run that requests a versioned ID requires every answer
+to come from it (--expect_model), stopping at the first answer from another version and writing no cell.  TypeSafe
+accepts a versioned ID "whether or not they appear in the list" (docs.typesafe.ai/models.md; GET /v1/models lists
+only the aliases), and an alias "moves when a new release ships".  The logs of 2026-11-04 were requested as
+jev-latest, every answer from jev-1.14.0; a pinned run resumes such a log, its cells recording both names requested.
+
 Usage:
     uv run python scripts/judge_responses_jev.py --axes_file scripts/tier_eval_axes_responses6.tsv \\
         --responses_dir 'runpod_workspace/qwen/qwen-3-32b Roger 8slot' --response_split 9 --response_part 0 \\
@@ -31,6 +37,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -47,7 +54,10 @@ from results_analysis.axis_judge_correlation import compute_correlations  # noqa
 
 logger = logging.getLogger("judge_responses_jev")
 API_URL = "https://api.typesafe.ai/v1/systemone"
-DEFAULT_MODEL = "jev-latest"
+#: A versioned ID, pinned (as judge_jev_entities.py since b4f145da): an alias's answers change when it moves.
+DEFAULT_MODEL = "jev-1.14.0"
+#: A versioned model ID, as against an alias; a run that requests one requires every answer to come from it.
+VERSIONED_ID = re.compile(r"jev-\d+\.\d+\.\d+")
 LEVELS = 5          # --levels: 3, 5, 7 or 10 (Jev's Score questions take 2 to 10), or 11 with --question_type choice
 QUESTION_TYPE = "score"     # --question_type: score, or choice (up to 255 options; the level computed here)
 JEV_DIRNAME = "_tier_eval_jev"
@@ -166,6 +176,19 @@ def settings_digest(header: Dict[str, Any]) -> str:
     return hashlib.sha256(json.dumps(header, sort_keys=True).encode()).hexdigest()[:16]
 
 
+def same_settings(found: Dict[str, Any], header: Dict[str, Any], answers: Dict[str, Dict[str, Any]],
+                  expect_model: Optional[str]) -> bool:
+    """Whether a log's header and this run's agree.  The name requested may differ (the logs of 2026-11-04 asked for
+    jev-latest, a run now for jev-1.14.0) when this run requires a version and every answer the log holds came from
+    it."""
+    strip = lambda h: {k: v for k, v in h.items() if k not in ("digest", "model")}
+    if settings_digest(strip(found)) != settings_digest(strip(header)):
+        return False
+    if found.get("model") == header.get("model"):
+        return True
+    return expect_model is not None and all(r.get("model") == expect_model for r in answers.values())
+
+
 def read_log(path: Path) -> Tuple[Optional[Dict[str, Any]], Dict[str, Dict[str, Any]]]:
     header, answers = None, {}
     if not path.exists():
@@ -231,7 +254,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--responses_dir", required=True, help="<kind>/responses/<entity>.jsonl and <kind>/scores/<entity>.json")
     p.add_argument("--response_split", type=int, default=3)
     p.add_argument("--response_part", type=int, default=None)
-    p.add_argument("--model", default=DEFAULT_MODEL, help=f"Jev's model name or alias (default {DEFAULT_MODEL})")
+    p.add_argument("--model", default=DEFAULT_MODEL,
+                   help=f"the name requested: a versioned ID (default {DEFAULT_MODEL}, pinned) or an alias "
+                        "(jev-latest, jev-preview), whose answers change when it moves")
+    p.add_argument("--expect_model", default=None,
+                   help="the version the answers must come from (default: --model when that is a versioned ID): an "
+                        "answer from another version stops the run, and no cell is written")
     p.add_argument("--cell_label", required=True, help="suffix of the cells, e.g. @jev5_s9p0")
     p.add_argument("--max_in_flight", type=int, default=32)
     p.add_argument("--budget_usd", type=float, default=None, help="stop issuing requests past this spend")
@@ -252,6 +280,8 @@ async def main_async(argv=None) -> int:
     LEVELS, QUESTION_TYPE = args.levels, args.question_type
     if LEVELS == 11 and QUESTION_TYPE != "choice":
         raise SystemExit("--levels 11 needs --question_type choice: a Score question takes up to 10 levels")
+    if args.expect_model is None and VERSIONED_ID.fullmatch(args.model):
+        args.expect_model = args.model
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
     if not args.cell_label.startswith("@"):
         raise SystemExit("--cell_label starts with @")
@@ -274,7 +304,7 @@ async def main_async(argv=None) -> int:
     work = E / JEV_DIRNAME / args.cell_label.lstrip("@")
     log_path = work / "answers.jsonl"
     found, answers = read_log(log_path)
-    if found is not None and settings_digest({k: v for k, v in found.items() if k != "digest"}) != settings_digest(header):
+    if found is not None and not same_settings(found, header, answers, args.expect_model):
         raise SystemExit(f"{log_path} was written under other settings: use another --cell_label, or move it aside")
     todo = [it for it in items if it[1] not in answers]
     rate_in, _ = price_for_model(args.model)
@@ -297,7 +327,7 @@ async def main_async(argv=None) -> int:
     for rec in answers.values():
         usage.charge(rec.get("model") or args.model, rec.get("input_tokens", 0), rec.get("output_tokens", 0))
     sem = asyncio.Semaphore(max(1, args.max_in_flight))
-    fatal: List[BaseException] = []
+    fatal: List[Any] = []
     failed = 0
     spent0 = usage.total_cost_usd
     lock = asyncio.Lock()
@@ -305,9 +335,11 @@ async def main_async(argv=None) -> int:
     async def one(item) -> None:
         nonlocal failed
         _, key, (question, answer) = item
-        if fatal or (args.budget_usd is not None and usage.total_cost_usd - spent0 > args.budget_usd):
-            return
         async with sem:
+            # checked once a slot is free, not before: every request is queued at once, before any reply, so a check
+            # ahead of the semaphore never stopped anything (the budget and a refusal were ignored until 2026-11-04)
+            if fatal or (args.budget_usd is not None and usage.total_cost_usd - spent0 > args.budget_usd):
+                return
             try:
                 reply = await ask(client, request_body(args.model, question, answer, questions))
             except JevRequestError as e:
@@ -327,11 +359,20 @@ async def main_async(argv=None) -> int:
                 f.write(json.dumps(rec) + "\n")
             answers[key] = rec
             usage.charge(rec["model"], rec["input_tokens"], rec["output_tokens"])
+            if args.expect_model and rec["model"] != args.expect_model and not fatal:
+                fatal.append(f"Jev answered as {rec['model']}, not {args.expect_model}")    # no more requests
 
     try:
         await asyncio.gather(*(one(it) for it in todo))
     finally:
         await client.aclose()
+    resolved = sorted({r.get("model") for r in answers.values() if r.get("model")})
+    if args.expect_model and resolved and resolved != [args.expect_model]:
+        atomic_write_text(json.dumps(usage.as_dict(), indent=2, sort_keys=True), work / "usage.json", logger_obj=logger)
+        logger.error(f"Jev answered as {', '.join(resolved)}, not {args.expect_model}: no cell is written.  Requested "
+                     f"as {args.model}: if that is the version, TypeSafe did not honour it (ask them); if an alias, it "
+                     f"has moved.  A new version is a change of judge, to be compared before it is used")
+        return 5
     if fatal:
         logger.error(f"Jev refused a request: {fatal[0]}")
         return 1
@@ -344,8 +385,8 @@ async def main_async(argv=None) -> int:
     if missing:
         logger.error(f"{len(missing)} responses unanswered ({failed} failed): rerun to ask them; cells not written")
         return 4
-    resolved = sorted({r.get("model") for r in answers.values()})
-    provenance = {"judge_model": resolved, "model_requested": args.model, "levels": LEVELS, "question_type": QUESTION_TYPE, "cell_label": args.cell_label,
+    requested = [found["model"], args.model] if found is not None and found.get("model") != args.model else args.model
+    provenance = {"judge_model": resolved, "model_requested": requested, "levels": LEVELS, "question_type": QUESTION_TYPE, "cell_label": args.cell_label,
                   "text_source": "responses", "responses_dir": str(args.responses_dir), "response_split": args.response_split,
                   "response_part": args.response_part, "multi_axis": [m.axis_dir for m in group.members],
                   "answers_log": str(log_path), "n_items": len(items)}

@@ -2714,12 +2714,14 @@ def test_rk_pn_judges_the_chosen_members_together_after_the_shared_prefix(world,
 
 class FakeJev:
     """TypeSafe's System One endpoint: each Score question answered with a level from the entity named in the
-    state's answer (SCORES -3..+3 onto levels 0..4); the first ``fail_first`` posts get HTTP 429."""
+    state's answer (SCORES -3..+3 onto levels 0..4); the first ``fail_first`` posts get HTTP 429; every answer
+    names ``answer_as`` as its version."""
 
-    def __init__(self, fail_first=0):
-        self.calls, self.fail_first = [], fail_first
+    def __init__(self, fail_first=0, answer_as="jev-1.13.0"):
+        self.calls, self.fail_first, self.answer_as = [], fail_first, answer_as
 
     async def post(self, url, json):
+        await asyncio.sleep(0)          # yield, as a real request does, so that queued requests interleave
         self.calls.append(json)
         if self.fail_first > 0:
             self.fail_first -= 1
@@ -2737,7 +2739,7 @@ class FakeJev:
                 answers[qid] = {"type": "choice", "choice": str(round(level)), "probabilities": probs, "confidence": 1.0}
             else:
                 answers[qid] = {"type": "score", "score": level, "confidence": 1.0}
-        body = {"model": "jev-1.13.0", "answers": answers, "usage": {"input_tokens": 500, "output_tokens": 9}}
+        body = {"model": self.answer_as, "answers": answers, "usage": {"input_tokens": 500, "output_tokens": 9}}
         return SimpleNamespace(status_code=200, text="", json=lambda: body)
 
     async def aclose(self):
@@ -2750,7 +2752,7 @@ def test_jev_judges_every_axis_per_response_and_writes_response_cells(world, mon
     monkeypatch.setattr(mod, "make_client", lambda: fake)
     monkeypatch.setattr(mod, "RETRY_DELAYS_S", (0, 0))
     argv = ["--axes_file", str(world.axes2), "--experiments_dir", str(world.exp), "--instructions_dir", str(world.data),
-            "--responses_dir", str(world.resp), "--response_part", "0", "--cell_label", "@jev5p0"]
+            "--responses_dir", str(world.resp), "--response_part", "0", "--cell_label", "@jev5p0", "--model", "jev-1.13.0"]
     assert asyncio.run(mod.main_async(argv)) == 0
     sent = fake.calls[-1]
     assert set(sent["questions"]) == {a[0] for a in AXES[:2]} and set(sent["state"]) == {"question", "answer"}
@@ -2802,7 +2804,7 @@ def test_jev_choice_of_eleven_numbered_options_gives_the_probability_weighted_nu
     monkeypatch.setattr(mod, "make_client", lambda: fake)
     argv = ["--axes_file", str(world.axes2), "--experiments_dir", str(world.exp), "--instructions_dir", str(world.data),
             "--responses_dir", str(world.resp), "--response_part", "0", "--cell_label", "@jevc11p0",
-            "--question_type", "choice", "--levels", "11"]
+            "--model", "jev-1.13.0", "--question_type", "choice", "--levels", "11"]
     try:
         assert asyncio.run(mod.main_async(argv)) == 0
         q = next(iter(fake.calls[-1]["questions"].values()))
@@ -2819,6 +2821,42 @@ def test_jev_choice_of_eleven_numbered_options_gives_the_probability_weighted_nu
             asyncio.run(mod.main_async([*argv[:-4], "--levels", "11"]))
     finally:
         mod.LEVELS, mod.QUESTION_TYPE = 5, "score"
+
+
+def test_jev_responses_pin_the_version_and_stop_at_an_answer_from_another(world, monkeypatch):
+    """2026-11-04: the response tool requests jev-1.14.0 by default and requires every answer to come from it; the
+    first answer from another version stops the requests (a check that runs once a slot is free, as does the budget)
+    and no cell is written; a log requested as jev-latest whose answers all came from jev-1.14.0 is resumed, its cells
+    recording both names requested; one holding another version's answers is refused."""
+    mod = _script("judge_responses_jev")
+    monkeypatch.setattr(mod, "RETRY_DELAYS_S", (0,))
+    base = ["--axes_file", str(world.axes2), "--experiments_dir", str(world.exp), "--instructions_dir", str(world.data),
+            "--responses_dir", str(world.resp), "--response_part", "0", "--max_in_flight", "1"]
+    run = lambda fake, *extra: (monkeypatch.setattr(mod, "make_client", lambda: fake),
+                                asyncio.run(mod.main_async([*base, *extra])))[1]
+    old = FakeJev(answer_as="jev-1.13.0")
+    assert run(old, "--cell_label", "@jpin13") == 5
+    assert len(old.calls) == 1 and {c["model"] for c in old.calls} == {"jev-1.14.0"}       # stopped at the first
+    assert not list(world.exp.glob("*_tier_eval/jev-*@jpin13"))
+    assert (world.exp / mod.JEV_DIRNAME / "jpin13" / "usage.json").exists()                  # what it cost is kept
+    # the budget, checked once a slot is free: a spend past it stops the queued requests
+    cheap = FakeJev(answer_as="jev-1.14.0")
+    assert run(cheap, "--cell_label", "@jbudget", "--budget_usd", "0") == 4 and len(cheap.calls) == 1
+    # an alias log whose answers all came from jev-1.14.0: resumed by a pinned run, nothing asked again
+    new = FakeJev(answer_as="jev-1.14.0")
+    assert run(new, "--cell_label", "@jalias", "--model", "jev-latest", "--limit_items", "2") == 0   # a smoke test of 2
+    n = len(new.calls)
+    assert n == 2 and {c["model"] for c in new.calls} == {"jev-latest"}
+    assert run(new, "--cell_label", "@jalias") == 0
+    assert len(new.calls) > n and {c["model"] for c in new.calls[n:]} == {"jev-1.14.0"}
+    assert len({json.dumps(c["state"]) for c in new.calls}) == len(new.calls)               # none asked twice
+    prov = json.loads((world.exp / f"{AXES[0][0]}_tier_eval" / "jev-1.14.0@jalias" / "scores_responses.json")
+                      .read_text())["_provenance"]
+    assert prov["model_requested"] == ["jev-latest", "jev-1.14.0"] and prov["judge_model"] == ["jev-1.14.0"]
+    # an alias log holding another version's answers: refused by the pinned run, accepted by an alias run
+    assert run(FakeJev(answer_as="jev-1.13.0"), "--cell_label", "@jalias13", "--model", "jev-latest") == 0
+    with pytest.raises(SystemExit):
+        run(FakeJev(answer_as="jev-1.14.0"), "--cell_label", "@jalias13")
 
 
 def test_a_long_group_name_is_shortened_stably():
