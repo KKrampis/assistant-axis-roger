@@ -76,11 +76,9 @@ DESCRIPTION_PASSES = 2
 #: with the reversal in the x2"): its own method, not b10 (scripts/judge_jev_entities.py: a Noul question per
 #: entity, "is it nearer the axis's second end than most of the other entries?", 160 entities a request, the
 #: value Jev's probability of yes), its passes balanced the same way as the others', its weight in
-#: judge_score_combine.TIER_JUDGE_WEIGHTS.  Its key is TYPESAFE_API_KEY.
+#: judge_score_combine.TIER_JUDGE_WEIGHTS.  Its key is TYPESAFE_API_KEY.  Requested by this versioned ID, pinned
+#: (TypeSafe accepts one although GET /v1/models lists only the aliases), and every answer required to come from it.
 JEV_MODEL = "jev-1.14.0"
-#: The name requested: TypeSafe's API serves only jev-latest and jev-preview (GET /v1/models, 2026-11-04), so the
-#: drivers ask for jev-latest and require answers from JEV_MODEL (judge_jev_entities.py --expect_model).
-JEV_REQUEST_MODEL = "jev-latest"
 JEV_TOOL = Path(__file__).resolve().parents[1] / "scripts" / "judge_jev_entities.py"
 JEV_ENTITIES_PER_CALL = 160
 JEV_METHOD = ("--question", "noul", "--wording", "relative")
@@ -161,7 +159,7 @@ def pass_argv(args: argparse.Namespace, model: str, seed: int) -> List[str]:
 def jev_pass_argv(args: argparse.Namespace, model: str, seed: int) -> List[str]:
     """judge_jev_entities.py's arguments for one Jev pass: the same axes, seed and direction pass as the other
     judges' pass of that seed (so its batches are its own, 160 a request, and its directions the same coin's)."""
-    argv = ["--mode", "descriptions", "--model", JEV_REQUEST_MODEL, "--expect_model", model, *JEV_METHOD, "--entities_per_call", str(JEV_ENTITIES_PER_CALL),
+    argv = ["--mode", "descriptions", "--model", model, "--expect_model", model, *JEV_METHOD, "--entities_per_call", str(JEV_ENTITIES_PER_CALL),
             "--shuffle_seed", str(seed), "--cell_label", jev_pass_label(seed, args.directions),
             "--experiments_dir", args.experiments_dir, "--instructions_dir", args.instructions_dir]
     if args.directions == "balanced":

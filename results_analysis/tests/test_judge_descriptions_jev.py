@@ -34,8 +34,8 @@ def test_jev_passes_go_to_its_own_tool_with_the_same_seeds_and_directions(monkey
         assert get("--shuffle_seed") == str(p + 1) and get("--direction_pass") == str(p)
         assert get("--cell_label") == f"@jd_noul_relative_n160d{p + 1}" and get("--entities_per_call") == "160"
         assert get("--question") == "noul" and get("--wording") == "relative"
-        # the API serves only jev-latest; the answers must come from the version the cells and weights are for
-        assert get("--model") == jd.JEV_REQUEST_MODEL == "jev-latest" and get("--expect_model") == jd.JEV_MODEL
+        # requested by its versioned ID, pinned, and the answers required to come from it
+        assert get("--model") == get("--expect_model") == jd.JEV_MODEL == "jev-1.14.0"
         assert get("--directions") == "descriptions" and get("--axes_file") == "axes.tsv"
     calls.clear()
     assert jd.run_judge(_args(), "gpt-5.6-luna") == 0

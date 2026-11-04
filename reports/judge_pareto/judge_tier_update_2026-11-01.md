@@ -427,9 +427,8 @@ Shorter here; each item links to the full account.
   yes/no-probability question per entity ("nearer the second end than most of the other
   entries?"), at $0.042 per million input tokens with output free.  Alone it scores above every
   other judge (descriptions 0.745 against Luna's 0.709 at one pass), and its fitted weight gives
-  it 71% of the blend: [`jev_judging.md`](./jev_judging.md).  Its API serves only `jev-latest`,
-  so the drivers ask for that and stop if the answers come from another version than
-  `jev-1.14.0`.  **The standard since then, in both modes: Luna + Haiku +
+  it 71% of the blend: [`jev_judging.md`](./jev_judging.md).  The drivers request
+  the pinned version, `jev-1.14.0`, and stop if any answer comes from another version.  **The standard since then, in both modes: Luna + Haiku +
   Gemini + Jev, two passes each, one each way, weighted 4 : 3 : 3 : 24.**  Descriptions: 0.766 at
   $0.084 an axis; instructions: 0.789 at $0.398.  Luna + Haiku + Jev at 2x is within 0.0005 of
   that in both modes, for about 60% of the cost; the figures are

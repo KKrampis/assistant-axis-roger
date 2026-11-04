@@ -52,6 +52,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import re
 import sys
 import time
 from pathlib import Path
@@ -70,7 +71,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import judge_responses_jev as jrj  # noqa: E402  -- the client, retries and log reading
 
 logger = logging.getLogger("judge_jev_entities")
-DEFAULT_MODEL = "jev-latest"
+#: A versioned ID, pinned: TypeSafe accepts one in the request's ``model`` field "whether or not they appear in the
+#: list" (docs.typesafe.ai/models.md; GET /v1/models lists only the aliases jev-latest and jev-preview), and an alias
+#: "moves when a new release ships, so its answers can change" (checked live 2026-11-04: jev-1.14.0 and jev-1.13.0
+#: each answer as themselves, a malformed or unknown ID is an HTTP 400).
+DEFAULT_MODEL = "jev-1.14.0"
+#: A versioned model ID, as against an alias; a run that requests one requires every answer to come from it.
+VERSIONED_ID = re.compile(r"jev-\d+\.\d+\.\d+")
 JEV_DIRNAME = "_tier_eval_jev"
 CHARS_PER_TOKEN = 4
 MODES = {"descriptions": "b10", "instructions": "i1_p0"}
@@ -313,11 +320,18 @@ def answer_value(answer: Any, question: str, levels: int) -> Optional[float]:
 # The run
 # ---------------------------------------------------------------------------
 
-def same_settings(found: Dict[str, Any], header: Dict[str, Any]) -> bool:
+def same_settings(found: Dict[str, Any], header: Dict[str, Any], answers: Optional[Dict[str, Dict[str, Any]]] = None,
+                  expect_model: Optional[str] = None) -> bool:
     """Whether a log's header and this run's agree, the sample request aside: one label spans several axes files
-    (the development and the held-out axes), whose first requests differ, and its records are keyed by axis."""
-    strip = lambda h: {k: v for k, v in h.items() if k not in ("digest", "sample")}
-    return jrj.settings_digest(strip(found)) == jrj.settings_digest(strip(header))
+    (the development and the held-out axes), whose first requests differ, and its records are keyed by axis.  The
+    name requested may differ (the balanced logs of 2026-11-04 asked for jev-latest, a run now for jev-1.14.0) when
+    this run requires a version and every answer the log holds came from it."""
+    strip = lambda h: {k: v for k, v in h.items() if k not in ("digest", "sample", "model")}
+    if jrj.settings_digest(strip(found)) != jrj.settings_digest(strip(header)):
+        return False
+    if found.get("model") == header.get("model"):
+        return True
+    return expect_model is not None and all(r.get("model") == expect_model for r in (answers or {}).values())
 
 
 def group_key(axis: str, names: Sequence[str]) -> str:
@@ -348,11 +362,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--entities_per_call", type=int, default=20)
     p.add_argument("--shuffle_seed", type=int, default=1)
     p.add_argument("--model", default=DEFAULT_MODEL,
-                   help="the name requested: the API offers only jev-latest and jev-preview, no pinned versions")
+                   help="the name requested: a versioned ID (the default, pinned; TypeSafe accepts one although GET "
+                        "/v1/models lists only the aliases) or an alias (jev-latest, jev-preview), whose answers "
+                        "change when it moves")
     p.add_argument("--expect_model", default=None,
-                   help="the version the answers must come from (e.g. jev-1.14.0, which the drivers' cell names and "
-                        "Jev's fitted weights are for): an answer from another version stops the run before any cell "
-                        "is written")
+                   help="the version the answers must come from (default: --model when that is a versioned ID): an "
+                        "answer from another version stops the run before any cell is written")
     p.add_argument("--cell_label", required=True, help="suffix of the cells, starting with @")
     p.add_argument("--max_in_flight", type=int, default=24)
     p.add_argument("--budget_usd", type=float, default=None, help="stop issuing requests past this spend")
@@ -379,6 +394,8 @@ def check_args(args) -> None:
 async def main_async(argv=None) -> int:
     args = build_parser().parse_args(argv)
     check_args(args)
+    if args.expect_model is None and VERSIONED_ID.fullmatch(args.model):
+        args.expect_model = args.model
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
     levels = args.levels if args.question not in ("noul", "pairs") else 2
     global PAIR_RING
@@ -432,7 +449,7 @@ async def main_async(argv=None) -> int:
     work = E / JEV_DIRNAME / args.cell_label.lstrip("@")
     log_path = work / "answers.jsonl"
     found, answers = jrj.read_log(log_path)
-    if found is not None and not same_settings(found, header):
+    if found is not None and not same_settings(found, header, answers, args.expect_model):
         raise SystemExit(f"{log_path} was written under other settings: use another --cell_label, or move it aside")
     todo = [r for r in requests if r[1] not in answers]
     rate_in, _ = price_for_model(args.model)
@@ -499,19 +516,23 @@ async def main_async(argv=None) -> int:
     if missing:
         logger.error(f"{len(missing)} requests unanswered ({failed} failed): rerun to ask them; cells not written")
         return 4
-    return write_cells(jobs, requests, answers, args, levels, log_path)
+    requested = [found["model"], args.model] if found is not None and found.get("model") != args.model else args.model
+    return write_cells(jobs, requests, answers, args, levels, log_path, requested)
 
 
-def write_cells(jobs, requests, answers, args, levels: int, log_path: Path) -> int:
+def write_cells(jobs, requests, answers, args, levels: int, log_path: Path, requested=None) -> int:
+    """The cells, from every answer of the log.  ``requested``: the name or names the log's requests asked for
+    (two when its first run asked for an alias and a later one for the version, as the balanced logs of 2026-11-04)."""
     by_axis: Dict[str, List[Tuple[List[str], Dict[str, Any]]]] = {}
     for job, key, names, _, _ in requests:
         by_axis.setdefault(job.axis_dir, []).append((names, answers[key]))
     resolved = sorted({r.get("model") for r in answers.values() if r.get("model")})
     if args.expect_model and resolved != [args.expect_model]:
         logger.error(f"Jev answered as {', '.join(resolved) or 'no named version'}, not {args.expect_model}: the "
-                     f"cells' names and Jev's fitted weights are for {args.expect_model}, so no cell is written.  Check "
-                     f"the new version, then change JEV_MODEL in the drivers (judge_descriptions.py, "
-                     f"judge_instruction_grid.py), which refits nothing by itself")
+                     f"cells' names and Jev's fitted weights are for {args.expect_model}, so no cell is written.  "
+                     f"Requested as {args.model}: if that is the version, TypeSafe did not honour it (ask them); if an "
+                     f"alias, it has moved.  A new version is a change of judge: JEV_MODEL in the drivers "
+                     f"(judge_descriptions.py, judge_instruction_grid.py), and Jev's weight refitted")
         return 5
     model = resolved[0] if len(resolved) == 1 else args.model
     mode = args.mode
@@ -540,7 +561,7 @@ def write_cells(jobs, requests, answers, args, levels: int, log_path: Path) -> i
                         result[name] = v
         d = Path(job.output_dir) / f"{model}{args.cell_label}"
         d.mkdir(parents=True, exist_ok=True)
-        prov = {"judge_model": model, "model_requested": args.model, "rubric": f"jev_{args.question}{levels}_{args.wording}",
+        prov = {"judge_model": model, "model_requested": requested or args.model, "rubric": f"jev_{args.question}{levels}_{args.wording}",
                 "text_source": "descriptions" if mode == "descriptions" else "instruction_rounds",
                 "instruction_round": args.instruction_round, "question": args.question, "levels": levels,
                 "wording": args.wording, "pair_ring": args.pair_ring, "directions": args.directions,

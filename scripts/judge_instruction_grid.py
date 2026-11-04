@@ -42,9 +42,8 @@ from results_analysis.judge_descriptions import max_tokens_for
 
 TOOL = REPO / "results_analysis" / "judge_tier_cost_eval.py"
 JEV_TOOL = REPO / "scripts" / "judge_jev_entities.py"
+#: Requested by this versioned ID, pinned, and every answer required to come from it (judge_descriptions.JEV_MODEL).
 JEV_MODEL = "jev-1.14.0"
-#: Requested as jev-latest, the only released name (judge_descriptions.JEV_REQUEST_MODEL), answers required from JEV_MODEL.
-JEV_REQUEST_MODEL = "jev-latest"
 JEV_ENTITIES_PER_CALL = 160
 JEV_METHOD = ("--question", "noul", "--wording", "relative")
 #: The settled instruction judges (Roger, 2026-11-03: the three; 2026-11-04: with Jev, two passes each)
@@ -65,7 +64,7 @@ def jev_round_label(r: int, directions: str = "own") -> str:
 def jev_command(model: str, r: int, args) -> list:
     """judge_jev_entities.py's command for Jev's round ``r``: instruction r mod 5, seed r + 1, its own batches of
     160, its column of Roger's direction table."""
-    argv = [sys.executable, str(JEV_TOOL), "--mode", "instructions", "--instruction_round", str(r), "--model", JEV_REQUEST_MODEL,
+    argv = [sys.executable, str(JEV_TOOL), "--mode", "instructions", "--instruction_round", str(r), "--model", model,
             "--expect_model", model,
             *JEV_METHOD, "--entities_per_call", str(JEV_ENTITIES_PER_CALL), "--shuffle_seed", str(r + 1),
             "--cell_label", jev_round_label(r, args.directions), "--axes_file", args.axes_file,

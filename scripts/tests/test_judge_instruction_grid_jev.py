@@ -38,7 +38,7 @@ def test_jev_rounds_run_its_own_tool_and_join_the_blend(monkeypatch, tmp_path):
         assert get("--instruction_round") == str(r) and get("--shuffle_seed") == str(r + 1)
         assert get("--cell_label") == f"@ji_noul_relative_n160d{r}" and get("--directions") == "instructions"
         assert get("--question") == "noul" and get("--entities_per_call") == "160" and get("--mode") == "instructions"
-        assert get("--model") == "jev-latest" and get("--expect_model") == "jev-1.14.0"
+        assert get("--model") == get("--expect_model") == "jev-1.14.0"     # pinned
     out, sources = blends[0]
     assert out == "gpt-5.6-luna+claude-haiku-5-5+gemini-3.1-flash-lite+jev-1.14.0@i1_p0n20dx2"
     assert len(sources) == 40 and "jev-1.14.0@ji_noul_relative_n160d9" in sources and "gpt-5.6-luna@i1_p0n20d0" in sources

@@ -2885,10 +2885,11 @@ def test_swap_poles_on_the_cached_prefix_response_rubric(world, monkeypatch):
 
 class FakeJevBatch:
     """Jev for batched entity judging: each question about "Entry k, <name> (<kind>)" answered from the entity's
-    SCORES (-3..+3): a Score level, a Choice split between its two neighbouring options, or a Noul probability."""
+    SCORES (-3..+3): a Score level, a Choice split between its two neighbouring options, or a Noul probability;
+    every reply names ``answer_as`` as the version that answered."""
 
-    def __init__(self):
-        self.calls = []
+    def __init__(self, answer_as="jev-1.14.0"):
+        self.calls, self.answer_as = [], answer_as
 
     async def post(self, url, json):
         self.calls.append(json)
@@ -2911,7 +2912,7 @@ class FakeJevBatch:
                 probs = {str(i): 0.0 for i in range(n)}
                 probs[str(lo)] += 1 - w; probs[str(hi)] += w
                 answers[qid] = {"type": "choice", "choice": str(round(level)), "probabilities": probs, "confidence": 1.0}
-        body = {"model": "jev-1.14.0", "answers": answers, "usage": {"input_tokens": 1000, "output_tokens": 50}}
+        body = {"model": self.answer_as, "answers": answers, "usage": {"input_tokens": 1000, "output_tokens": 50}}
         return SimpleNamespace(status_code=200, text="", json=lambda: body)
 
     async def aclose(self):
@@ -2956,16 +2957,57 @@ def test_jev_entities_judges_a_batch_per_request_and_writes_description_cells(wo
 
 
 def test_jev_entities_refuses_answers_from_another_version(world, monkeypatch):
-    """2026-11-04: TypeSafe serves only jev-latest, so the drivers ask for it and require the version their cell
-    names and Jev's fitted weights are for; answers from another version write no cell (exit 5), and a rerun
-    expecting the version that answered writes them from the log without asking again."""
+    """2026-11-04: a run requires the version its cell names and Jev's fitted weights are for; answers from another
+    version write no cell (exit 5), and a rerun expecting the version that answered writes them from the log
+    without asking again."""
     mod, fake, run = _jev_entities(world, monkeypatch, "--mode", "descriptions", "--question", "noul",
                                    "--entities_per_call", "3", "--cell_label", "@jd_v")
-    assert run(["--expect_model", "jev-1.13.0"]) == 5                # the fake answers as jev-1.14.0
+    assert run(["--model", "jev-latest", "--expect_model", "jev-1.13.0"]) == 5     # the fake answers as jev-1.14.0
     assert not list(world.exp.glob("*_tier_eval/jev-*@jd_v"))
     n = len(fake.calls)
-    assert run(["--expect_model", "jev-1.14.0"]) == 0 and len(fake.calls) == n
+    assert run(["--model", "jev-latest", "--expect_model", "jev-1.14.0"]) == 0 and len(fake.calls) == n
     assert (world.exp / f"{AXES[0][0]}_tier_eval" / "jev-1.14.0@jd_v" / "scores_descriptions.json").exists()
+
+
+def test_jev_entities_pins_the_version_by_default(world, monkeypatch):
+    """2026-11-04: TypeSafe accepts a versioned ID in the model field although GET /v1/models lists only the
+    aliases, so the tool requests jev-1.14.0 by default and requires every answer to come from it; a reply from
+    another version (the pin not honoured) writes no cell."""
+    mod, fake, run = _jev_entities(world, monkeypatch, "--mode", "descriptions", "--question", "noul",
+                                   "--entities_per_call", "3", "--cell_label", "@jd_pin")
+    assert run() == 0
+    assert fake.calls and {c["model"] for c in fake.calls} == {"jev-1.14.0"}
+    prov = json.loads((world.exp / f"{AXES[0][0]}_tier_eval" / "jev-1.14.0@jd_pin" / "scores_descriptions.json")
+                      .read_text())["_provenance"]
+    assert prov["judge_model"] == prov["model_requested"] == "jev-1.14.0"
+    mod, fake, run = _jev_entities(world, monkeypatch, "--mode", "descriptions", "--question", "noul",
+                                   "--entities_per_call", "3", "--cell_label", "@jd_pin13")
+    fake.answer_as = "jev-1.13.0"
+    assert run() == 5 and not list(world.exp.glob("*_tier_eval/jev-*@jd_pin13"))
+
+
+def test_jev_entities_resumes_an_alias_log_under_the_pinned_version(world, monkeypatch):
+    """The balanced logs of 2026-11-04 asked for jev-latest, every answer from jev-1.14.0: a run pinned to jev-1.14.0
+    takes such a log on (new axes asked for by the version, the cells recording both names requested), and refuses
+    one holding an answer from another version."""
+    one = world.exp.parent / "one.tsv"; one.write_text("\t".join(AXES[0]) + "\n")
+    mod, fake, run = _jev_entities(world, monkeypatch, "--mode", "descriptions", "--question", "noul",
+                                   "--entities_per_call", "3", "--cell_label", "@jd_alias")
+    assert run(["--model", "jev-latest", "--axes_file", str(one)]) == 0
+    n = len(fake.calls)
+    assert run() == 0                                           # both axes, pinned: only the second axis asked
+    assert len(fake.calls) > n and {c["model"] for c in fake.calls[n:]} == {"jev-1.14.0"}
+    assert all(c["state"]["axis"]["to"] != AXES[0][1] and c["state"]["axis"]["from"] != AXES[0][1] for c in fake.calls[n:])
+    for axis_dir, *_ in AXES[:2]:
+        prov = json.loads((world.exp / f"{axis_dir}_tier_eval" / "jev-1.14.0@jd_alias" / "scores_descriptions.json")
+                          .read_text())["_provenance"]
+        assert prov["model_requested"] == ["jev-latest", "jev-1.14.0"] and prov["judge_model"] == "jev-1.14.0"
+    mod, fake, run = _jev_entities(world, monkeypatch, "--mode", "descriptions", "--question", "noul",
+                                   "--entities_per_call", "3", "--cell_label", "@jd_alias13")
+    fake.answer_as = "jev-1.13.0"
+    assert run(["--model", "jev-latest", "--axes_file", str(one)]) == 0      # an alias run requires nothing
+    with pytest.raises(SystemExit):
+        run()                                                   # pinned to 1.14.0: the log's 1.13.0 answers refuse it
 
 
 def test_jev_entities_instruction_round_puts_that_rounds_instruction_in_the_state(world, monkeypatch):

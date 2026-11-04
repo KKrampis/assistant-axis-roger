@@ -2789,8 +2789,9 @@ runs it by default (`--rounds` defaults to 0-9) and derives
 Haiku 3 : Gemini 3 : Jev 24**, the weight fitted on these balanced cells as for descriptions
 (the peak of 4:3:3:X at 20, 24 indistinguishable from it, 12-40 within 0.001, +0.0044
 [+0.0014, +0.0074] over 3; `judge_score_combine.TIER_JUDGE_WEIGHTS_BY_MODE`).  Jev is requested
-as `jev-latest`, the only name TypeSafe serves, and a run stops before writing cells if it
-answers as another version than `jev-1.14.0` (`--expect_model`), since the cell names and the
+by its versioned ID, `jev-1.14.0`, pinned (TypeSafe accepts one although `GET /v1/models`
+lists only the aliases), and a run stops before writing cells if any answer comes from another
+version (`--expect_model`, by default the version requested), since the cell names and the
 weight are for that version.
 
 | judges (61 axes, balanced; slot 6, layer 25, raw; real price, May corpus) | ρ | $ per axis | on the frontier, of 12 variants |
@@ -2867,7 +2868,7 @@ budget-tracked run.
 | Anthropic small (current) | `claude-haiku-5-5` | $0.10 | $0.50 | High — pricing page read 2026-10-07; batch at half |
 | OpenAI smallest | `gpt-6-luna` | $0.10 | $0.50 | High — model page read 2026-10-26; batch and Flex at half |
 | Google small | `gemini-3.1-flash-lite` | $0.25 | $1.50 | High — `ai.google.dev/gemini-api/docs/pricing`, read 2026-11-01; Batch and Flex at half (read 2026-11-03) |
-| TypeSafe | `jev-1.14.0` (requested as `jev-latest`) | $0.042 | free | High — typesafe.ai and its docs, read 2026-11-04; a request's state is billed once whatever the number of questions; no batch or Flex tier |
+| TypeSafe | `jev-1.14.0` (pinned) | $0.042 | free | High — typesafe.ai and its docs, read 2026-11-04; a request's state is billed once whatever the number of questions; no batch or Flex tier |
 
 `results_analysis/plot_batch_size_quality_vs_cost.py` has its own separate,
 deliberately-un-synced copy of the legacy rates (it regenerates a chart
