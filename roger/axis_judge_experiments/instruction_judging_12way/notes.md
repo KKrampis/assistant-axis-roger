@@ -6,7 +6,7 @@ Made 2026-11-03.  The method in both: every judge in an arm judges every text of
 
 ## Since 2026-11-04: Jev, and the poles balanced
 
-Both figures now carry Jev (TypeSafe AI's model, six arms: Jev 1x and 2x, and Luna + Haiku + Gemini + Jev and Luna + Haiku + Jev at 1x and 2x) and read the balanced cells, after Roger's rule that no judging runs in one fixed pole order.  A judge's 2x is its two passes one each way.  A 1x alternates the direction over an entity's five instructions (Roger's table, `judge_tier_cost_eval.INSTRUCTION_DIRECTIONS`) or, for a description, takes a coin's direction per axis.  The blends weigh Luna 4 : Haiku 3 : Gemini 3 : Jev 24 in both modes, Jev's weight fitted on these cells ([`jev_judging.md`](../../../reports/judge_pareto/jev_judging.md)).  **The decisions (Roger, 2026-11-04): Luna + Haiku + Gemini + Jev, two passes each, one each way, for descriptions and for instructions.**  `scripts/judge_instruction_12way.py --without_jev --directions own` redraws the figures of 2026-11-03, whose account follows this section.
+Both figures now carry Jev (TypeSafe AI's model, six arms: Jev 1x and 2x, and Luna + Haiku + Gemini + Jev and Luna + Haiku + Jev at 1x and 2x) and read the balanced cells, after Roger's rule that no judging runs in one fixed pole order.  A judge's 2x is its two passes one each way.  A 1x alternates the direction over an entity's five instructions (Roger's table, `judge_tier_cost_eval.INSTRUCTION_DIRECTIONS`) or, for a description, takes a coin's direction per axis.  The blends weigh Luna 4 : Haiku 3 : Gemini 3 : Jev 12 in both modes, Jev's weight chosen for resilience: the smallest worst-axis shortfall, at a mean ρ within noise of the mean-ρ fit's 24, which the figures used for a few hours on 2026-11-04 ([`jev_judging.md`](../../../reports/judge_pareto/jev_judging.md) § "Jev's weight: 12, for resilience").  **The decisions (Roger, 2026-11-04): Luna + Haiku + Gemini + Jev, two passes each, one each way, for descriptions and for instructions.**  `scripts/judge_instruction_12way.py --without_jev --directions own` redraws the figures of 2026-11-03, whose account follows this section.
 
 | instructions (61 axes, s6_l25_raw) | ρ | $/axis | frontier of 12 |
 |---|---:|---:|---:|
@@ -14,10 +14,10 @@ Both figures now carry Jev (TypeSafe AI's model, six arms: Jev 1x and 2x, and Lu
 | Luna + Haiku + Gemini 1x (the default to 2026-11-04) | 0.778 | 0.178 | 0 |
 | Luna + Haiku + Gemini 2x | 0.780 | 0.356 | 0 |
 | Jev 1x | 0.781 | 0.021 | 12 |
-| Jev 2x | 0.783 | 0.043 | 10 |
-| Luna + Haiku + Jev 1x | 0.787 | 0.119 | 9 |
-| Luna + Haiku + Jev 2x | 0.788 | 0.239 | 10 |
-| **Luna + Haiku + Gemini + Jev 2x** | **0.789** | **0.398** | **5** |
+| Jev 2x | 0.783 | 0.043 | 8 |
+| Luna + Haiku + Jev 1x | 0.788 | 0.119 | 9 |
+| Luna + Haiku + Jev 2x | 0.789 | 0.239 | 10 |
+| **Luna + Haiku + Gemini + Jev 2x** | **0.789** | **0.398** | **2** |
 
 | descriptions (61 axes, s6_l25_raw) | ρ | $/axis | frontier of 12 |
 |---|---:|---:|---:|
@@ -26,9 +26,9 @@ Both figures now carry Jev (TypeSafe AI's model, six arms: Jev 1x and 2x, and Lu
 | Luna + Haiku + Gemini 2x (the default to 2026-11-04) | 0.751 | 0.076 | 0 |
 | Jev 2x | 0.758 | 0.008 | 12 |
 | Luna + Haiku + Jev 2x | 0.766 | 0.050 | 12 |
-| **Luna + Haiku + Gemini + Jev 2x** | **0.766** | **0.084** | **5** |
+| **Luna + Haiku + Gemini + Jev 2x** | **0.766** | **0.084** | **1** |
 
-In both modes Gemini adds about +0.0003 beside Jev.  Data: the trio's balanced cells `<judge>@i1_p0n20d<r>` (rounds 0–9, $21.69) and `<judge>@b10n20d<seed>` (seeds 1–2), Jev's `jev-1.14.0@ji_noul_relative_n160d<r>` and `jev-1.14.0@jd_noul_relative_n160d<seed>`; Luna's third and fourth instruction passes are its own-order rounds 10–19.
+At Jev 24 the four-judge 2x was on the frontier in 5 variants in both modes and Luna + Haiku + Jev 1x on descriptions in none (now 1).  In both modes Gemini adds nothing beside Jev at the default variant (descriptions 0.7659 against 0.7664 for Luna + Haiku + Jev 2x, instructions 0.7887 against 0.7891); it stays by Roger's rule of every model we have.  Data: the trio's balanced cells `<judge>@i1_p0n20d<r>` (rounds 0–9, $21.69) and `<judge>@b10n20d<seed>` (seeds 1–2), Jev's `jev-1.14.0@ji_noul_relative_n160d<r>` and `jev-1.14.0@jd_noul_relative_n160d<seed>`; Luna's third and fourth instruction passes are its own-order rounds 10–19.
 
 ## The decisions (Roger, 2026-11-03)
 

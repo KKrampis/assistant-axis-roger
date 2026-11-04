@@ -2694,8 +2694,9 @@ descriptions as the judge-tier evaluation settled it: the batched percentile rub
 `b10`, 20 entities per call, two passes, one each way, no reasoning, each judge's passes
 averaged, for GPT-5.6 Luna, Haiku 5.5 and Gemini 3.1 Flash-Lite, and **since 2026-11-04
 Jev (TypeSafe AI) beside them by its own method, two passes one each way, the four blended
-Luna 4 : Haiku 3 : Gemini 3 : Jev 24** (Roger: "the new standard is (Luna + Haiku + Gemini
-+ Jev) x2, with the reversal in the x2"; `judge_score_combine.TIER_JUDGE_WEIGHTS_BY_MODE`).
+Luna 4 : Haiku 3 : Gemini 3 : Jev 12** (Roger: "the new standard is (Luna + Haiku + Gemini
++ Jev) x2, with the reversal in the x2"; `judge_score_combine.TIER_JUDGE_WEIGHTS_BY_MODE`; Jev 24 until the
+resilience review of the same day).
 The defaults are the constants at the top of that script, one place to change them.
 
 **Since 2026-11-04, balanced cells** (61 axes, slot 6, layer 25, raw; real price, May corpus;
@@ -2708,13 +2709,18 @@ The defaults are the constants at the top of that script, one place to change th
 | Luna + Haiku + Gemini, 2 passes each (the default to 2026-11-04) | 0.751 | 0.076 | 0 |
 | Jev, 2 passes | 0.758 | 0.008 | 12 |
 | Luna + Haiku + Jev, 2 passes each | 0.766 | 0.050 | 12 |
-| **Luna + Haiku + Gemini + Jev, 2 passes each (the default)** | **0.766** | **0.084** | **5** |
+| **Luna + Haiku + Gemini + Jev, 2 passes each (the default)** | **0.766** | **0.084** | **1** |
 
-Jev's weight, 24 beside Luna's 4, is the peak of 4:3:3:X on ρ averaged over the 12
-variants: X from 16 to 40 lies within 0.0005 of it, the bootstrap's best X is in [16, 40]
-(95%), fitting either half or leaving any one axis out picks 24, and it is +0.0083
-[+0.0051, +0.0113] over X = 3.  A free fit of all four weights gains nothing on held-out
-halves.  Jev's method, its tests and the evidence:
+Jev's weight, 12 beside Luna's 4, is chosen for resilience, not fitted to the mean (Roger, on
+the mean-ρ fit's 24: "That's not an ensemble, that's an addendum").  On ρ averaged over the
+12 variants, 4:3:3:X peaks at 24, but there the blend ranks entities as Jev alone does
+(Spearman 0.99), and Jev's bad axes are one class, the style axes (precise vs vague −0.105
+against the trio), which make the per-axis differences fat-tailed.  12 has the smallest
+worst-axis shortfall from the better of Jev alone and the trio (0.026, against 0.043 at 24),
+for a mean −0.0010 [−0.0022, +0.0002] from 24's.  Dropping each entity's outlying score, the
+median of the four and dropping the least-agreeing judge per axis all do worse
+([`scripts/jev_weight_resilience.py`](../scripts/jev_weight_resilience.py)).  Jev's method,
+its tests and the evidence:
 [`jev_judging.md`](../reports/judge_pareto/jev_judging.md).  Jev's cells are
 `<axis>_tier_eval/jev-1.14.0@jd_noul_relative_n160d<seed>/`, its average
 `jev-1.14.0@jd_noul_relative_n160dx2/`; its key is `TYPESAFE_API_KEY`.
@@ -2786,9 +2792,11 @@ its column B A B A d; cells `jev-1.14.0@ji_noul_relative_n160d<round>`).
 [`scripts/judge_instruction_grid.py`](../scripts/judge_instruction_grid.py) `--design rounds`
 runs it by default (`--rounds` defaults to 0-9) and derives
 `gpt-5.6-luna+claude-haiku-5-5+gemini-3.1-flash-lite+jev-1.14.0@i1_p0n20dx2`, **blended Luna 4 :
-Haiku 3 : Gemini 3 : Jev 24**, the weight fitted on these balanced cells as for descriptions
-(the peak of 4:3:3:X at 20, 24 indistinguishable from it, 12-40 within 0.001, +0.0044
-[+0.0014, +0.0074] over 3; `judge_score_combine.TIER_JUDGE_WEIGHTS_BY_MODE`).  Jev is requested
+Haiku 3 : Gemini 3 : Jev 12**, as for descriptions and for the same reason
+(`judge_score_combine.TIER_JUDGE_WEIGHTS_BY_MODE`; the mean-ρ fit peaks at 20 here, 12 is
+−0.0003 [−0.0014, +0.0008] from it, and its worst-axis shortfall is 0.036 against 0.048 at
+24; [`jev_judging.md`](../reports/judge_pareto/jev_judging.md) § "Jev's weight: 12, for
+resilience").  Jev is requested
 by its versioned ID, `jev-1.14.0`, pinned (TypeSafe accepts one although `GET /v1/models`
 lists only the aliases), and a run stops before writing cells if any answer comes from another
 version (`--expect_model`, by default the version requested), since the cell names and the
@@ -2798,9 +2806,9 @@ weight are for that version.
 |---|---:|---:|---:|
 | Luna + Haiku + Gemini, 1 pass each (the default to 2026-11-04) | 0.778 | 0.178 | 0 |
 | Jev, 1 pass | 0.781 | 0.021 | 12 |
-| Jev, 2 passes | 0.783 | 0.043 | 10 |
-| Luna + Haiku + Jev, 2 passes each | 0.788 | 0.239 | 10 |
-| **Luna + Haiku + Gemini + Jev, 2 passes each (the default)** | **0.789** | **0.398** | **5** |
+| Jev, 2 passes | 0.783 | 0.043 | 8 |
+| Luna + Haiku + Jev, 2 passes each | 0.789 | 0.239 | 10 |
+| **Luna + Haiku + Gemini + Jev, 2 passes each (the default)** | **0.789** | **0.398** | **2** |
 
 On the October corpus the default costs roughly $0.95 an axis, about $190 for 200 axes (an
 estimate scaled from the May corpus).  Account and figures:

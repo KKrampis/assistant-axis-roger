@@ -7,16 +7,17 @@ places each entity by percentile among all of them on the axis), 20 entities per
 no reasoning, each judge's passes averaged, for GPT-5.6 Luna, Haiku 5.5 and Gemini 3.1 Flash-Lite; and since
 2026-11-04 Jev (TypeSafe AI) beside them by its own method, two passes, one each way (Roger: "the new standard is
 (Luna + Haiku + Gemini + Jev) x2, with the reversal in the x2"; JEV_* below, scripts/judge_jev_entities.py).  The
-four are blended Luna 4 : Haiku 3 : Gemini 3 : Jev 24 (judge_score_combine.TIER_JUDGE_WEIGHTS_BY_MODE, the Jev
-weight fitted on the 12 projection variants: reports/judge_pareto/jev_judging.md).  On the 61 axes, balanced
-cells, slot 6, layer 25, raw (rho against the activation projections, cost per axis at the real price, Flex and
-batch; scripts/judge_instruction_12way.py --mode descriptions):
+four are blended Luna 4 : Haiku 3 : Gemini 3 : Jev 12 (judge_score_combine.TIER_JUDGE_WEIGHTS_BY_MODE; Jev's
+weight chosen for resilience, the smallest worst-axis shortfall, rather than the mean-rho fit's 24:
+reports/judge_pareto/jev_judging.md § "Jev's weight: 12, for resilience").  On the 61 axes, balanced cells, slot
+6, layer 25, raw (rho against the activation projections, cost per axis at the real price, Flex and batch;
+scripts/judge_instruction_12way.py --mode descriptions):
 
     gpt-5.6-luna alone, 1 pass                                  0.709   $0.011
     the three, 2 passes each (the default from 2026-11-03)      0.751   $0.076
     Jev alone, 2 passes                                         0.758   $0.008    frontier in 12 of 12
     Luna + Haiku + Jev, 2 passes each                           0.766   $0.050    frontier in 12 of 12
-    the four, 2 passes each (the default)                       0.766   $0.084    frontier in 5 of 12
+    the four, 2 passes each (the default)                       0.766   $0.084    frontier in 1 of 12
 
 Roger's rule (2026-11-03), chosen over picking among twenty arms a few thousandths apart: every model we have,
 since the cross-model ensemble helps and varies by axis, and as many passes as the one text per entity needs

@@ -426,12 +426,19 @@ Shorter here; each item links to the full account.
 - **Jev (TypeSafe AI) as a fourth judge (2026-11-04).**  Batched, 160 entities a request, one
   yes/no-probability question per entity ("nearer the second end than most of the other
   entries?"), at $0.042 per million input tokens with output free.  Alone it scores above every
-  other judge (descriptions 0.745 against Luna's 0.709 at one pass), and its fitted weight gives
-  it 71% of the blend: [`jev_judging.md`](./jev_judging.md).  The drivers request
+  other judge (descriptions 0.745 against Luna's 0.709 at one pass): [`jev_judging.md`](./jev_judging.md).  The drivers request
   the pinned version, `jev-1.14.0`, and stop if any answer comes from another version.  **The standard since then, in both modes: Luna + Haiku +
-  Gemini + Jev, two passes each, one each way, weighted 4 : 3 : 3 : 24.**  Descriptions: 0.766 at
-  $0.084 an axis; instructions: 0.789 at $0.398.  Luna + Haiku + Jev at 2x is within 0.0005 of
-  that in both modes, for about 60% of the cost; the figures are
+  Gemini + Jev, two passes each, one each way, weighted 4 : 3 : 3 : 12.**  Descriptions: 0.766 at
+  $0.084 an axis; instructions: 0.789 at $0.398.  **Jev's weight is chosen for resilience, not
+  fitted to the mean.**  The mean-ρ fit gave 24, which made the blend 68% Jev in effect, ranking
+  entities as Jev alone does (0.99); Roger: "That's not an ensemble, that's an addendum".  Jev's
+  bad axes are one class, the style axes (precise vs vague −0.105 against the trio in both
+  modes), and the per-axis gaps are fat-tailed, so 12, the weight with the smallest worst-axis
+  shortfall (0.026 and 0.036, against 0.043 and 0.048 at 24), replaced it for a mean ρ within
+  noise; dropping each entity's outlying score, which Roger also asked about, does worse
+  ([`jev_judging.md`](./jev_judging.md) § "Jev's weight: 12, for resilience",
+  [`jev_weight_resilience.py`](../../scripts/jev_weight_resilience.py)).  Luna + Haiku + Jev at
+  2x is within 0.0005 of the four in both modes, for about 60% of the cost; the figures are
   [`judge_description_12way.png`](../../roger/axis_judge_experiments/instruction_judging_12way/judge_description_12way.png)
   and
   [`judge_instruction_12way.png`](../../roger/axis_judge_experiments/instruction_judging_12way/judge_instruction_12way.png),

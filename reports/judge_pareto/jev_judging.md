@@ -14,8 +14,9 @@ Written for Roger and for later agents.  Jev is TypeSafe AI's model (jev-1.14.0)
 
 ## The decisions (Roger, 2026-11-04)
 
-- **Descriptions:** "the new standard is (Luna + Haiku + Gemini + Jev) x2, with the reversal in the x2".  [`judge_descriptions.py`](../../results_analysis/judge_descriptions.py) runs this by default.  The blend is Luna 4 : Haiku 3 : Gemini 3 : **Jev 24** (`judge_score_combine.TIER_JUDGE_WEIGHTS_BY_MODE`; § "The description blend" below).
-- **Instructions:** "(Luna + Haiku + Gemini + Jev) x2, and just do both directions in the x2".  [`judge_instruction_grid.py`](../../scripts/judge_instruction_grid.py) `--design rounds` runs this by default: two passes, rounds 0-9, each judge in its column of Roger's direction table, the second pass the first reversed.  Jev's weight for instructions is in § "The instruction blend".
+- **Descriptions:** "the new standard is (Luna + Haiku + Gemini + Jev) x2, with the reversal in the x2".  [`judge_descriptions.py`](../../results_analysis/judge_descriptions.py) runs this by default.  The blend is Luna 4 : Haiku 3 : Gemini 3 : **Jev 12** (`judge_score_combine.TIER_JUDGE_WEIGHTS_BY_MODE`).
+- **Instructions:** "(Luna + Haiku + Gemini + Jev) x2, and just do both directions in the x2".  [`judge_instruction_grid.py`](../../scripts/judge_instruction_grid.py) `--design rounds` runs this by default: two passes, rounds 0-9, each judge in its column of Roger's direction table, the second pass the first reversed.  The blend is the same, **Jev 12**.
+- **Jev's weight, 12 in both modes, is chosen for resilience, not fitted to the mean** (Roger, on the fitted 24: "That's not an ensemble, that's an addendum"; § "Jev's weight: 12, for resilience").  The mean-ρ fits, which gave 24, are in § "The description blend" and § "The instruction blend"; 24 was the default for a few hours on 2026-11-04.
 
 ## How Jev judges
 
@@ -103,7 +104,7 @@ The cells are all four judges, two balanced passes each, on the 61 axes.  Each j
 - **Against X = 3:** 24 is +0.0083 [+0.0051, +0.0113].
 - **Free weights:** fitting all four weights freely gains nothing on held-out halves.  The best free fit is 3 : 1.5 : 0 : 12, which equals 4:3:3:24 on all 61.
 
-So Jev carries 71% of the description blend.  Alone, the judges at 2x balanced score Jev 0.7045, Luna 0.6784, Haiku 0.6673 and Gemini 0.6626.
+At 24 Jev carries 71% of the description blend by weight.  Alone, the judges at 2x balanced score Jev 0.7045, Luna 0.6784, Haiku 0.6673 and Gemini 0.6626.
 
 ## The instruction blend
 
@@ -119,9 +120,9 @@ The cells are all four judges, two passes each, on the 61 axes: rounds 0-9, the 
 - **Against X = 3:** 24 is +0.0044 [+0.0014, +0.0074].
 - **Free weights:** the best free fit on all 61 is 5 : 1.5 : 0 : 12 (0.7309 against 0.7302); fitted on either half it scores −0.0001 and +0.0010 on the other, so nothing to choose.
 
-**Chosen: 24, as for descriptions** (`judge_score_combine.TIER_JUDGE_WEIGHTS_BY_MODE`).  Nothing separates it from the peak, and one weight for both modes is simpler.  Alone, the judges at 2x balanced score Jev 0.7259, Luna 0.7152, Haiku 0.7045 and Gemini 0.7041.
+**Chosen at first: 24, as for descriptions.**  Nothing separates it from the peak, and one weight for both modes is simpler.  Replaced the same day by 12 in both modes (next section).  Alone, the judges at 2x balanced score Jev 0.7259, Luna 0.7152, Haiku 0.7045 and Gemini 0.7041.
 
-The arms at the default variant (s6_l25_raw), from [`judge_instruction_12way.png`](../../roger/axis_judge_experiments/instruction_judging_12way/judge_instruction_12way.png), balanced: a 2x takes each judge's passes one each way, a 1x alternates directions over an entity's instructions (Roger's table):
+The arms at the default variant (s6_l25_raw), from [`judge_instruction_12way.png`](../../roger/axis_judge_experiments/instruction_judging_12way/judge_instruction_12way.png), balanced, the blends at Jev 12: a 2x takes each judge's passes one each way, a 1x alternates directions over an entity's instructions (Roger's table):
 
 | judges (61 axes, balanced) | ρ | $ per axis | on the frontier, of 12 variants |
 |---|---:|---:|---:|
@@ -129,12 +130,81 @@ The arms at the default variant (s6_l25_raw), from [`judge_instruction_12way.png
 | Luna + Haiku + Gemini, 1 pass each (the default to 2026-11-04) | 0.778 | 0.178 | 0 |
 | Luna + Haiku + Gemini, 2 passes each | 0.780 | 0.356 | 0 |
 | Jev, 1 pass | 0.781 | 0.021 | 12 |
-| Jev, 2 passes | 0.783 | 0.043 | 10 |
-| Luna + Haiku + Jev, 1 pass each | 0.787 | 0.119 | 9 |
-| Luna + Haiku + Jev, 2 passes each | 0.788 | 0.239 | 10 |
-| **Luna + Haiku + Gemini + Jev, 2 passes each (the default)** | **0.789** | **0.398** | **5** |
+| Jev, 2 passes | 0.783 | 0.043 | 8 |
+| Luna + Haiku + Jev, 1 pass each | 0.788 | 0.119 | 9 |
+| Luna + Haiku + Jev, 2 passes each | 0.789 | 0.239 | 10 |
+| **Luna + Haiku + Gemini + Jev, 2 passes each (the default)** | **0.789** | **0.398** | **2** |
 
-As on descriptions, Gemini adds little beside Jev: the default is +0.0003 over Luna + Haiku + Jev at 2x, for $0.16 more an axis.  On the October corpus (1,270 entities an axis, instructions 40 tokens against 24) the default costs roughly $0.95 an axis, about $190 for 200 axes (the trio's $0.42 an axis at 1x, doubled, plus Jev scaled from the May corpus; an estimate, not a dry run).
+At Jev 24 the last three rows were 0.787, 0.788 and 0.789, on the frontier in 9, 10 and 5 variants, and Jev 2x was on it in 10.  As on descriptions, Gemini adds nothing beside Jev at the default variant: the default is 0.7887 against 0.7891 for Luna + Haiku + Jev at 2x, for $0.16 more an axis; it stays the standard by Roger's rule of every model we have (the resilience it is kept for is about the worst axes, below).  On the October corpus (1,270 entities an axis, instructions 40 tokens against 24) the default costs roughly $0.95 an axis, about $190 for 200 axes (the trio's $0.42 an axis at 1x, doubled, plus Jev scaled from the May corpus; an estimate, not a dry run).
+
+## Jev's weight: 12, for resilience (Roger, 2026-11-04)
+
+The mean-ρ fits above made Jev 71% of the blend.  Roger: "4:3:3:24 ? That's not an ensemble, that's an addendum", and "With the other models, they tend to have good and bad axes, which vary between models: part of the reason for the ensemble was resilience."  (His first reaction to 12 was that it "isn't that resilient" either; the tests below are what he asked for next.)  So the weight is judged here by its worst axes as well as its mean.  After them: "best so far is a simple 4:3:3:12 ensemble" and "Switch over".  **Jev's weight is 12 in both modes since then** (`judge_score_combine.TIER_JUDGE_WEIGHTS_BY_MODE`).
+
+Every number in this section comes from [`jev_weight_resilience.py`](../../scripts/jev_weight_resilience.py), on the same balanced cells (each judge's two passes, one each way), 61 axes, ρ averaged over the 12 variants; the numbers are in [`jev_weight_resilience.json`](../../roger/axis_judge_experiments/jev_weight/jev_weight_resilience.json).  An axis's **shortfall** is how far a blend falls below the better of Jev alone and the trio (Luna 4 : Haiku 3 : Gemini 3) on that axis: what an ensemble is for is never doing much worse than its better part.
+
+| 4:3:3:X | Descriptions: mean ρ, vs 24 [95%] | axes below the trio | worst shortfall | Instructions: mean ρ, vs 24 [95%] | axes below the trio | worst shortfall |
+|---|---|---:|---:|---|---:|---:|
+| 3 | 0.7014, −0.0083 [−0.0113, −0.0051] | 2 | 0.056 | 0.7257, −0.0044 [−0.0074, −0.0014] | 5 | 0.067 |
+| 8 | 0.7070, −0.0027 [−0.0045, −0.0007] | 3 | 0.035 | 0.7290, −0.0011 [−0.0029, +0.0007] | 10 | 0.045 |
+| **12** | **0.7086, −0.0010 [−0.0022, +0.0002]** | **4** | **0.026** | **0.7299, −0.0003 [−0.0014, +0.0008]** | **10** | **0.036** |
+| 14 | 0.7091, −0.0006 [−0.0015, +0.0003] | 4 | 0.030 | 0.7300, −0.0001 [−0.0010, +0.0008] | 11 | 0.034 |
+| 16 | 0.7093, −0.0003 [−0.0010, +0.0004] | 4 | 0.033 | 0.7301, −0.0000 [−0.0007, +0.0007] | 11 | 0.037 |
+| 24 | 0.7097 | 5 | 0.043 | 0.7301 | 12 | 0.048 |
+| 32 | 0.7095, −0.0002 [−0.0007, +0.0003] | 6 | 0.052 | 0.7299, −0.0003 [−0.0008, +0.0001] | 12 | 0.055 |
+
+- **12 has the smallest worst shortfall on descriptions, and 14 on instructions** (0.034 against 0.036): one weight for both modes, as before.  Its mean is within noise of 24's in both.
+- **The weight in effect.**  A weighted mean of raw scores gives each judge its weight times its spread.  At 24, Jev's share is 0.67 (descriptions) and 0.69 (instructions), and the blend ranks entities as Jev alone does (Spearman 0.992 and 0.995).  At 12 its share is 0.51 and 0.52, and Luna, Haiku and Gemini each agree with the blend better (0.959, 0.943, 0.948 on descriptions, against 0.947, 0.934, 0.937).
+
+**Jev's bad axes are one class.**  Jev trails the trio on 12 description axes and 17 instruction axes.  The worst are style axes, about how someone expresses themselves or works:
+
+| axis | Descriptions: Jev minus trio | Instructions |
+|---|---:|---:|
+| [precise](../../data/traits/instructions/precise.json) vs [vague](../../data/traits/instructions/vague.json) | −0.105 | −0.105 |
+| [proactive](../../data/traits/instructions/proactive.json) vs [reactive](../../data/traits/instructions/reactive.json) | −0.080 | −0.067 |
+| [concise](../../data/traits/instructions/concise.json) vs [verbose](../../data/traits/instructions/verbose.json) | −0.068 | −0.042 |
+| [superficial](../../data/traits/instructions/superficial.json) vs [thorough](../../data/traits/instructions/thorough.json) | −0.037 | −0.027 |
+| [accessible](../../data/traits/instructions/accessible.json) vs [esoteric](../../data/traits/instructions/esoteric.json) | −0.008 | −0.034 |
+| [opaque](../../data/traits/instructions/opaque.json) vs [transparent](../../data/traits/instructions/transparent.json) | −0.011 | −0.028 |
+| [practical](../../data/traits/instructions/practical.json) vs [theoretical](../../data/traits/instructions/theoretical.json) | −0.019 | −0.018 |
+| [quantitative](../../data/traits/instructions/quantitative.json) vs [qualitative](../../data/traits/instructions/qualitative.json) | −0.008 | −0.018 |
+
+- **They are properties of the axes, not noise.**  On instructions the gap on pass 1 predicts the gap on pass 2 across the axes (Pearson 0.96; 15 axes below on both).  On descriptions the passes agree less (0.44), because a description pass is one direction and Jev's direction effect differs by axis; precise vs vague is −0.085 and −0.107.
+- **Jev is still the judge with the fewest bad axes.**  Alone, it trails the mean of the other three alone on 5 description axes and 12 instruction axes; Luna on 34 and 34, Haiku on 35 and 35, Gemini on 48 and 43.
+- **Jev's best axis**, by the same measure, is [ecocentric](../../data/traits/instructions/ecocentric.json) vs [anthropocentric](../../data/traits/instructions/anthropocentric.json): +0.080 and +0.094.
+
+**The gaps are fat-tailed.**  Per axis, the gap's standard error comes from a paired bootstrap over the axis's entities (1,000 resamples, the same for both judges and all 12 projections); the conservative check adds the judge noise of the pass split (0.020 on descriptions, an upper bound inflated by the direction effect; 0.004 on instructions).
+
+| | Descriptions | Instructions |
+|---|---|---|
+| Spread of the gaps across axes (sd); median standard error | 0.030; 0.008 | 0.028; 0.006 |
+| Cochran's Q on 60 df: the bootstrap's noise; the conservative noise | 412, p 5e-54; 97, p 0.002 | 585, p 4e-87; 434, p 4e-58 |
+| Real spread between axes, τ (conservative) | 0.017 | 0.018 |
+| Axes beyond 3 sd after that spread (a normal gives 0.16) | 2 | 3 |
+| Excess kurtosis; Shapiro-Wilk p; Student-t df | 3.5; 0.000; 2.2 | 3.4; 0.001; 2.2 |
+| The same without the three lowest axes | Q 48 on 57 (p 0.80), τ 0: noise alone | τ 0.015, 1 axis beyond 3 (ecocentric vs anthropocentric, +4.4 sd, on the good side), kurtosis 2.2 |
+
+So beyond a real, roughly normal spread of the per-axis differences, the lower tail is a cluster of style axes: a mixture, not a smooth heavy tail.  A weight fitted to the mean is the right choice when the per-axis differences are normal; with a lower tail confined to one class of axes, the worst axes cost more than the mean shows, and the October corpus's 200 or so axes will hold more style axes of this kind.  With 61 axes the tail shape (the t df above) is rough, but 2 to 3 axes beyond 3 sd against 0.16 is not borderline.
+
+**Alternatives tried, all worse.**  Roger: "Where we have 4 results, can we do better by discarding the outlier and averaging the other 3?", and "Try 1:1:1:1 and 4:3:3:12 ... and 1:1:1:2 for the averaging".
+
+| method | Descriptions: vs 24 [95%] | below the trio | worst shortfall | Instructions: vs 24 [95%] | below the trio | worst shortfall |
+|---|---|---:|---:|---|---:|---:|
+| **4:3:3:12** | **−0.0010 [−0.0022, +0.0002]** | **4** | **0.026** | **−0.0003 [−0.0013, +0.0009]** | **10** | **0.036** |
+| 1:1:1:2 | −0.0040 [−0.0062, −0.0017] | 3 | 0.050 | −0.0020 [−0.0040, +0.0001] | 9 | 0.058 |
+| 1:1:1:1 | −0.0081 [−0.0112, −0.0049] | 3 | 0.068 | −0.0045 [−0.0075, −0.0012] | 7 | 0.075 |
+| per entity, drop the outlying score, 1:1:1:1 on the rest | −0.0171 [−0.0203, −0.0138] | 29 | 0.077 | −0.0094 [−0.0128, −0.0057] | 33 | 0.080 |
+| the same, 1:1:1:2 on the rest | −0.0152 | 27 | 0.061 | −0.0087 | 26 | 0.061 |
+| the same, 4:3:3:12 on the rest | −0.0142 | 25 | 0.048 | −0.0083 | 25 | 0.043 |
+| the same, 4:3:3:24 on the rest | −0.0139 | 26 | 0.045 | −0.0084 | 24 | 0.036 |
+| median of the four | −0.0110 | 10 | 0.068 | −0.0061 | 14 | 0.073 |
+| per axis, drop the judge that agrees least with the other three, 4:3:3:12 on the rest | −0.0019 [−0.0042, +0.0006] | 7 | 0.035 | −0.0027 [−0.0062, +0.0007] | 7 | 0.045 |
+| the trio alone | −0.0168 | 0 | 0.080 | −0.0099 | 0 | 0.094 |
+
+- **Dropping the outlier is a vote against the best judge.**  The score dropped is Jev's for 29% (descriptions) and 33% (instructions) of entities, against 25% by chance.  Jev is the most accurate judge, and the trio share their errors, so when Jev disagrees with them it is mostly right; the vote removes the one independent judge.  The result falls below the trio alone on 25 to 33 axes.  (With four scores, the score farthest from the mean and the one farthest from the median are always the same, so that variant adds nothing.)
+- **Dropping a judge per axis**, chosen by agreement alone (no projections), does drop Jev on [concise](../../data/traits/instructions/concise.json) vs [verbose](../../data/traits/instructions/verbose.json) and [precise](../../data/traits/instructions/precise.json) vs [vague](../../data/traits/instructions/vague.json) in both modes.  But agreement does not tell Jev's bad axes from its best: its agreement with the other three on ecocentric vs anthropocentric (0.899 and 0.929) is as low as on its style axes (0.83 to 0.91 and 0.89 to 0.93).  No threshold on agreement would separate them.
+
+**Caveats.**  The weight is chosen on the same 61 axes it is judged on; it is one parameter on a flat mean, but a worst axis is a single-axis statistic and noisy.  The October corpus is the real test.  Gemini adds nothing beside Jev at the default variant (0.7659 against 0.7664 for Luna + Haiku + Jev 2x on descriptions; 0.7887 against 0.7891 on instructions); it stays by Roger's rule of every model we have.
 
 ## Where Jev is strong and weak (one pass each, own order, 61 axes)
 
@@ -151,7 +221,7 @@ This is also why Jev gains most from soft whitening, which damps the valence-hea
 
 - **The Jev judge:** [`judge_jev_entities.py`](../../scripts/judge_jev_entities.py).  Its tests are [`test_judge_jev_entities.py`](../../scripts/tests/test_judge_jev_entities.py) and the jev_entities tests in [`test_judge_tier_cost_eval.py`](../../results_analysis/tests/test_judge_tier_cost_eval.py).
 - **Production:** [`judge_descriptions.py`](../../results_analysis/judge_descriptions.py) (test [`test_judge_descriptions_jev.py`](../../results_analysis/tests/test_judge_descriptions_jev.py)) and [`judge_instruction_grid.py`](../../scripts/judge_instruction_grid.py) (test [`test_judge_instruction_grid_jev.py`](../../scripts/tests/test_judge_instruction_grid_jev.py)).
-- **Weights:** [`judge_score_combine.py`](../../assistant_axis/judge_score_combine.py), `TIER_JUDGE_WEIGHTS_BY_MODE`.
+- **Weights:** [`judge_score_combine.py`](../../assistant_axis/judge_score_combine.py), `TIER_JUDGE_WEIGHTS_BY_MODE`.  The evidence for 12: [`jev_weight_resilience.py`](../../scripts/jev_weight_resilience.py) (test [`test_jev_weight_resilience.py`](../../scripts/tests/test_jev_weight_resilience.py)), its numbers in [`jev_weight_resilience.json`](../../roger/axis_judge_experiments/jev_weight/jev_weight_resilience.json); no API calls, about ten minutes.
 - **The figures:** [`judge_instruction_12way.py`](../../scripts/judge_instruction_12way.py), drawing [`judge_description_12way.png`](../../roger/axis_judge_experiments/instruction_judging_12way/judge_description_12way.png) and [`judge_instruction_12way.png`](../../roger/axis_judge_experiments/instruction_judging_12way/judge_instruction_12way.png).  They use balanced cells by default; `--directions own` draws the own-order ones.
 - **Run logs and drivers:** [`jev_entity_logs/`](../../roger/axis_judge_experiments/jev_entity_logs/).
 - **Spend:** about $16 of Jev credit, and about $27 of trio judging for the balanced cells.

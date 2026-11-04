@@ -312,20 +312,21 @@ PRIMARY_AXIS_SAMPLE_WEIGHT: float = 5.0
 # part of a cell name before "@".  See the module docstring, item 5.
 TIER_JUDGE_WEIGHTS: Dict[str, float] = {"gpt-5.6-luna": 4.0}
 TIER_JUDGE_DEFAULT_WEIGHT: float = 3.0
-#: Per judging mode, the weights that differ from TIER_JUDGE_WEIGHTS (2026-11-04).  Jev (TypeSafe AI) on
-#: descriptions: 24 beside Luna 4, Haiku 3, Gemini 3 (Roger: "an optimal blend ... of the form 4:3:3:X ...
-#: average across all 12"), fitted on the balanced cells of the 61 axes (each judge two passes, one each way)
-#: on rho averaged over the 12 projection variants: the peak of 4:3:3:X, the plateau 16-40 within 0.0005 of it,
-#: the bootstrap's best X in [16, 40] (95%), 24 chosen fitting either half and leaving any one axis out, and
-#: +0.0083 [+0.0051, +0.0113] over X = 3; a free fit of all four weights gains nothing on held-out halves.
-#: instructions: 24 too (Roger: "(Luna + Haiku + Gemini + Jev) x2, and just do both directions in the x2"),
-#: fitted the same way on the balanced instruction cells (rounds 0-9): the peak at 20, 0.0000 above 24
-#: ([-0.0002, +0.0003]), the plateau 12-40 within 0.001, the bootstrap's best X in [12, 40] (95%, 24 the
-#: commonest), 16 to 24 chosen fitting either half or leaving any one axis out, and +0.0044 [+0.0014, +0.0074]
-#: over X = 3; one weight for both modes, since nothing tells the two apart.
-#: Evidence: reports/judge_pareto/jev_judging.md.
-TIER_JUDGE_WEIGHTS_BY_MODE: Dict[str, Dict[str, float]] = {"descriptions": {"jev-1.14.0": 24.0},
-                                                           "instructions": {"jev-1.14.0": 24.0}}
+#: Per judging mode, the weights that differ from TIER_JUDGE_WEIGHTS (2026-11-04).  Jev (TypeSafe AI): 12
+#: beside Luna 4, Haiku 3, Gemini 3, in both modes, chosen for resilience rather than for the mean (Roger: "4:3:3:24
+#: ? That's not an ensemble, that's an addendum"; the ensemble is there because each judge has its own bad axes).
+#: The mean-rho fit on the balanced cells of the 61 axes (rho averaged over the 12 projection variants) peaks at
+#: 24 on descriptions and 20 on instructions, but at 24 the blend is about 68% Jev in effect and ranks 0.99 as Jev
+#: alone does.  Jev's bad axes are one class, the style axes (precise/vague -0.105 against the trio in both
+#: modes, proactive/reactive, concise/verbose), stable across passes, and the per-axis gaps are fat-tailed (2-4
+#: axes beyond 3 sd against 0.16 for a normal spread).  12 has the smallest worst-axis shortfall from the better
+#: of Jev and the trio among the weights tried (0.026 descriptions, 0.036 instructions, against 0.043 / 0.048 at
+#: 24; 14 is 0.034 on instructions), for a mean rho within noise of 24: -0.0010 [-0.0022, +0.0002] and -0.0003
+#: [-0.0014, +0.0009].  Dropping each entity's outlying judge, the median of the four and dropping the judge that
+#: agrees least on an axis all do worse.  Evidence: reports/judge_pareto/jev_judging.md § "Jev's weight",
+#: scripts/jev_weight_resilience.py.  24 from 70da7b0f / 4e806584 to this change.
+TIER_JUDGE_WEIGHTS_BY_MODE: Dict[str, Dict[str, float]] = {"descriptions": {"jev-1.14.0": 12.0},
+                                                           "instructions": {"jev-1.14.0": 12.0}}
 
 
 def tier_judge_weights(judges, mode: Optional[str] = None) -> Dict[str, float]:
