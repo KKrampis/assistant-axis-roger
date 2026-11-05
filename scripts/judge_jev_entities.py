@@ -40,6 +40,9 @@ refused.  The cells are judge_tier_cost_eval.py's: ``<axis>_tier_eval/<model><la
 ``scores_<mode>.json``, ``correlations.json`` and ``usage.json`` (the axis's own requests).  The key is
 TYPESAFE_API_KEY, from the environment or a .env, never printed or written.
 
+Before changing how Jev is asked or read, see reports/judge_pareto/working_with_jev.md: what one small test showed
+about prompting it, its answers and its quirks, as clues rather than rules.
+
 Usage:
     uv run python scripts/judge_jev_entities.py --mode descriptions --axes_file scripts/tier_eval_axes_dev30.tsv \\
         --instructions_dir /tmp/claude-501/corpus_2026-05-24/data --question score --levels 5 \\

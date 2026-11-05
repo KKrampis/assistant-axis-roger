@@ -1,6 +1,6 @@
 # Jev as an axis judge: descriptions and instructions (2026-11-04)
 
-Written for Roger and for later agents.  Jev is TypeSafe AI's model (jev-1.14.0).  This report covers judging axes from the entities' descriptions and instructions; Jev on responses is in [`response_judging_plan.md`](./response_judging_plan.md) § 4b.
+Written for Roger and for later agents.  Jev is TypeSafe AI's model (jev-1.14.0).  **Before asking Jev anything, read [`working_with_jev.md`](./working_with_jev.md)**: what we have noticed about prompting it, reading its answers, its quality and its quirks, as clues rather than rules.  This report covers judging axes from the entities' descriptions and instructions; Jev on responses is in [`response_judging_plan.md`](./response_judging_plan.md) § 4b.
 
 **Terms.**
 - **ρ:** the Spearman correlation, over an axis's entities, between a judge's scores and the activation projections.

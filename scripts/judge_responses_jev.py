@@ -25,6 +25,9 @@ accepts a versioned ID "whether or not they appear in the list" (docs.typesafe.a
 only the aliases), and an alias "moves when a new release ships".  The logs of 2026-11-04 were requested as
 jev-latest, every answer from jev-1.14.0; a pinned run resumes such a log, its cells recording both names requested.
 
+Before changing how Jev is asked or read, see reports/judge_pareto/working_with_jev.md: what one small test showed
+about prompting it, its answers and its quirks, as clues rather than rules.
+
 Usage:
     uv run python scripts/judge_responses_jev.py --axes_file scripts/tier_eval_axes_responses6.tsv \\
         --responses_dir 'runpod_workspace/qwen/qwen-3-32b Roger 8slot' --response_split 9 --response_part 0 \\

@@ -2742,7 +2742,10 @@ for a mean −0.0010 [−0.0022, +0.0002] from 24's.  Dropping each entity's out
 median of the four and dropping the least-agreeing judge per axis all do worse
 ([`scripts/jev_weight_resilience.py`](../scripts/jev_weight_resilience.py)).  Jev's method,
 its tests and the evidence:
-[`jev_judging.md`](../reports/judge_pareto/jev_judging.md).  Jev's cells are
+[`jev_judging.md`](../reports/judge_pareto/jev_judging.md); what we have noticed about
+prompting it, reading its answers and its quirks, as clues rather than rules:
+[`working_with_jev.md`](../reports/judge_pareto/working_with_jev.md), to read before asking
+Jev anything.  Jev's cells are
 `<axis>_tier_eval/jev-1.14.0@jd_noul_relative_n160d<seed>/`, its average
 `jev-1.14.0@jd_noul_relative_n160dx2/`; its key is `TYPESAFE_API_KEY`.
 
