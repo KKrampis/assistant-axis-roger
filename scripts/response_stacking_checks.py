@@ -21,7 +21,8 @@ resamples, a fresh generator per comparison, seed 0), by slot (slot 0, slot 6: s
 extrapolated points (1/3 and all, Spearman-Brown) carry no per-axis values, so they enter only as a mean ("with
 extrapolated points").
 
-Usage: uv run python scripts/response_stacking_checks.py [--pareto_dir roger/axis_judge_experiments/response_pareto]
+Usage: uv run python scripts/response_stacking_checks.py [--judge luna|haiku|gemini] [--pareto_dir ...]
+(the twelve-axis checks are Luna's and print only with --judge luna)
 """
 from __future__ import annotations
 
@@ -38,7 +39,7 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 from results_analysis.judge_tier_cost_plot_pooled import pareto_frontier  # noqa: E402
 
-LUNA = "gpt-5.6-luna"
+LUNA = "gpt-5.6-luna"     # the judge read; main() sets it from the 61-axis JSON's config (--judge)
 SHARES = (10, 15, 20, 25)
 KS = (2, 4, 6)
 N_BOOT = 4000
@@ -197,11 +198,17 @@ def twelve(P: Points) -> None:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--pareto_dir", default="roger/axis_judge_experiments/response_pareto")
+    ap.add_argument("--judge", default="luna", choices=("luna", "haiku", "gemini"))
     args = ap.parse_args(argv)
+    global LUNA
     d = Path(args.pareto_dir)
-    if (d / "judge_response_pareto_61.json").exists():
-        sixty_one(Points(d / "judge_response_pareto_61.json"))
-    if (d / "judge_response_pareto.json").exists():
+    f61 = d / ("judge_response_pareto_61.json" if args.judge == "luna" else f"judge_response_pareto_61_{args.judge}.json")
+    if f61.exists():
+        P61 = Points(f61)
+        LUNA = P61.config.get("model", LUNA)
+        sixty_one(P61)
+    if args.judge == "luna" and (d / "judge_response_pareto.json").exists():
+        LUNA = "gpt-5.6-luna"
         twelve(Points(d / "judge_response_pareto.json"))
     return 0
 

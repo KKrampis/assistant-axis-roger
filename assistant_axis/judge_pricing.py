@@ -238,8 +238,43 @@ _BATCH_PRICE_FACTORS: tuple[tuple[str, float], ...] = (
 
 #: OpenAI Flex processing (``service_tier="flex"``) is billed at Batch API rates
 #: (developers.openai.com Flex guide, read 2026-10-26); its usage is kept under
-#: ``<model>:flex`` and priced with the batch factors.
+#: ``<model>:flex`` and priced with the batch factors.  Gemini's Flex tier too
+#: (``"serviceTier": "flex"``, 2026-11-05): input, cached input, storage and output
+#: all at half the standard price, as its Batch API (aistudio.google.com/docs/pricing,
+#: read 2026-11-05: 3.1 Flash-Lite $0.125 / $0.0125 cached / $0.75 against $0.25 /
+#: $0.025 / $1.50).
 FLEX_SUFFIX = ":flex"
+#: The providers whose ``<model>:flex`` has a price.
+_FLEX_PREFIXES = ("gpt-", "gemini-")
+
+
+# Explicit-cache storage (Gemini, 2026-11-05): USD per 1M cached tokens per hour, standard tier
+# (aistudio.google.com/docs/pricing, read that day: 3.1 Flash-Lite $1.00 an hour, Flex and Batch $0.50, the
+# "gemini-" batch factor).  A usage record keeps it as token-hours (UsageTotals.cache_storage_token_hours),
+# priced at cache_storage_rate of its key.  Only explicit caches bill storage; the implicit ones and the
+# other providers' caches bill none.
+_CACHE_STORAGE_RATES: tuple[tuple[str, float], ...] = (
+    ("gemini-3.1-flash-lite", 1.00),
+)
+
+
+def cache_storage_rate(model: str) -> float:
+    """USD per 1M token-hours of explicit-cache storage for a usage key (``:batch`` and ``:flex`` at the batch
+    factor).  Raises ``KeyError`` for a model with no rate, so that a run cannot store a cache it prices as
+    free."""
+    m = model.lower()
+    factor = 1.0
+    for suffix in (FLEX_SUFFIX, BATCH_SUFFIX):
+        if m.endswith(suffix):
+            m = m[: -len(suffix)]
+            factor = next((f for fragment, f in _BATCH_PRICE_FACTORS if fragment in m), None)
+            if factor is None:
+                raise KeyError(f"No batch price factor for {model!r} (cache storage)")
+    for fragment, rate in _CACHE_STORAGE_RATES:
+        if fragment in m:
+            return rate * factor
+    raise KeyError(f"No cache storage rate for {model!r}.  Add one to "
+                   f"assistant_axis/judge_pricing.py:_CACHE_STORAGE_RATES before caching with it.")
 
 
 # ---------------------------------------------------------------------------
@@ -273,8 +308,10 @@ _CACHE_RATE_FACTORS: tuple[tuple[str, float, float], ...] = (
     ("fable", 1.25, 0.10),
     # Gemini's implicit cache (2026-11-04): no write premium, reads at a tenth (3.1 Flash-Lite $0.025 of $0.25,
     # batch $0.0125 of $0.125; aistudio.google.com/docs/pricing, read that day); a live probe of Flash-Lite
-    # read 6,125 of 10,145 prompt tokens of a repeated prefix.  Explicit caches, which also bill storage by the
-    # hour, are not used here.
+    # read 6,125 of 10,145 prompt tokens of a repeated prefix.  Explicit caches (2026-11-05,
+    # judge_tier_cost_eval --gemini_cache explicit) read at the same tenth ($0.0125 on Flex and Batch) and bill
+    # storage by the token-hour (cache_storage_rate); their creation is charged as cache-written tokens at the
+    # factor 1.0, the tier's input rate, an assumption (not verified against a bill).
     ("gemini", 1.0, 0.10),
 )
 
@@ -308,8 +345,8 @@ def price_for_model(model: str) -> tuple[float, float]:
     """
     m = model.lower()
     if m.endswith(FLEX_SUFFIX):
-        if not m.startswith("gpt-"):
-            raise KeyError(f"Flex processing is OpenAI's; no flex price for {model!r}")
+        if not m.startswith(_FLEX_PREFIXES):
+            raise KeyError(f"Flex processing is OpenAI's and Gemini's; no flex price for {model!r}")
         return price_for_model(m[: -len(FLEX_SUFFIX)] + BATCH_SUFFIX)
     if m.endswith(BATCH_SUFFIX):
         rate_in, rate_out = price_for_model(m[: -len(BATCH_SUFFIX)])
@@ -336,19 +373,23 @@ def cost_for_usage(
     completion_tokens: int,
     cache_write_tokens: int = 0,
     cache_read_tokens: int = 0,
+    cache_storage_token_hours: float = 0.0,
 ) -> float:
     """USD cost of one call's tokens at the model's rates.  ``prompt_tokens``
     is every input token, the cache-written and cache-read ones included;
     those are priced at :func:`cache_rate_factors` times the input rate, the
-    rest at the input rate.
+    rest at the input rate.  ``cache_storage_token_hours`` (an explicit Gemini
+    cache's storage, 2026-11-05) is priced at :func:`cache_storage_rate`.
     """
     rate_in, rate_out = price_for_model(model)
     write_factor, read_factor = cache_rate_factors(model)
     plain = prompt_tokens - cache_write_tokens - cache_read_tokens
+    storage = cache_storage_token_hours * cache_storage_rate(model) / 1_000_000.0 if cache_storage_token_hours else 0.0
     return (
         (plain + cache_write_tokens * write_factor + cache_read_tokens * read_factor)
         * rate_in / 1_000_000.0
         + completion_tokens * rate_out / 1_000_000.0
+        + storage
     )
 
 
@@ -474,6 +515,8 @@ class UsageTotals:
             provider's prompt cache (priced at :func:`cache_rate_factors`
             times the input rate; 2026-11-01).
         cache_read_tokens: Of the prompt tokens, those read from it.
+        cache_storage_token_hours: Explicit-cache storage (Gemini, 2026-11-05),
+            in token-hours, priced at :func:`cache_storage_rate`.
         cost_usd: Running total cost in USD, computed at charge time
             using :func:`price_for_model` rates.
         n_calls: Number of API calls accumulated (for log lines).
@@ -485,19 +528,25 @@ class UsageTotals:
     n_calls: int = 0
     cache_write_tokens: int = 0
     cache_read_tokens: int = 0
+    cache_storage_token_hours: float = 0.0
 
     def charge(self, prompt_tokens: int, completion_tokens: int,
-               cache_write_tokens: int = 0, cache_read_tokens: int = 0) -> float:
+               cache_write_tokens: int = 0, cache_read_tokens: int = 0, *,
+               cache_storage_token_hours: float = 0.0, n_calls: int = 1) -> float:
         """Add one API call's tokens; return its USD cost contribution.
-        ``prompt_tokens`` includes the cache-written and cache-read tokens."""
+        ``prompt_tokens`` includes the cache-written and cache-read tokens.
+        ``n_calls=0`` for a charge that is not a judge call (an explicit cache's
+        creation or storage, 2026-11-05)."""
         delta_cost = cost_for_usage(self.model, int(prompt_tokens), int(completion_tokens),
-                                    int(cache_write_tokens), int(cache_read_tokens))
+                                    int(cache_write_tokens), int(cache_read_tokens),
+                                    float(cache_storage_token_hours))
         self.prompt_tokens += int(prompt_tokens)
         self.completion_tokens += int(completion_tokens)
         self.cache_write_tokens += int(cache_write_tokens)
         self.cache_read_tokens += int(cache_read_tokens)
+        self.cache_storage_token_hours += float(cache_storage_token_hours)
         self.cost_usd += delta_cost
-        self.n_calls += 1
+        self.n_calls += int(n_calls)
         return delta_cost
 
     def as_dict(self) -> dict:
@@ -515,6 +564,8 @@ class UsageTotals:
             out["cache_write_tokens"] = self.cache_write_tokens
         if self.cache_read_tokens:
             out["cache_read_tokens"] = self.cache_read_tokens
+        if self.cache_storage_token_hours:
+            out["cache_storage_token_hours"] = round(self.cache_storage_token_hours, 4)
         return out
 
     @classmethod
@@ -530,16 +581,18 @@ class UsageTotals:
         n  = int(d.get("n_calls") or 0)
         cw = int(d.get("cache_write_tokens") or 0)
         cr = int(d.get("cache_read_tokens") or 0)
+        sh = float(d.get("cache_storage_token_hours") or 0.0)
         # Recompute cost from tokens (the stored value is rounded; we
         # keep full precision in memory).
         try:
-            cost = cost_for_usage(model, pt, ct, cw, cr)
+            cost = cost_for_usage(model, pt, ct, cw, cr, sh)
         except KeyError:
             # Unknown model: fall back to the persisted cost so we
             # don't silently zero out historic totals.
             cost = float(d.get("cost_usd") or 0.0)
         return cls(model=model, prompt_tokens=pt, completion_tokens=ct,
-                   cost_usd=cost, n_calls=n, cache_write_tokens=cw, cache_read_tokens=cr)
+                   cost_usd=cost, n_calls=n, cache_write_tokens=cw, cache_read_tokens=cr,
+                   cache_storage_token_hours=sh)
 
 
 # ---------------------------------------------------------------------------
@@ -573,7 +626,8 @@ class MultiModelUsage:
 
     def charge(
         self, model: str, prompt_tokens: int, completion_tokens: int,
-        cache_write_tokens: int = 0, cache_read_tokens: int = 0,
+        cache_write_tokens: int = 0, cache_read_tokens: int = 0, *,
+        cache_storage_token_hours: float = 0.0, n_calls: int = 1,
     ) -> float:
         """Tick the (model) sub-accumulator.  Returns the USD cost
         contribution of this single call (sum across all token streams).
@@ -586,7 +640,9 @@ class MultiModelUsage:
         if model not in self.per_model:
             self.per_model[model] = UsageTotals(model=model)
         return self.per_model[model].charge(prompt_tokens, completion_tokens,
-                                            cache_write_tokens, cache_read_tokens)
+                                            cache_write_tokens, cache_read_tokens,
+                                            cache_storage_token_hours=cache_storage_token_hours,
+                                            n_calls=n_calls)
 
     def charge_usage(self, model: str, usage: TokenUsage) -> float:
         """:meth:`charge` from a :class:`TokenUsage`."""
@@ -650,11 +706,13 @@ class MultiModelUsage:
             tgt.completion_tokens += sub.completion_tokens
             tgt.cache_write_tokens += sub.cache_write_tokens
             tgt.cache_read_tokens += sub.cache_read_tokens
+            tgt.cache_storage_token_hours += sub.cache_storage_token_hours
             tgt.n_calls += sub.n_calls
             # Recompute cost from totals at current rates.
             try:
                 tgt.cost_usd = cost_for_usage(model, tgt.prompt_tokens, tgt.completion_tokens,
-                                              tgt.cache_write_tokens, tgt.cache_read_tokens)
+                                              tgt.cache_write_tokens, tgt.cache_read_tokens,
+                                              tgt.cache_storage_token_hours)
             except KeyError:
                 # Unknown model: keep sum-of-stored-cost as best-effort.
                 tgt.cost_usd += sub.cost_usd
@@ -668,6 +726,7 @@ class MultiModelUsage:
             f"{m}: ${t.cost_usd:.3f} in={t.prompt_tokens:,} out={t.completion_tokens:,} n={t.n_calls:,}"
             + (f" cache_write={t.cache_write_tokens:,}" if t.cache_write_tokens else "")
             + (f" cache_read={t.cache_read_tokens:,}" if t.cache_read_tokens else "")
+            + (f" cache_storage={t.cache_storage_token_hours:,.0f} token-h" if t.cache_storage_token_hours else "")
             for m, t in sorted(self.per_model.items())
         )
         return (
@@ -848,6 +907,7 @@ __all__ = [
     "ROLES_RESPONSE_LENGTH_FACTOR",
     "price_for_model",
     "cache_rate_factors",
+    "cache_storage_rate",
     "cost_for_usage",
     "surgical_rejudge_cost_split",
     "TokenUsage",

@@ -15,13 +15,14 @@ from typing import Any, Dict, List, Optional, Tuple
 from assistant_axis import judge as _judge
 from assistant_axis.judge import (  # noqa: F401 -- re-exported
     DEFAULT_TEMPERATURE, FAILED, FLEX_FALLBACK_AFTER_S, FLEX_MAX_RETRIES, FLEX_MIN_ATTEMPT_S,
-    FLEX_RETRY_SLEEP_S, FLEX_TIMEOUT_S, GEMINI_ATTEMPTS, GEMINI_BASE_URL, GEMINI_RETRY_SLEEP_S,
+    FLEX_RETRY_SLEEP_S, FLEX_TIMEOUT_S, GEMINI_ATTEMPTS, GEMINI_BASE_URL, GEMINI_FLEX_TIER, GEMINI_RETRY_SLEEP_S,
+    GeminiCache, gemini_create_cache, gemini_delete_cache, gemini_served_tier,
     GEMINI_RETRY_STATUSES, JUDGE_REQUEST_SETTINGS, MODEL_CAPABILITIES, SERVICE_TIERS, SKIPPED,
     BillingError, CallStats, FlexRefusedError, JudgeRequestError, RequestOverride, Truncated,
     accepts_flex, accepts_temperature, anthropic_reply, anthropic_request_params, chat_create_kwargs,
     chat_request_body, content_flag, flex_attempt_client, gemini_quota_ids, gemini_reply,
     gemini_request_body, is_billing_error, is_flex_refusal, judge_request_settings,
-    make_gemini_client, model_capabilities, parse_request_setting, provider_for_model,
+    make_gemini_client, model_capabilities, parse_request_setting, prompt_parts, provider_for_model,
     request_temperature, usage_key,
 )
 from assistant_axis.judge import call_anthropic_judge as call_anthropic  # noqa: F401
@@ -36,21 +37,23 @@ CUT_AT_CAP = "length"
 
 
 def request_for(model: str, prompt: str, max_tokens: int, settings: Dict[str, Any],
-                service_tier: Optional[str] = None) -> Dict[str, Any]:
+                service_tier: Optional[str] = None, cached_content: Optional[str] = None) -> Dict[str, Any]:
     """The provider's request for ``model`` (a chat body, Messages params or a generateContent
-    body): the same request a live call sends, which a Batch API line carries unchanged."""
+    body): the same request a live call sends, which a Batch API line carries unchanged.
+    ``cached_content``: a Gemini request on an explicit cache of the prompt's prefix (its
+    suffix only; the Gemini batch runner puts the cache's name in at submission)."""
     provider = provider_for_model(model)
     if provider == "anthropic":
         return anthropic_request_params(prompt, model, max_tokens, settings=settings)
     if provider == "google":
-        return gemini_request_body(prompt, model, max_tokens, settings=settings)
+        return gemini_request_body(prompt, model, max_tokens, settings=settings, cached_content=cached_content)
     return chat_request_body(prompt, model, max_tokens, settings=settings, service_tier=service_tier)
 
 
 def prompt_of_request(request: Dict[str, Any]) -> str:
     """The prompt of a request built by :func:`request_for`."""
     if "contents" in request:
-        return request["contents"][0]["parts"][0]["text"]
+        return "".join(part.get("text", "") for c in request["contents"] for part in c.get("parts", []))
     content = request["messages"][0]["content"]
     return content if isinstance(content, str) else "".join(part.get("text", "") for part in content)
 
@@ -89,16 +92,17 @@ def choose_transport(model: str, requested: str = "auto") -> TransportChoice:
     ``gemini_batch.py``; since 2026-11-03, once a round of 1,769 requests came back in about 3 minutes);
     an OpenAI model by Flex when ``judge.MODEL_CAPABILITIES`` says OpenAI takes it, by the
     Batch API when it says OpenAI refuses it, and, untested, by Flex with a probe (the first request
-    alone; a service-tier HTTP 400 switches the model to batch for the run).  Gemini's Flex tier (a
-    preview, documented for the Interactions API only on 2026-11-03) is not wired.  A transport the
-    model cannot take raises :class:`JudgeRequestError`."""
+    alone; a service-tier HTTP 400 switches the model to batch for the run).  Gemini's Flex tier on
+    generateContent (``"serviceTier": "flex"``, half price, measured live on 2026-11-05) is
+    ``--transport flex``, never auto's choice: its latency target is 1 to 15 minutes, its batch the
+    same price.  A transport the model cannot take raises :class:`JudgeRequestError`."""
     if requested not in TRANSPORT_CHOICES:
         raise ValueError(f"--transport {requested!r}: expected one of {TRANSPORT_CHOICES}")
     provider = provider_for_model(model)
     if provider == "google":
         if requested == "flex":
-            raise JudgeRequestError("--transport flex: Gemini's Flex tier is not wired up here; "
-                                    "use --transport batch (the same half price)")
+            return TransportChoice("flex", False, "--transport flex: Gemini generateContent on the Flex tier "
+                                                  "(serviceTier flex, half price)")
         if requested == "realtime":
             return TransportChoice("realtime", False, "--transport realtime: Gemini generateContent")
         return TransportChoice("batch", False, "--transport batch: Gemini Batch API" if requested == "batch" else

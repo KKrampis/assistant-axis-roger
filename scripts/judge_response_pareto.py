@@ -34,7 +34,7 @@ reliabilities' ratio (checked against the score-alone rubric's third and full ce
 Cost on the x axis: a full run, 200 axes of the October extraction (1,273 entities, 425 kept responses each)
 at the point's coverage, every prefix cached and read for every axis after the first: GPT-5.6 Luna by Flex
 ($0.10/$0.60 per 1M, reads 0.1x, a write 1.25x once per prefix); Haiku 5.5 by Message Batches ($0.05/$0.25, the
-same factors; the probe of 2026-11-04 read every prefix in a batch); Gemini 3.1 Flash-Lite by its Batch API
+same factors, assuming every prefix is read inside a batch, which is untested); Gemini 3.1 Flash-Lite by its Batch API
 naming an explicit cache per prefix ($0.125/$0.75, cached reads $0.0125; each cache created once at the standard
 input rate, $0.25, and stored an hour at $1 per 1M an hour; the implicit cache reads nothing in batch).  Each
 judge's tokens a call are its own, measured on these runs; a stacked arm's cost is its measured cost.
@@ -88,7 +88,6 @@ N_AXES = 200
 NINTH = 1 / 9
 FRACTION_K = 3                      # each judge's share of the ninth cut in thirds (Roger: no fifths)
 FRACTIONS = (1, 2, 3)               # m/3 of it
-EXTRAPOLATE = {"1/3": 3, "all": 9}  # coverage multiples of the ninth
 KEY_RE = re.compile(r"^(.*)\|p(\d+)q(\d+)$")
 #: Production prices, USD per 1M tokens: (input, output, cached read, once per prefix per cached token).
 PRICES = {
@@ -108,10 +107,6 @@ JEV_ARMS = [("@jrel_a20m12_s9p0", "Jev, 20 answers x 12 axes a request"), ("@jre
 #: own on 2026-11-05, "Move that to a separate plot"): one arm can be
 #: in several; a reference arm is drawn grey and stays off that figure's frontier.
 FIGURES = {
-    "luna": ("Luna only: one axis a call against every stacking format and k",
-             "judge_response_pareto_luna.png",
-             "GPT-5.6 Luna alone, every call's direction a coin, 20 answers a call; stacking: each batch's axes "
-             "regrouped at random, formats plain \"1, SCORES: 18, 42\", labelled \"1. SCORES: A=18, B=42\", axis by axis \"A: 1=18, 2=32\""),
     "jev": ("Jev only: its relative yes/no design, answers and axes a request (Luna one axis a call for reference)",
             "judge_response_pareto_jev.png",
             "Jev 1.14 (TypeSafe AI): a batch of answers to one question and some axes a request, \"is the persona behind answer k "
@@ -130,15 +125,35 @@ STACK61_K = (2, 4, 6)
 LEAVE_OUT = (0.10, 0.15, 0.20, 0.25)  # Roger, 2026-11-04: "try 10%, 25%, and a plausible seeming threshold"; 15%, 20% 2026-11-05
 CROSSFIT_FOLDS = 9
 INV_PHI = 0.6180339887498949
+#: The 61-axis mode's judges (Roger, 2026-11-05: "redo this for Haiku and Gemini ... Each step depends on the decision
+#: for the previous one"; figures under the same names with the judge added).  Per judge: its share of the responses
+#: (``base``; Gemini judges the round-robin 1/27 of the ninth, its questions 27 apart) and the cell labels, ``{i}`` the
+#: axis's index in its axes file; ``k1_12`` / ``n40_12`` the twelve's own cells (Luna: "balanced", its own-order and
+#: swapped runs), else the 61-axis label serves the twelve too.  A judge's figures are drawn once their cells exist.
+JUDGES_61 = {
+    "luna": dict(model=LUNA, name="Luna", share="s9p0", base=NINTH, step=9, k1_12="balanced",
+                 k1_61="@r1_pnn20_s9p0g61_a{i}c", n40_12="@r1_pnn40_s9p0g12_a{i}c", n40_61="@r1_pnn40_s9p0g61_a{i}c"),
+    "haiku": dict(model=HAIKU, name="Haiku 5.5", share="s9p0", base=NINTH, step=9, k1_12=None,
+                  k1_61="@r1_pnn20_s9p0g61_st1", n40_12=None, n40_61="@r1_pnn40_s9p0g61_st1"),
+    "gemini": dict(model=GEMINI, name="Gemini 3.1 Flash-Lite", share="s27p0", base=1 / 27, step=27,
+                   k1_12="@r1_pnn20_s27p0g12_a{i}c", k1_61="@r1_pnn20_s27p0g61_a{i}c", n40_12=None,
+                   n40_61="@r1_pnn40_s27p0g61_a{i}c"),
+}
+#: The stacking formats on the 61 axes (2026-11-05; Roger: "the full one", replacing the twelve-axis Luna figure).
+FIGURE_FORMATS = ("61 axes, {name} only: one axis a call against every stacking format and k",
+                  "judge_response_pareto_luna.png",
+                  "{name} alone, every call's direction a coin, 20 answers a call; every axis stacked, each batch's 61 axes "
+                  "regrouped at random; formats plain \"1, SCORES: 18, 42\", labelled \"1. SCORES: A=18, B=42\", axis by axis "
+                  "\"A: 1=18, 2=32\"")
 #: 20 answers a call against 40, on the 61 axes since 2026-11-05 (Roger: "Do it [at Flex], update it and show it to me
 #: once done, no need to change the plot name"); drawn by --stack_group g61.
-FIGURE_ANSWERS = ("61 axes, Luna only: 20 answers a call against 40",
+FIGURE_ANSWERS = ("61 axes, {name} only: 20 answers a call against 40",
                   "judge_response_pareto_answers.png",
-                  "GPT-5.6 Luna alone, one axis a call, every call's direction a coin; each call judges one question's answers "
+                  "{name} alone, one axis a call, every call's direction a coin; each call judges one question's answers "
                   "in batches of 20 (the default) or 40")
-FIGURE_61 = ("61 axes, Luna only: one axis a call against plain stacking, every axis or all but the worst",
+FIGURE_61 = ("61 axes, {name} only: one axis a call against plain stacking, every axis or all but the worst",
              "judge_response_pareto_61_luna.png",
-             "GPT-5.6 Luna alone, every call's direction a coin, 20 answers a call; plain stacking \"1, SCORES: 18, 42\", each "
+             "{name} alone, every call's direction a coin, 20 answers a call; plain stacking \"1, SCORES: 18, 42\", each "
              "batch's 61 axes regrouped at random; the worst 10%, 15%, 20% or 25% of the axes judged one axis a call instead, chosen on "
              "the other 8 of 9 question folds (cross-fitted)")
 
@@ -292,6 +307,8 @@ def main(argv=None) -> int:
     ap.add_argument("--stack_group", choices=("g12", "g61"), default="g12",
                     help="g12: the twelve axes, every judge and format (three figures); g61: the 61 axes, Luna only (stacking, and 20 answers a call against 40)")
     ap.add_argument("--axes_file", default=None, help=f"default {AXES_12}, or {AXES_61} with --stack_group g61")
+    ap.add_argument("--judge", choices=sorted(JUDGES_61), default="luna",
+                    help="with --stack_group g61: the judge whose cells are drawn (figures named with it unless Luna)")
     ap.add_argument("--instructions_dir", default="/tmp/claude-501/corpus_2026-05-24/data")
     ap.add_argument("--cache_dir", default=str(rob.DEFAULT_EXPERIMENTS_DIR / "_tier_eval_scratch" / "robustness_cache"))
     ap.add_argument("--output_dir", required=True)
@@ -355,14 +372,14 @@ def main(argv=None) -> int:
         arms.append(dict(key=key, label=label, family=family, members=members, cost_parts=cost_parts, figures=figures))
     jb = JEV_ARMS[0][0]                 # Jev in the mixes: its cheapest arm, 20 answers x 12 axes
     add(f"{LUNA}@k1", "Luna", "Luna, one axis a call", [("luna", judges["luna"], None)], [(1.0, unit[LUNA])],
-        ["luna", "jev", "models"])
+        ["jev", "models"])
     if have["luna40"]:
         add(f"{LUNA}@n40", "Luna, 40 answers", "Luna, one axis a call, 40 answers a call", [("luna40", judges["luna40"], None)],
             [(1.0, unit["luna40"])], [])        # its figure is drawn on the 61 axes (--stack_group g61)
     for (fmt, k), cells in stacked.items():
         if (fmt, k) in stack_unit:
             add(f"{LUNA}@{fmt}k{k}", f"Luna k={k} {FMT_NAME[fmt]}", f"Luna stacked, {FMT_NAME[fmt]}",
-                [("luna", cells, None)], [(1.0, stack_unit[(fmt, k)])], ["luna"])
+                [("luna", cells, None)], [(1.0, stack_unit[(fmt, k)])], [])     # drawn on the 61 axes since 2026-11-05
     for lab, name in JEV_ARMS:
         if have[lab]:
             add(f"{JEV}{lab}", name, name, [(lab, judges[lab], None)], [(1.0, unit[lab])], ["jev"] + (["models"] if lab == jb else []))
@@ -436,10 +453,14 @@ def projector(data: Data, cache_dir: Path, data_dir: Path):
 
 
 def arm_points(arms: List[dict], data: Data, model_of: Dict[str, str], rho_of, vkeys: List[str],
-               calib: float) -> Dict[str, dict]:
-    """Each arm's points: the fractions m/3 of the ninth measured (each the mean of three rotations), and the
-    coverages above the ninth extrapolated by Spearman-Brown, the gains scaled by calib."""
+               calib: float, base: float = NINTH, step: int = 9) -> Dict[str, dict]:
+    """Each arm's points: the fractions m/3 of the measured share (the ninth unless ``base`` says otherwise; Gemini
+    judged a 1/27, cut by question, its questions ``step`` = 27 apart) measured, each the mean of three rotations,
+    and the coverages above it up to all extrapolated by Spearman-Brown, the gains scaled by calib.  The point keys
+    keep the word "ninth" whatever the share (the plots read ``coverage`` and ``m``)."""
     axes = data.axes
+    extrapolate = {f"1/{round(1 / (base * M))}" if base * M < 1 else "all": M
+                   for M in (3, 9, 27) if base * M <= 1 + 1e-9}
     points: Dict[str, dict] = {}
     for arm in arms:
         for m in FRACTIONS:
@@ -452,7 +473,7 @@ def arm_points(arms: List[dict], data: Data, model_of: Dict[str, str], rho_of, v
                     per_rot.append(rho_of(blend(parts), ax))
                 for vk in vkeys:
                     rhos[vk].append(float(np.mean([x[vk] for x in per_rot])))
-            cov = NINTH * m / FRACTION_K
+            cov = base * m / FRACTION_K
             points[f"{arm['key']}|ninth x {m}/{FRACTION_K}"] = dict(arm=arm["key"], label=arm["label"], family=arm["family"], coverage=cov, m=m,
                                                  figures=arm["figures"],
                                                  measured=True, cost=full_run_cost([(f * cov, u) for f, u in arm["cost_parts"]]),
@@ -467,125 +488,179 @@ def arm_points(arms: List[dict], data: Data, model_of: Dict[str, str], rho_of, v
                     # by question (more coverage adds questions), alternating along the judge's own questions,
                     # which lie a share's modulus apart (9 in the ninth and in a golden share of it, 27 in the
                     # trio's share by question)
-                    step = share[1] if share and share[0] == "q" else 9
+                    st = share[1] if share and share[0] == "q" else step
                     sel = {k: v for k, v in subsample(items[ax.axis_dir], data.rank, data.qabs, FRACTION_K, 0, share).items()
-                           if (k[2] // step) % 2 == h}
+                           if (k[2] // st) % 2 == h}
                     parts[model_of[j]] = means(sel)
                 halves.append(blend(parts))
             common = sorted(set(halves[0]) & set(halves[1]))
             r = pearsonr([halves[0][n] for n in common], [halves[1][n] for n in common])[0]
             rel.append(2 * r / (1 + r))
         R = float(np.mean(rel))
-        base = points[f"{arm['key']}|ninth x {FRACTION_K}/{FRACTION_K}"]
-        for name, M in EXTRAPOLATE.items():
+        base_pt = points[f"{arm['key']}|ninth x {FRACTION_K}/{FRACTION_K}"]
+        for name, M in extrapolate.items():
             RM = M * R / (1 + (M - 1) * R)
-            cov = NINTH * M
+            cov = base * M
             points[f"{arm['key']}|{name}"] = dict(
                 arm=arm["key"], label=arm["label"], family=arm["family"], coverage=cov, measured=False, reliability=R,
                 figures=arm["figures"],
                 cost=full_run_cost([(f * cov, u) for f, u in arm["cost_parts"]]),
                 # the Spearman-Brown gain, scaled by the measured-to-predicted ratio of the check
-                rho={vk: base["rho"][vk] * (1 + calib * (math.sqrt(RM / R) - 1)) for vk in vkeys})
+                rho={vk: base_pt["rho"][vk] * (1 + calib * (math.sqrt(RM / R) - 1)) for vk in vkeys})
     return points
 
 
 def main61(args) -> int:
-    """The 61 axes, Luna only: one axis a call against plain stacking at k = 2, 4, 6, every axis stacked or all but
-    the worst 10%, 15%, 20% or 25%, those chosen by cross-fitting over question folds (module docstring)."""
+    """The 61 axes, one judge (--judge, JUDGES_61): 20 answers a call against 40; one axis a call against plain
+    stacking at k = 2, 4, 6, every axis stacked or all but the worst 10%, 15%, 20% or 25%, those chosen by
+    cross-fitting over question folds (module docstring); and the three stacking formats.  Each figure is drawn once
+    its cells exist; Luna's file names are kept, other judges' carry the judge (judge_response_pareto_answers_haiku.png)."""
     from results_analysis.judge_tier_cost_plot_pooled import load_measured_cost
+    J = JUDGES_61[args.judge]
+    model, name, share, base = J["model"], J["name"], J["share"], J["base"]
     E, data_dir, inst = Path(args.experiments_dir), Path(args.data_dir).resolve(), Path(args.instructions_dir)
     data = Data(E, Path(args.axes_file), data_dir, inst)
-    d12 = Data(E, Path(AXES_12), data_dir, inst)          # the twelve's balanced cells and Luna's cost a call
+    d12 = Data(E, Path(AXES_12), data_dir, inst)          # the twelve's own cells, and Luna's cost a call
     axes, A = data.axes, len(data.axes)
     i12 = {a.axis_dir: i for i, a in enumerate(d12.axes)}
-    k1 = {a.axis_dir: (d12.luna_balanced(i12[a.axis_dir], a.axis_dir) if a.axis_dir in i12
-                       else data.cell(a.axis_dir, LUNA, f"@r1_pnn20_s9p0g61_a{i}c")) for i, a in enumerate(axes)}
-    stacked = {k: {a.axis_dir: data.cell(a.axis_dir, LUNA, f"@rk_pnn20_s9p0g61_k{k}") for a in axes} for k in STACK61_K}
-    k1_40 = {a.axis_dir: (d12.cell(a.axis_dir, LUNA, f"@r1_pnn40_s9p0g12_a{i12[a.axis_dir]}c") if a.axis_dir in i12
-                          else data.cell(a.axis_dir, LUNA, f"@r1_pnn40_s9p0g61_a{i}c")) for i, a in enumerate(axes)}
-    missing = [f"{ax} ({what})" for what, cells in [("one axis a call", k1), ("40 answers", k1_40)] + [(f"k={k}", c) for k, c in stacked.items()]
-               for ax, v in cells.items() if not v]
-    if missing:
-        raise SystemExit(f"{len(missing)} cells missing, e.g. {missing[:4]}")
 
-    unit_luna = judge_costs(per_call_profile(d12, LUNA, lambda i: f"@r1_pnn20_s9p0g12_a{i}"), LUNA)
-    unit_40 = judge_costs(per_call_profile(d12, LUNA, lambda i: f"@r1_pnn40_s9p0g12_a{i}c"), LUNA)
-    stack_unit = {}
-    for k in STACK61_K:                 # a stacked run's measured cost, per response and axis
+    def cells_of(label_12, label_61):
+        """{axis: items or None}: the twelve's own cells (label_12) where given, else the 61-axis label."""
+        out = {}
+        for i, a in enumerate(axes):
+            if label_12 == "balanced" and a.axis_dir in i12:
+                out[a.axis_dir] = d12.luna_balanced(i12[a.axis_dir], a.axis_dir)
+            elif label_12 and a.axis_dir in i12:
+                out[a.axis_dir] = d12.cell(a.axis_dir, model, label_12.format(i=i12[a.axis_dir]))
+            else:
+                out[a.axis_dir] = data.cell(a.axis_dir, model, label_61.format(i=i))
+        return out
+
+    complete = lambda cells: all(v for v in cells.values())
+    k1 = cells_of(J["k1_12"], J["k1_61"])
+    if not complete(k1):
+        raise SystemExit(f"{name}: one axis a call is missing on {sum(not v for v in k1.values())} of {A} axes")
+    k1_40 = cells_of(J["n40_12"], J["n40_61"])
+    have40 = complete(k1_40)
+    fmt_label = lambda fmt, k: f"@{fmt}n20_{share}g61_k{k}"
+    stacked_by = {(fmt, k): {a.axis_dir: data.cell(a.axis_dir, model, fmt_label(fmt, k)) for a in axes}
+                  for fmt in FMT_NAME for k in STACK61_K}
+    have = {key: complete(c) for key, c in stacked_by.items()}
+    plain_ks = [k for k in STACK61_K if have[("rk_pn", k)]]
+    print(f"[{args.judge}] one axis a call: complete; 40 answers: {'complete' if have40 else 'missing'}; stacked: "
+          + ", ".join(f"{fmt} k={k}" for (fmt, k), ok in have.items() if ok), file=sys.stderr)
+
+    def measured_unit(label_of_axis):
+        """(USD per response per axis, 0): a cell's recorded tokens at the model's batch rate, over its items."""
         per = []
-        for a in axes:
-            cd = E / f"{a.axis_dir}{rob.TIER_EVAL_SUFFIX}" / f"{LUNA}@rk_pnn20_s9p0g61_k{k}"
+        for i, a in enumerate(axes):
+            cd = E / f"{a.axis_dir}{rob.TIER_EVAL_SUFFIX}" / f"{model}{label_of_axis(i, a)}"
+            if not (cd / "usage.json").exists():
+                continue
             per.append(load_measured_cost(cd / "usage.json", "batch") / json.load(open(cd / "scores_responses.json"))["_provenance"]["n_items"])
             data.read.append(cd / "usage.json")
-        stack_unit[k] = (float(np.mean(per)), unit_luna[1])
-    for name, u in [("one axis a call", unit_luna), ("40 answers a call", unit_40)] + [(f"plain k={k}", u) for k, u in stack_unit.items()]:
-        print(f"[cost] {name}: ${u[0] * 1e6:.2f} per 1M response-axes; full run, every response: "
-              f"${full_run_cost([(1.0, u)]):,.0f}", file=sys.stderr)
+        return (float(np.mean(per)), 0.0)
+
+    if args.judge == "luna":     # as since 2026-11-04: Luna's production cost model a call, the stacked runs measured
+        unit_k1 = judge_costs(per_call_profile(d12, LUNA, lambda i: f"@r1_pnn20_s9p0g12_a{i}"), LUNA)
+        unit_40 = judge_costs(per_call_profile(d12, LUNA, lambda i: f"@r1_pnn40_s9p0g12_a{i}c"), LUNA) if have40 else None
+        stack_unit = {key: (measured_unit(lambda i, a, key=key: fmt_label(*key))[0], unit_k1[1])
+                      for key, ok in have.items() if ok}
+    else:                        # every arm measured the same way: its recorded tokens at the batch rate
+        lab = lambda label_12, label_61: (lambda i, a: label_12.format(i=i12[a.axis_dir])
+                                          if label_12 and a.axis_dir in i12 else label_61.format(i=i))
+        unit_k1 = measured_unit(lab(J["k1_12"], J["k1_61"]))
+        unit_40 = measured_unit(lab(J["n40_12"], J["n40_61"])) if have40 else None
+        stack_unit = {key: measured_unit(lambda i, a, key=key: fmt_label(*key)) for key, ok in have.items() if ok}
+    for nm, u in [("one axis a call", unit_k1), ("40 answers a call", unit_40)] + \
+                 [(f"{FMT_NAME[f]} k={k}", u) for (f, k), u in stack_unit.items()]:
+        if u:
+            print(f"[cost] {nm}: ${u[0] * 1e6:.2f} per 1M response-axes; full run, every response: "
+                  f"${full_run_cost([(1.0, u)]):,.0f}", file=sys.stderr)
 
     variants, vkeys, rho_of = projector(data, Path(args.cache_dir), data_dir)
     fold = lambda key: int(((data.qabs[key[2]] * INV_PHI) % 1.0) * CROSSFIT_FOLDS)
     part = lambda items, keep: {key: v for key, v in items.items() if fold(key) in keep}
     rho_mean = lambda items, ax: float(np.mean(list(rho_of(means(items), ax).values())))
     folds = set(range(CROSSFIT_FOLDS))
-    # each fold's selection: the stacking penalty of every axis on the other folds
-    base = {j: np.array([rho_mean(part(k1[a.axis_dir], folds - {j}), a) for a in axes]) for j in folds}
-    penalty = {(k, j): np.array([rho_mean(part(stacked[k][a.axis_dir], folds - {j}), a) for a in axes]) - base[j]
-               for k in STACK61_K for j in folds}
 
     arms, left_out = [], {}
-    arms.append(dict(key=f"{LUNA}@k1", label="Luna", family="Luna, one axis a call", members=[("luna", k1, None)],
-                     cost_parts=[(1.0, unit_luna)], figures=["luna61", "answers"]))
-    arms.append(dict(key=f"{LUNA}@n40", label="Luna, 40 answers", family="Luna, one axis a call, 40 answers a call",
-                     members=[("luna", k1_40, None)], cost_parts=[(1.0, unit_40)], figures=["answers"]))
-    for k in STACK61_K:
-        arms.append(dict(key=f"{LUNA}@rk_pnk{k}", label=f"Luna k={k} plain", family="Luna stacked, plain",
-                         members=[("luna", stacked[k], None)], cost_parts=[(1.0, stack_unit[k])], figures=["luna61"]))
-        for share in LEAVE_OUT:
-            n, pct = round(share * A), round(100 * share)
+    arms.append(dict(key=f"{model}@k1", label=name, family=f"{name}, one axis a call", members=[("j", k1, None)],
+                     cost_parts=[(1.0, unit_k1)], figures=["luna61", "answers", "formats"]))
+    if have40:
+        arms.append(dict(key=f"{model}@n40", label=f"{name}, 40 answers", family=f"{name}, one axis a call, 40 answers a call",
+                         members=[("j", k1_40, None)], cost_parts=[(1.0, unit_40)], figures=["answers"]))
+    if plain_ks:
+        # each fold's selection: the stacking penalty of every axis on the other folds
+        basef = {j: np.array([rho_mean(part(k1[a.axis_dir], folds - {j}), a) for a in axes]) for j in folds}
+        penalty = {(k, j): np.array([rho_mean(part(stacked_by[("rk_pn", k)][a.axis_dir], folds - {j}), a) for a in axes]) - basef[j]
+                   for k in plain_ks for j in folds}
+    for (fmt, k), ok in have.items():
+        if not ok:
+            continue
+        figs = ["formats"] + (["luna61"] if fmt == "rk_pn" else [])
+        arms.append(dict(key=f"{model}@{fmt}k{k}", label=f"{name} k={k} {FMT_NAME[fmt]}", family=f"{name} stacked, {FMT_NAME[fmt]}",
+                         members=[("j", stacked_by[(fmt, k)], None)], cost_parts=[(1.0, stack_unit[(fmt, k)])], figures=figs))
+        if fmt != "rk_pn":
+            continue
+        for sh in LEAVE_OUT:
+            n, pct = round(sh * A), round(100 * sh)
             out_of = {j: set(np.argsort(penalty[(k, j)])[:n].tolist()) for j in folds}
             merged = {}
             for i, a in enumerate(axes):
                 items: Dict[Tuple[str, int, int], float] = {}
                 for j in folds:
-                    items.update(part(k1[a.axis_dir] if i in out_of[j] else stacked[k][a.axis_dir], {j}))
+                    items.update(part(k1[a.axis_dir] if i in out_of[j] else stacked_by[(fmt, k)][a.axis_dir], {j}))
                 merged[a.axis_dir] = items
-            key = f"{LUNA}@rk_pnx{pct}k{k}"
+            key = f"{model}@rk_pnx{pct}k{k}"
             left_out[key] = {a.axis_dir: c for i, a in enumerate(axes) if (c := sum(i in out_of[j] for j in folds))}
-            arms.append(dict(key=key, label=f"Luna k={k} plain, worst {pct}% one axis a call",
-                             family=f"Luna stacked, plain, worst {pct}% one axis a call", members=[("luna", merged, None)],
-                             cost_parts=[(n / A, unit_luna), (1 - n / A, stack_unit[k])], figures=["luna61"]))
+            arms.append(dict(key=key, label=f"{name} k={k} plain, worst {pct}% one axis a call",
+                             family=f"{name} stacked, plain, worst {pct}% one axis a call", members=[("j", merged, None)],
+                             cost_parts=[(n / A, unit_k1), (1 - n / A, stack_unit[(fmt, k)])], figures=["luna61"]))
 
     check = validate_extrapolation(data, E)
-    points = arm_points(arms, data, {"luna": LUNA}, rho_of, vkeys, check["calibration"])
-    ref = points[f"{LUNA}@k1|ninth x {FRACTION_K}/{FRACTION_K}"]["rho"]
+    points = arm_points(arms, data, {"j": model}, rho_of, vkeys, check["calibration"], base=base, step=J["step"])
+    ref = points[f"{model}@k1|ninth x {FRACTION_K}/{FRACTION_K}"]["rho"]
     for arm in arms:
         p = points[f"{arm['key']}|ninth x {FRACTION_K}/{FRACTION_K}"]
         d = np.array([p["rho"][vk] - ref[vk] for vk in vkeys])
-        print(f"[ninth] {arm['label']:45s} cost {p['cost']:6.0f}  rho {np.mean(list(p['rho'].values())):.4f}  "
+        print(f"[measured share] {arm['label']:50s} cost {p['cost']:6.0f}  rho {np.mean(list(p['rho'].values())):.4f}  "
               f"minus one axis a call, same coverage: slot 0 {d[:6].mean():+.4f}, slot 6 {d[6:].mean():+.4f}", file=sys.stderr)
 
     out = Path(args.output_dir)
     out.mkdir(parents=True, exist_ok=True)
     data.read += d12.read
     inputs = data.inputs + d12.inputs + [current_files_input(dep_key="cells", paths=sorted(set(data.read)))]
-    for fig_key, (fig_title, fname, lead) in (("luna61", FIGURE_61), ("answers", FIGURE_ANSWERS)):
+    suffix = "" if args.judge == "luna" else f"_{args.judge}"
+    drawn = []
+    for fig_key, (fig_title, fname, lead), needed in (("luna61", FIGURE_61, bool(plain_ks)), ("answers", FIGURE_ANSWERS, have40),
+                                                      ("formats", FIGURE_FORMATS, sum(have.values()) > len(plain_ks))):
+        if not needed:
+            continue
+        fname = fname.replace("_luna.png", f"_{args.judge}.png") if args.judge != "luna" and fname.endswith("_luna.png") \
+            else fname.replace(".png", f"{suffix}.png") if args.judge != "luna" else fname
         sub_points = {key: v for key, v in points.items() if fig_key in v["figures"]}
-        plot(sub_points, variants, out / fname, f"Response judging, {fig_title}", A, check, inputs, lead=lead,
-             axes_file=args.axes_file)
+        plot(sub_points, variants, out / fname, f"Response judging, {fig_title.format(name=name)}", A, check, inputs,
+             lead=lead.format(name=name), axes_file=args.axes_file, base=base)
+        drawn.append(fname)
         print(f"wrote {out / fname}", file=sys.stderr)
-    title = "Response judging on 61 axes, Luna only: stacking with the worst axes left out, under 12 projection variants"
-    result = {"config": {"axes_file": args.axes_file, "variants": vkeys, "prices": PRICES, "october_responses": OCTOBER_RESPONSES,
-                         "n_axes": N_AXES, "stack_k": list(STACK61_K), "leave_out": list(LEAVE_OUT),
+    title = f"Response judging on 61 axes, {name} only: answers a call and stacking, under 12 projection variants"
+    result = {"config": {"judge": args.judge, "model": model, "measured_share": base, "axes_file": args.axes_file,
+                         "variants": vkeys, "prices": PRICES, "october_responses": OCTOBER_RESPONSES,
+                         "n_axes": N_AXES, "stack_k": list(STACK61_K), "leave_out": list(LEAVE_OUT), "figures": drawn,
                          "crossfit": f"{CROSSFIT_FOLDS} folds by frac(Q / phi) of the absolute question; each fold's left-out axes "
                                      "the worst by stacking penalty (rho mean of 12 variants) on the other folds",
-                         "fractions": "m/3 of the ninth, golden (judge_tier_cost_eval.golden_point), 3 rotations",
-                         "extrapolation": "Spearman-Brown from a split half by question"},
-              "unit_costs": {"one axis a call": unit_luna, "40 answers a call": unit_40, **{f"plain k={k}": u for k, u in stack_unit.items()}},
+                         "fractions": "m/3 of the measured share, golden (judge_tier_cost_eval.golden_point), 3 rotations",
+                         "extrapolation": "Spearman-Brown from a split half by question",
+                         "unit_costs_basis": "Luna: one axis a call by its production cost model, stacked runs measured; "
+                                             "other judges: every arm's recorded tokens at the batch rate"},
+              "unit_costs": {"one axis a call": unit_k1, "40 answers a call": unit_40,
+                             **{f"{FMT_NAME[f]} k={k}": u for (f, k), u in stack_unit.items()}},
               "left_out_folds": left_out, "extrapolation_check": check, "points": points}
-    (out / "judge_response_pareto_61.json").write_text(json.dumps(json_metadata(result, title=title, inputs=inputs), indent=1))
-    print(f"wrote {out / 'judge_response_pareto_61.json'}", file=sys.stderr)
+    jname = "judge_response_pareto_61.json" if args.judge == "luna" else f"judge_response_pareto_61_{args.judge}.json"
+    (out / jname).write_text(json.dumps(json_metadata(result, title=title, inputs=inputs), indent=1))
+    print(f"wrote {out / jname}", file=sys.stderr)
     return 0
-
 
 def validate_extrapolation(data: Data, E: Path) -> dict:
     """The extrapolation checked where coverage was measured: the score-alone rubric (r1_hn, GPT-5.6 Luna, own
@@ -654,8 +729,20 @@ FAMILY_STYLE = {
 K_MARKER = {"k2": "s", "k4": "^", "k6": "v"}
 
 
+def canonical_family(family: str) -> str:
+    """The FAMILY_STYLE key of a family: itself, or with its judge's name read as Luna's (the 61-axis mode names its
+    judge: "Haiku 5.5 stacked, plain" is styled as "Luna stacked, plain")."""
+    if family in FAMILY_STYLE:
+        return family
+    return re.sub(r"^[^,]+?(, | stacked)", lambda m: "Luna" + m.group(1), family, count=1)
+
+
+def style_of(family: str) -> Tuple[str, str]:
+    return FAMILY_STYLE[canonical_family(family)]
+
+
 def plot(points: Dict[str, dict], variants, out_png: Path, title: str, n_axes: int, check: dict, inputs,
-         ref_arms=frozenset(), lead: str = "", axes_file: str = AXES_12) -> None:
+         ref_arms=frozenset(), lead: str = "", axes_file: str = AXES_12, base: float = NINTH) -> None:
     vkeys = [v.key for v in variants]
     sl = list(dict.fromkeys((v.slot, v.layer) for v in variants))
     regimes = list(dict.fromkeys(v.regime for v in variants))
@@ -675,7 +762,7 @@ def plot(points: Dict[str, dict], variants, out_png: Path, title: str, n_axes: i
             for arm in dict.fromkeys(p["arm"] for p in points.values()):
                 ks = sorted([k for k in keys if points[k]["arm"] == arm], key=lambda k: points[k]["cost"])
                 fam = points[ks[0]]["family"]
-                col, mk = ("#BBBBBB", "o") if arm in ref_arms else FAMILY_STYLE[fam]
+                col, mk = ("#BBBBBB", "o") if arm in ref_arms else style_of(fam)
                 kk = re.search(r"k(\d)$", arm)
                 if kk and "stacked" in fam:
                     mk = K_MARKER[f"k{kk.group(1)}"]
@@ -705,8 +792,11 @@ def plot(points: Dict[str, dict], variants, out_png: Path, title: str, n_axes: i
             if r == len(regimes) - 1:
                 ax.set_xlabel("estimated total cost of a full run (USD, 200 October axes)", fontsize=9)
     ref_fams = {p["family"] for p in points.values() if p["arm"] in ref_arms}
-    handles = [plt.Line2D([0], [0], marker=mk, color=col, lw=0.8, label=fam, markersize=7) for fam, (col, mk) in FAMILY_STYLE.items()
-               if fam not in ref_fams and any(p["family"] == fam for p in points.values())]
+    present = list(dict.fromkeys(p["family"] for p in points.values()))
+    order = list(FAMILY_STYLE)
+    present.sort(key=lambda f: order.index(canonical_family(f)))
+    handles = [plt.Line2D([0], [0], marker=style_of(fam)[1], color=style_of(fam)[0], lw=0.8, label=fam, markersize=7)
+               for fam in present if fam not in ref_fams]
     handles += [plt.Line2D([0], [0], marker="o", color="#BBBBBB", lw=0.8, label=f"{fam} (reference, off the frontier)", markersize=7)
                 for fam in sorted(ref_fams)]
     if any("stacked" in p["family"] for p in points.values()):
@@ -717,7 +807,8 @@ def plot(points: Dict[str, dict], variants, out_png: Path, title: str, n_axes: i
                            label="on the frontier (its convex hull)")]
     fig.legend(handles=handles, loc="lower center", ncol=4, fontsize=8.5, frameon=False, bbox_to_anchor=(0.5, 0.0))
     sub = (f"{n_axes} axes ({axes_file}); {lead}\n"
-           f"a ninth of the kept responses measured: points from 1/27 (smallest) to 1/9, subsampled the golden way (absolute question and instruction); 1/3 and all extrapolated "
+           f"{'a ninth' if base == NINTH else f'1/{round(1 / base)}'} of the kept responses measured: points from 1/{round(3 / base)} (smallest) to "
+           f"1/{round(1 / base)}, subsampled the golden way (absolute question and instruction); larger coverages extrapolated "
            f"(hollow: Spearman-Brown by question, gains scaled by {check['calibration']:.2f}, the measured-to-predicted ratio on Luna's third and full cells)\n"
            f"cost of a full run, 200 October axes (1,273 entities x 425 kept responses) at the point's coverage, every prefix cached: Luna by Flex, "
            f"Haiku by Message Batches, Gemini by its Batch API with explicit caches, Jev at its measured cost (no cache)")

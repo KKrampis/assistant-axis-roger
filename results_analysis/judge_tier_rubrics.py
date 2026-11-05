@@ -91,6 +91,9 @@ class RubricSpec:
     #: Several axes judged in one call (the rk_* response rubrics): ``build_batch`` takes a
     #: :class:`MultiAxisSpec` and ``parse_batch`` gives each item a list of scores, one per axis.
     multi_axis: bool = False
+    #: ``build_batch`` gives a two-part prompt, ``(prefix, suffix)``: the question and answers, then the axes (the
+    #: cached-prefix rubrics, r1_pn and rk_pn/pl/pa); what an explicit Gemini cache can hold (2026-11-05).
+    two_part: bool = False
 
     @property
     def mode(self) -> str:
@@ -673,7 +676,8 @@ def _response_prefix_rubric() -> RubricSpec:
     parse_batch = batch_parser(0, 100)
     return RubricSpec(name, name, build, lambda text: parse_batch(text, 1)[1], 0, 100,
                       "responses, percentile 0..100, the question and answers as a cached prefix, the axis after, "
-                      "the score alone", build_batch=build_batch, parse_batch=parse_batch, text_source="responses")
+                      "the score alone", build_batch=build_batch, parse_batch=parse_batch, text_source="responses",
+                      two_part=True)
 
 
 RUBRICS["r1_pn"] = _response_prefix_rubric()
@@ -725,7 +729,8 @@ def _response_multi_prefix_rubric() -> RubricSpec:
     return RubricSpec(name, name, build, lambda text: parse_batch(text, 1)[1], 0, 100,
                       "responses on k axes per call, percentile 0..100 each, the question and answers as a cached "
                       "prefix, the axes after, the scores alone",
-                      build_batch=build_batch, parse_batch=parse_batch, text_source="responses", multi_axis=True)
+                      build_batch=build_batch, parse_batch=parse_batch, text_source="responses", multi_axis=True,
+                      two_part=True)
 
 
 RUBRICS["rk_pn"] = _response_multi_prefix_rubric()
@@ -862,7 +867,8 @@ def _response_multi_format_rubric(fmt: str) -> RubricSpec:
                "before the next"}[fmt]
     return RubricSpec(name, name, build, lambda text: parse_batch(text, 1)[1], 0, 100,
                       f"responses on k axes per call after the cached prefix, percentile 0..100 each, {summary}",
-                      build_batch=build_batch, parse_batch=parse_batch, text_source="responses", multi_axis=True)
+                      build_batch=build_batch, parse_batch=parse_batch, text_source="responses", multi_axis=True,
+                      two_part=True)
 
 
 for _fmt in _MULTI_FORMATS:

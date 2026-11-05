@@ -28,6 +28,19 @@ Differences from the Anthropic runner:
   gemini-3.1-flash-lite): ``response.inlinedResponses.inlinedResponses[]`` of ``{"response",
   "metadata": {"key"}}``, the same list under ``metadata.output``, and ``metadata.state``
   ``BATCH_STATE_SUCCEEDED``; done in 1 min 47 s.
+* **Explicit caches** (2026-11-05, ``cache_create`` and ``cache_delete`` given): a request written
+  with a prefix (``write_chunks`` items ``(custom_id, body, prefix)``, the body carrying only the
+  prompt's suffix) goes on an explicit cache of that prefix.  The chunk line keeps the prefix's
+  digest and the chunk's prefixes go in a side file, ``<chunk>.prefixes.json``, so that the inline
+  submission carries the suffixes only (far more requests fit the 15 MB).  Just before a chunk is
+  submitted its prefixes' caches are created (a cache still alive from an earlier chunk is reused)
+  and recorded in the state file's ``caches``, by digest, with every chunk and custom id that uses
+  it, and the chunk's lines are rewritten with the caches' names; a prefix whose cache cannot be
+  created goes whole instead (logged), and lines that would then pass the inline limit go into a
+  chunk of their own.  A cache is deleted once every chunk that uses it is collected, its creation
+  and storage handed to ``on_cache_done``; :meth:`resume` deletes the caches no batch in flight
+  needs any more.  The TTL (``cache_ttl_s``, six hours by default) is the backstop.  Requests a
+  batch leaves unanswered are returned whole, never on a cache.
 * **HTTP.**  A create answered 429 is tried again after ``poll_seconds``, up to
   ``max_create_retries`` times; 402 (prepaid credit used up) and any other refusal raise
   :class:`GeminiBatchError`.  A failed status check is tried again at the next poll, as in the
@@ -41,24 +54,51 @@ from __future__ import annotations
 
 import asyncio
 import datetime as _dt
+import hashlib
 import json
 import logging
 import secrets
 import time
 from collections import deque
 from pathlib import Path
-from typing import Any, Callable, Deque, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, Awaitable, Callable, Deque, Dict, Iterable, List, Optional, Set, Tuple
 
 from .atomic_io import atomic_write_text
 
 #: Google: "under 20MB" of inline requests per batch; a chunk stays well below it.
 DEFAULT_CHUNK_BYTES = 15 * 1024 * 1024
+#: What a prepared chunk (explicit caches' names in, a failed cache's requests whole) may hold inline; the rest goes
+#: in chunks of their own.
+INLINE_LIMIT_BYTES = DEFAULT_CHUNK_BYTES
 DEFAULT_CHUNK_REQUESTS = 10_000
 MAX_FAILED_POLL_ROUNDS = 30
 MAX_CREATE_RETRIES = 60
 LIST_MAX_PAGES = 20
 DOWNLOAD_BASE_URL = "https://generativelanguage.googleapis.com/download/v1beta"
 TERMINAL_STATES = ("SUCCEEDED", "FAILED", "CANCELLED", "EXPIRED")
+#: An explicit cache's TTL in a batch run: long enough for most batches (the usual wait is minutes to an
+#: hour), short enough that a cache a stopped run leaves behind costs little (storage is billed by the hour
+#: until it is deleted or expires).  A request whose cache has expired comes back as an error and is judged
+#: in real time.
+DEFAULT_CACHE_TTL_S = 6 * 3600.0
+DEFAULT_CACHE_CONCURRENCY = 16
+
+
+def prefix_digest(prefix: str) -> str:
+    return hashlib.sha256(prefix.encode("utf-8")).hexdigest()[:24]
+
+
+def full_request(request: Dict[str, Any], prefix: str) -> Dict[str, Any]:
+    """A request on an explicit cache made whole: the prefix and the suffix joined in one user turn, as
+    ``judge.gemini_request_body`` sends a prompt without one, the cache's name dropped."""
+    out = {k: v for k, v in request.items() if k != "cachedContent"}
+    suffix = "".join(part.get("text", "") for c in request.get("contents", []) for part in c.get("parts", []))
+    out["contents"] = [{"parts": [{"text": prefix + suffix}]}]
+    return out
+
+
+def _prefixes_path(path: Path) -> Path:
+    return path.with_name(path.stem + ".prefixes.json")
 STATE_VERSION = 1
 
 
@@ -126,7 +166,16 @@ class GeminiBatchRunner:
                  poll_seconds: float = 60.0,
                  max_failed_poll_rounds: int = MAX_FAILED_POLL_ROUNDS,
                  max_create_retries: int = MAX_CREATE_RETRIES,
-                 logger: Optional[logging.Logger] = None):
+                 logger: Optional[logging.Logger] = None,
+                 cache_create: Optional[Callable[[str, float], Awaitable[Optional[Tuple[str, int]]]]] = None,
+                 cache_delete: Optional[Callable[[str], Awaitable[bool]]] = None,
+                 cache_ttl_s: float = DEFAULT_CACHE_TTL_S,
+                 on_cache_done: Optional[Callable[[List[str], Dict[str, Any]], None]] = None,
+                 cache_concurrency: int = DEFAULT_CACHE_CONCURRENCY):
+        """``cache_create(prefix, ttl_s)`` gives ``(name, tokens)`` or None, ``cache_delete(name)`` whether it
+        went (the tool passes ``judge.gemini_create_cache`` and ``judge.gemini_delete_cache``); ``on_cache_done(
+        custom_ids, record)`` receives each cache once it is deleted, ``record`` with its ``tokens``, its
+        ``storage_token_hours`` and its ``custom_ids``, so the caller can charge it to those requests' cells."""
         self.client = client
         self.model = model
         self.work_dir = Path(work_dir)
@@ -135,6 +184,9 @@ class GeminiBatchRunner:
         self.max_failed_poll_rounds = max_failed_poll_rounds
         self.max_create_retries = max_create_retries
         self.log = logger or logging.getLogger(__name__)
+        self.cache_create, self.cache_delete = cache_create, cache_delete
+        self.cache_ttl_s, self.on_cache_done = float(cache_ttl_s), on_cache_done
+        self.cache_concurrency = max(1, int(cache_concurrency))
         self.state: Dict[str, Any] = self._load_state()
 
     # -- state ------------------------------------------------------------
@@ -199,7 +251,9 @@ class GeminiBatchRunner:
                 keep.append(rec)
             else:
                 Path(rec["path"]).unlink(missing_ok=True)
+                _prefixes_path(Path(rec["path"])).unlink(missing_ok=True)
         self.state["chunks"] = keep
+        await self._release_caches(None, at_resume=True)
         ids: Set[str] = set()
         for rec in self._inflight_records():
             path = Path(rec["path"])
@@ -229,11 +283,13 @@ class GeminiBatchRunner:
 
     # -- chunk files --------------------------------------------------------
 
-    def write_chunks(self, requests: Iterable[Tuple[str, Dict[str, Any]]], *,
+    def write_chunks(self, requests: Iterable[Tuple[Any, ...]], *,
                      max_requests: int = DEFAULT_CHUNK_REQUESTS,
                      max_bytes: int = DEFAULT_CHUNK_BYTES) -> List[Path]:
         """Stream ``(custom_id, generateContent body)`` pairs into chunk files of at most
-        ``max_requests`` lines and ``max_bytes`` bytes; return their paths."""
+        ``max_requests`` lines and ``max_bytes`` bytes; return their paths.  An item
+        ``(custom_id, body, prefix)`` with a prefix goes on an explicit cache of it (the body
+        holding the suffix only; the module docstring), its line counting without the prefix."""
         max_bytes = min(max_bytes, DEFAULT_CHUNK_BYTES)
         self.work_dir.mkdir(parents=True, exist_ok=True)
         known = {Path(r["path"]).name for r in self.state["chunks"]}
@@ -243,32 +299,149 @@ class GeminiBatchRunner:
             k += 1
             stamp = f"{base}-{k}"
 
-        def encode(custom_id: str, i: int, request: Dict[str, Any]) -> bytes:
-            return (json.dumps({"custom_id": custom_id, "key": f"r{i:06d}", "model": self.model, "request": request},
-                               ensure_ascii=False) + "\n").encode("utf-8")
+        def encode(custom_id: str, i: int, request: Dict[str, Any], digest: Optional[str]) -> bytes:
+            line = {"custom_id": custom_id, "key": f"r{i:06d}", "model": self.model, "request": request}
+            if digest is not None:
+                line["prefix"] = digest
+            return (json.dumps(line, ensure_ascii=False) + "\n").encode("utf-8")
 
         paths: List[Path] = []
         f = None
         n = size = 0
-        for custom_id, request in requests:
-            line = encode(custom_id, n, request)
+        prefixes: Dict[str, str] = {}
+
+        def close() -> None:
+            if f is not None:
+                f.close()
+                if prefixes:
+                    _prefixes_path(paths[-1]).write_text(json.dumps(prefixes, ensure_ascii=False), encoding="utf-8")
+
+        for item in requests:
+            custom_id, request = item[0], item[1]
+            prefix = item[2] if len(item) > 2 else None
+            if prefix is not None and self.cache_create is None:
+                raise ValueError("a request with a prefix to cache needs a runner with cache_create")
+            digest = prefix_digest(prefix) if prefix is not None else None
+            line = encode(custom_id, n, request, digest)
             if f is None or n >= max_requests or (n and size + len(line) > max_bytes):
-                if f is not None:
-                    f.close()
+                close()
                 path = self.work_dir / f"chunk_{stamp}_{len(paths):04d}.jsonl"
                 paths.append(path)
                 f = open(path, "wb")
                 n = size = 0
-                line = encode(custom_id, 0, request)
+                prefixes = {}
+                line = encode(custom_id, 0, request, digest)
+            if digest is not None:
+                prefixes[digest] = prefix
             f.write(line)
             n += 1
             size += len(line)
-        if f is not None:
-            f.close()
+        close()
         for path in paths:
             self._record(path)["n_requests"] = len(_read_lines(path))
         self._save_state()
         return paths
+
+    # -- explicit caches (2026-11-05) -------------------------------------
+
+    def _caches(self) -> Dict[str, Dict[str, Any]]:
+        return self.state.setdefault("caches", {})
+
+    def _alive(self, c: Dict[str, Any], margin_s: float = 600.0) -> bool:
+        return bool(c.get("name")) and not c.get("deleted") and c["created"] + c["ttl_s"] > time.time() + margin_s
+
+    async def _prepare(self, path: Path) -> List[Path]:
+        """Before ``path`` is submitted: create the caches of its prefixes (reusing any still alive), rewrite
+        its lines with their names (a prefix whose cache failed, whole), and move what then passes the inline
+        limit into new chunks, returned for submission after it."""
+        lines = _read_lines(path)
+        wanted = sorted({line["prefix"] for line in lines if line.get("prefix") and not line.get("prepared")})
+        if not wanted:
+            return []
+        prefixes = json.loads(_prefixes_path(path).read_text(encoding="utf-8"))
+        caches = self._caches()
+        sem = asyncio.Semaphore(self.cache_concurrency)
+
+        async def make(digest: str) -> None:
+            c = caches.get(digest)
+            if c is not None and self._alive(c):
+                return
+            async with sem:
+                made = await self.cache_create(prefixes[digest], self.cache_ttl_s)
+            if made is None:
+                caches[digest] = {"name": None, "failed": True, "chunks": [], "custom_ids": []}
+            else:
+                name, tokens = made
+                caches[digest] = {"name": name, "tokens": int(tokens), "created": time.time(),
+                                  "ttl_s": self.cache_ttl_s, "chunks": [], "custom_ids": []}
+            self._save_state()      # every name on record at once, so a stopped run can delete it
+
+        await asyncio.gather(*(make(d) for d in wanted))
+        failed = [d for d in wanted if not caches[d].get("name")]
+        if failed:
+            self.log.warning(f"{path.name}: {len(failed)} of {len(wanted)} explicit caches not created; those "
+                             f"prefixes' requests go whole")
+        keep: List[Dict[str, Any]] = []
+        overflow: List[Tuple[str, Dict[str, Any]]] = []
+        size = 0
+        for line in lines:
+            d = line.get("prefix")
+            if d and not line.get("prepared"):
+                c = caches[d]
+                if c.get("name"):
+                    line["request"] = {**line["request"], "cachedContent": c["name"]}
+                    c["chunks"] = sorted(set(c["chunks"]) | {str(path)})
+                    c["custom_ids"] = sorted(set(c["custom_ids"]) | {line["custom_id"]})
+                else:
+                    line["request"] = full_request(line["request"], prefixes[d])
+                line["prepared"] = True
+            encoded = len(json.dumps(line, ensure_ascii=False).encode("utf-8")) + 1
+            if keep and size + encoded > INLINE_LIMIT_BYTES:
+                overflow.append((line["custom_id"], line["request"]))
+                continue
+            keep.append(line)
+            size += encoded
+        atomic_write_text("".join(json.dumps(line, ensure_ascii=False) + "\n" for line in keep), path,
+                          logger_obj=self.log)
+        self._record(path)["n_requests"] = len(keep)
+        self._save_state()
+        if not overflow:
+            return []
+        self.log.warning(f"{path.name}: {len(overflow)} requests sent whole no longer fit the inline limit; "
+                         f"they go in a chunk of their own")
+        return self.write_chunks(overflow)
+
+    async def _release_caches(self, collecting: Optional[Dict[str, Any]], *, at_resume: bool = False) -> None:
+        """Delete every cache no chunk still to be collected uses (``collecting``, the chunk being collected,
+        counts as collected), and hand each to ``on_cache_done`` (at a resume only logged: the cells its
+        requests were charged to are written or not loaded)."""
+        caches = self.state.get("caches") or {}
+        if not caches or self.cache_delete is None:
+            return
+        open_paths = {r["path"] for r in self.state["chunks"]
+                      if not r.get("collected") and r is not collecting}
+        done = [(d, c) for d, c in caches.items()
+                if c.get("name") and not c.get("deleted") and not (set(c.get("chunks") or []) & open_paths)]
+        if not done:
+            return
+        sem = asyncio.Semaphore(self.cache_concurrency)
+
+        async def drop(digest: str, c: Dict[str, Any]) -> None:
+            async with sem:
+                ok = await self.cache_delete(c["name"])
+            end = time.time() if ok else c["created"] + c["ttl_s"]      # undeleted: it lives to its TTL
+            end = min(end, c["created"] + c["ttl_s"])
+            c.update(deleted=True, delete_ok=bool(ok),
+                     storage_token_hours=c["tokens"] * max(0.0, end - c["created"]) / 3600.0)
+            if at_resume or self.on_cache_done is None:
+                self.log.warning(f"cache {c['name']} ({c['tokens']} tokens) left by an earlier run "
+                                 f"{'deleted' if ok else 'not deleted (it expires at its TTL)'}; its creation and "
+                                 f"{c['storage_token_hours']:.1f} token-hours of storage are in no cell's usage")
+            else:
+                self.on_cache_done(list(c.get("custom_ids") or []), dict(c))
+
+        await asyncio.gather(*(drop(d, c) for d, c in done))
+        self._save_state()
 
     # -- submission and collection -----------------------------------------
 
@@ -347,12 +520,20 @@ class GeminiBatchRunner:
         if failed or missing:
             self.log.warning(f"batch {rec['batch_id']}: {len(failed)} errored, {len(missing)} not answered, "
                              f"of {len(lines)}")
+        prefixes: Dict[str, str] = {}
+        if _prefixes_path(path).exists():
+            prefixes = json.loads(_prefixes_path(path).read_text(encoding="utf-8"))
         for key in failed | missing:
-            unanswered[by_key[key]["custom_id"]] = by_key[key]["request"]
+            line = by_key[key]
+            request = line["request"]
+            if "cachedContent" in request and line.get("prefix") in prefixes:
+                request = full_request(request, prefixes[line["prefix"]])     # whole: its cache is going
+            unanswered[line["custom_id"]] = request
         on_batch_done()
         rec.update(collected=True, collected_at=_now(), n_answered=len(seen) - len(failed))
         self._save_state()
         path.unlink(missing_ok=True)
+        _prefixes_path(path).unlink(missing_ok=True)
 
     async def run(self, chunks: List[Path],
                   on_result: Callable[[str, Optional[dict], Optional[str]], None],
@@ -366,6 +547,8 @@ class GeminiBatchRunner:
         failed_rounds = 0
         while pending:
             path = pending.popleft()
+            if self.cache_create is not None:
+                pending.extend(await self._prepare(path))
             inflight[await self._submit(path)] = self._record(path)
         while inflight:
             await asyncio.sleep(self.poll_seconds)
@@ -395,7 +578,9 @@ class GeminiBatchRunner:
                     self.log.warning(f"batch {name} ended {state or 'without results'} "
                                      f"({json.dumps(_field(op, 'error'))[:200]}); its requests are unanswered")
                     items = []
-                self._collect(inflight.pop(name), items, on_result, on_batch_done, unanswered)
+                rec = inflight.pop(name)
+                await self._release_caches(rec)     # its results are in hand: caches only it still used can go
+                self._collect(rec, items, on_result, on_batch_done, unanswered)
             if last_error is not None and n_ok == 0:
                 failed_rounds += 1
                 if failed_rounds >= self.max_failed_poll_rounds:

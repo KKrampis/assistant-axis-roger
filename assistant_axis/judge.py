@@ -1488,13 +1488,130 @@ GEMINI_ATTEMPTS = 8
 GEMINI_RETRY_SLEEP_S = (5, 10, 20, 30, 45, 60, 60)
 
 
-def gemini_request_body(prompt: str, model: str, max_tokens: int, *,
-                        settings: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+#: Gemini's Flex tier on generateContent (2026-11-05, measured live by the main session's probes): the
+#: top-level body field ``"serviceTier": "flex"`` (lowercase; ``"FLEX"`` is an HTTP 400), the reply reporting
+#: ``usageMetadata.serviceTier`` (and the header ``x-gemini-service-tier``); half the standard price, as the
+#: Batch API (aistudio.google.com/docs/pricing, read 2026-11-05); a latency target of 1 to 15 minutes; HTTP 429
+#: or 503 when Google is at capacity, and never a fall back to the standard tier by itself.  So a Flex call
+#: here is tried again with growing sleeps until :data:`FLEX_FALLBACK_AFTER_S` after its first send, then
+#: sent once to the standard tier, Roger's rule for OpenAI's Flex (2026-10-29: "only after trying for a
+#: while"), and each attempt waits at most the time left (at least :data:`FLEX_MIN_ATTEMPT_S`).
+GEMINI_FLEX_TIER = "flex"
+
+
+def gemini_request_body(prompt: Any, model: str, max_tokens: int, *,
+                        settings: Optional[Dict[str, Any]] = None,
+                        service_tier: Optional[str] = None,
+                        cached_content: Optional[str] = None) -> Dict[str, Any]:
     """The generateContent request: ``settings`` when given, else the model's
-    :data:`JUDGE_REQUEST_SETTINGS`, go in ``generationConfig``."""
+    :data:`JUDGE_REQUEST_SETTINGS`, go in ``generationConfig``; ``service_tier``
+    ``"flex"`` is the top-level ``serviceTier``.  With ``cached_content`` (an explicit
+    cache's name, ``cachedContents/...``, holding a two-part prompt's prefix as one
+    user turn: :func:`gemini_create_cache`) the request carries the name and only the
+    prompt's suffix, as a second user turn; otherwise the whole prompt, the two parts
+    joined, as one turn (the implicit cache's form, every request before
+    2026-11-05)."""
     config: Dict[str, Any] = {"maxOutputTokens": max_tokens}
     config.update(judge_request_settings(model) if settings is None else json.loads(json.dumps(settings)))
-    return {"contents": [{"parts": [{"text": prompt_text(prompt)}]}], "generationConfig": config}
+    if cached_content is not None:
+        _, suffix = prompt_parts(prompt)
+        if suffix is None:
+            raise ValueError("an explicit Gemini cache holds a two-part prompt's prefix: this prompt has one part")
+        body: Dict[str, Any] = {"cachedContent": cached_content,
+                                "contents": [{"role": "user", "parts": [{"text": suffix}]}],
+                                "generationConfig": config}
+    else:
+        body = {"contents": [{"parts": [{"text": prompt_text(prompt)}]}], "generationConfig": config}
+    if service_tier is not None:
+        if service_tier != GEMINI_FLEX_TIER:
+            raise ValueError(f"Gemini service tier {service_tier!r}: only {GEMINI_FLEX_TIER!r}")
+        body["serviceTier"] = service_tier
+    return body
+
+
+def gemini_served_tier(data: Dict[str, Any]) -> Optional[str]:
+    """The tier a generateContent reply says it was served on (``usageMetadata.serviceTier``), lowercased, or
+    None when it says nothing."""
+    tier = (data.get("usageMetadata") or {}).get("serviceTier") if isinstance(data, dict) else None
+    return str(tier).lower() if tier else None
+
+
+#: Explicit caches (2026-11-05): a ``POST /cachedContents`` holding a two-part prompt's prefix as one user turn,
+#: then generateContent with ``"cachedContent": <name>`` and the suffix.  Measured live that day on Gemini 3.1
+#: Flash-Lite: 96% of prompt tokens read from the cache on Flex and in the Batch API alike, against about 60%
+#: live, 45-57% on Flex and 17% in the Batch API for the implicit cache.  Billed: reads at a tenth of the tier's
+#: input rate, storage by the token-hour (judge_pricing.cache_storage_rate), and creation, assumed here (not
+#: verified) to bill the cached tokens once at the tier's input rate.  A create is tried this many times on a
+#: 429 or 5xx, with these sleeps.
+GEMINI_CACHE_ATTEMPTS = 4
+GEMINI_CACHE_RETRY_SLEEP_S = (5, 15, 30)
+
+
+@dataclass(frozen=True)
+class GeminiCache:
+    """An explicit cache as created: its name, the tokens it holds (the create reply's
+    ``usageMetadata.totalTokenCount``), and when it was created (``time.time()``) with its TTL."""
+    name: str
+    tokens: int
+    created: float
+    ttl_s: float
+
+    def storage_token_hours(self, until: Optional[float] = None) -> float:
+        """Token-hours of storage from creation to ``until`` (default now), at most to its expiry."""
+        end = min(time.time() if until is None else until, self.created + self.ttl_s)
+        return self.tokens * max(0.0, end - self.created) / 3600.0
+
+
+async def gemini_create_cache(client: Any, model: str, prefix: str, ttl_s: float, *,
+                              display_name: Optional[str] = None) -> Optional[GeminiCache]:
+    """Create an explicit cache of ``prefix`` (one user turn) for ``model`` with a TTL of ``ttl_s`` seconds:
+    the :class:`GeminiCache`, or None when Google refuses it (a prefix under the model's minimum, a quota) or
+    keeps failing, logged, so that the caller sends that prefix's requests whole.  A 402 raises
+    :class:`BillingError`, as every call would fail alike."""
+    body: Dict[str, Any] = {"model": f"models/{model}", "contents": [{"role": "user", "parts": [{"text": prefix}]}],
+                            "ttl": f"{int(round(ttl_s))}s"}
+    if display_name:
+        body["displayName"] = display_name[:120]
+    last = ""
+    for attempt in range(GEMINI_CACHE_ATTEMPTS):
+        try:
+            resp = await client.post("/cachedContents", json=body)
+        except Exception as e:  # noqa: BLE001 -- a connection error: tried again
+            resp, last = None, f"{type(e).__name__}: {e}"
+        if resp is not None:
+            if resp.status_code == 200:
+                try:
+                    data = resp.json()
+                    name = data["name"]
+                except (ValueError, KeyError, TypeError) as e:
+                    logger.warning(f"{model}: cache create answered without a name ({e}); sending the prefix whole")
+                    return None
+                tokens = int(((data.get("usageMetadata") or {}).get("totalTokenCount")) or 0)
+                return GeminiCache(name=name, tokens=tokens, created=time.time(), ttl_s=float(ttl_s))
+            last = f"HTTP {resp.status_code}: {str(getattr(resp, 'text', ''))[:200]}"
+            if resp.status_code == 402:
+                raise BillingError(f"{model}: {last}; a rerun resumes once the credit is topped up")
+            if resp.status_code not in GEMINI_RETRY_STATUSES:
+                break
+        if attempt + 1 < GEMINI_CACHE_ATTEMPTS:
+            await asyncio.sleep(GEMINI_CACHE_RETRY_SLEEP_S[min(attempt, len(GEMINI_CACHE_RETRY_SLEEP_S) - 1)])
+    logger.warning(f"{model}: explicit cache not created ({last}); its prefix's requests go whole")
+    return None
+
+
+async def gemini_delete_cache(client: Any, name: str) -> bool:
+    """Delete an explicit cache; False (logged, not raised: the TTL is the backstop) when it fails.  A cache
+    already gone (HTTP 404) counts as deleted."""
+    try:
+        resp = await client.delete(f"/{name}")
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"cache {name}: delete failed ({type(e).__name__}: {e}); it expires at its TTL")
+        return False
+    if resp.status_code in (200, 204, 404):
+        return True
+    logger.warning(f"cache {name}: delete failed (HTTP {resp.status_code}: {str(getattr(resp, 'text', ''))[:200]}); "
+                   f"it expires at its TTL")
+    return False
 
 
 def gemini_quota_ids(body: str) -> List[str]:
@@ -1535,6 +1652,8 @@ async def call_gemini_judge(
     settings: Optional[Dict[str, Any]] = None,
     stats: Optional[CallStats] = None,
     gate: Optional[Callable[[], bool]] = None,
+    service_tier: Optional[str] = None,
+    cached_content: Optional[str] = None,
 ) -> Any:
     """One generateContent call (``client``: :func:`make_gemini_client`): the reply
     text, a :class:`Truncated` when it hit ``maxOutputTokens``, None for a blocked
@@ -1543,18 +1662,41 @@ async def call_gemini_judge(
     :data:`GEMINI_ATTEMPTS` times with growing sleeps.  An HTTP 400, 401, 403 or 404
     raises :class:`JudgeRequestError`, and a 402 (prepaid credit used up) or a 429
     naming a daily quota :class:`BillingError`, since no retry within a run gets past
-    it."""
+    it.
+
+    ``service_tier`` ``"flex"`` (2026-11-05, :data:`GEMINI_FLEX_TIER`): the call goes on
+    Flex, tried again with growing sleeps while it fails (Flex answers 429 or 503 at
+    capacity) until :data:`FLEX_FALLBACK_AFTER_S` after its first send, each attempt
+    waiting at most the time left (at least :data:`FLEX_MIN_ATTEMPT_S`), then sent to
+    the standard tier as an ordinary call; charged under ``<model>:flex``, or under
+    ``model`` when it went to the standard tier or the reply says it was served there.
+    ``cached_content`` (an explicit cache of the prompt's prefix): the request carries
+    the cache and the suffix only; should Google not find the cache (an HTTP 400, 403
+    or 404, say one that expired), the call goes on without it, the prompt whole."""
     from .judge_pricing import gemini_usage
     stats = stats if stats is not None else CallStats()
-    body = gemini_request_body(prompt, model, max_tokens, settings=settings)
+    tier = service_tier
+
+    def body_now() -> Dict[str, Any]:
+        return gemini_request_body(prompt, model, max_tokens, settings=settings, service_tier=tier,
+                                   cached_content=cached_content)
+
+    body = body_now()
     last: Optional[str] = None
-    for attempt in range(GEMINI_ATTEMPTS):
+    started: Optional[float] = None
+    attempt = 0
+    while True:
         await rate_limiter.acquire()
-        if attempt == 0 and gate is not None and gate():
-            stats.skipped += 1
-            return SKIPPED
+        if started is None:
+            started = time.monotonic()
+            if gate is not None and gate():
+                stats.skipped += 1
+                return SKIPPED
+        kwargs: Dict[str, Any] = {}
+        if tier == GEMINI_FLEX_TIER:
+            kwargs["timeout"] = max(FLEX_FALLBACK_AFTER_S - (time.monotonic() - started), FLEX_MIN_ATTEMPT_S)
         try:
-            resp = await client.post(f"/models/{model}:generateContent", json=body)
+            resp = await client.post(f"/models/{model}:generateContent", json=body, **kwargs)
         except Exception as e:  # noqa: BLE001 -- a connection error: tried again
             last = f"{type(e).__name__}: {e}"
             resp = None
@@ -1564,38 +1706,65 @@ async def call_gemini_judge(
                     data = resp.json()
                     text, finish, n_in, n_out = gemini_reply(data)
                 except ValueError as e:     # a truncated or non-JSON body: no answer yet
-                    text, finish, n_in, n_out = None, None, 0, 0
+                    data = None
                     last = f"HTTP 200 with an unreadable body: {e}"
-                    sleep = GEMINI_RETRY_SLEEP_S[min(attempt, len(GEMINI_RETRY_SLEEP_S) - 1)]
-                    logger.warning(f"Gemini call to {model} failed ({last}); attempt {attempt + 1} of "
-                                   f"{GEMINI_ATTEMPTS}, trying again in {sleep}s")
-                    await asyncio.sleep(sleep)
+                if data is not None:
+                    if usage is not None:
+                        served = gemini_served_tier(data)
+                        key_tier = tier if served is None or (tier and tier in served) else None
+                        if tier and key_tier is None:
+                            logger.warning(f"{model}: a {tier} request was served on the {served} tier; charged as such")
+                        usage.charge_usage(usage_key(model, key_tier), gemini_usage(data))     # the cache reads too
+                    if finish == "MAX_TOKENS":
+                        return Truncated(text)
+                    if text is None:
+                        stats.content_flagged += 1
+                        logger.warning(f"{model}: no text in the reply (finishReason {finish}); this item gives None")
+                    return text
+            else:
+                last = f"HTTP {resp.status_code}: {resp.text[:200]}"
+                if cached_content is not None and resp.status_code in (400, 403, 404):
+                    logger.warning(f"{model}: the request on cache {cached_content} was refused ({last}); "
+                                   f"sending the prompt whole")
+                    cached_content = None
+                    body = body_now()
                     continue
-                if usage is not None:
-                    usage.charge_usage(model, gemini_usage(data))     # the cache reads too
-                if finish == "MAX_TOKENS":
-                    return Truncated(text)
-                if text is None:
-                    stats.content_flagged += 1
-                    logger.warning(f"{model}: no text in the reply (finishReason {finish}); this item gives None")
-                return text
-            last = f"HTTP {resp.status_code}: {resp.text[:200]}"
-            if resp.status_code in (400, 401, 403, 404):
-                logger.error(f"Error calling judge model {model}: {last}")
-                raise JudgeRequestError(f"{model}: {last}")
-            if resp.status_code == 402:     # "Your prepayment credits are depleted" (2026-11-03): every call would fail alike
-                raise BillingError(f"{model}: {last}; a rerun resumes once the credit is topped up")
-            if resp.status_code == 429:
-                quotas = gemini_quota_ids(resp.text)
-                if any("PerDay" in q for q in quotas):
-                    raise BillingError(f"{model}: daily quota used up ({', '.join(quotas)}); a rerun resumes "
-                                       f"once it resets")
-                if quotas:
-                    last = f"HTTP 429: {', '.join(quotas)}"
-            if resp.status_code not in GEMINI_RETRY_STATUSES:
-                break
+                if resp.status_code in (400, 401, 403, 404):
+                    logger.error(f"Error calling judge model {model}: {last}")
+                    raise JudgeRequestError(f"{model}: {last}")
+                if resp.status_code == 402:     # "Your prepayment credits are depleted" (2026-11-03): every call would fail alike
+                    raise BillingError(f"{model}: {last}; a rerun resumes once the credit is topped up")
+                if resp.status_code == 429:
+                    quotas = gemini_quota_ids(resp.text)
+                    if any("PerDay" in q for q in quotas):
+                        raise BillingError(f"{model}: daily quota used up ({', '.join(quotas)}); a rerun resumes "
+                                           f"once it resets")
+                    if quotas:
+                        last = f"HTTP 429: {', '.join(quotas)}"
+                if resp.status_code not in GEMINI_RETRY_STATUSES:
+                    break
         sleep = GEMINI_RETRY_SLEEP_S[min(attempt, len(GEMINI_RETRY_SLEEP_S) - 1)]
-        logger.warning(f"Gemini call to {model} failed ({last}); attempt {attempt + 1} of {GEMINI_ATTEMPTS}, "
+        attempt += 1
+        if tier == GEMINI_FLEX_TIER:
+            if gate is not None and gate():
+                stats.skipped += 1      # a fatal error elsewhere, or the budget: stop retrying
+                return SKIPPED
+            waited = time.monotonic() - started
+            if waited + sleep < FLEX_FALLBACK_AFTER_S:
+                logger.warning(f"Gemini Flex call to {model} failed after {waited:.0f}s ({last}); trying Flex again "
+                               f"in {sleep}s")
+                await asyncio.sleep(sleep)
+                continue
+            logger.warning(f"Gemini Flex call to {model} failed for {waited:.0f}s ({last}); sending it to the "
+                           f"standard tier")
+            stats.flex_fallbacks += 1
+            FLEX_FALLBACKS[model] = FLEX_FALLBACKS.get(model, 0) + 1
+            tier, attempt = None, 0
+            body = body_now()
+            continue
+        if attempt >= GEMINI_ATTEMPTS:
+            break
+        logger.warning(f"Gemini call to {model} failed ({last}); attempt {attempt} of {GEMINI_ATTEMPTS}, "
                        f"trying again in {sleep}s")
         await asyncio.sleep(sleep)
     stats.errors += 1
@@ -1616,14 +1785,21 @@ async def call_judge_model(
     fallback_client: Any = None,
     stats: Optional[CallStats] = None,
     gate: Optional[Callable[[], bool]] = None,
+    cached_content: Optional[str] = None,
 ) -> Any:
     """:func:`call_openai_judge`, :func:`call_anthropic_judge` or
     :func:`call_gemini_judge` by the model's provider, at the provider's default
-    temperature unless ``settings`` says otherwise (Gemini's T=0 is a setting)."""
+    temperature unless ``settings`` says otherwise (Gemini's T=0 is a setting).
+    ``service_tier`` goes to OpenAI and Gemini (both take ``"flex"``; Gemini needs no
+    ``fallback_client``, the tier being a body field); ``cached_content`` (an explicit
+    Gemini cache) to Gemini only."""
     provider = provider_for_model(model)
     if provider == "google":
         return await call_gemini_judge(client, prompt, model, max_tokens, rate_limiter, usage,
-                                       settings=settings, stats=stats, gate=gate)
+                                       settings=settings, stats=stats, gate=gate, service_tier=service_tier,
+                                       cached_content=cached_content)
+    if cached_content is not None:
+        raise ValueError(f"{model}: an explicit cache (cachedContent) is Gemini's")
     if provider == "anthropic":
         return await call_anthropic_judge(client, prompt, model, max_tokens, rate_limiter, usage,
                                           settings=settings, stats=stats, gate=gate)

@@ -31,7 +31,11 @@ Transports (--transport, default auto; added 2026-11-01):
               once through the rate limiter, on a client with a 900 s timeout
               and 8 retries; a request Flex keeps failing for 10 minutes is
               sent once to the standard tier.  Usage under <model>:flex, the
-              fallbacks under <model>.
+              fallbacks under <model>.  Gemini's Flex tier too since 2026-11-05
+              ("serviceTier": "flex" on generateContent, half price; Flex answers
+              429 or 503 at capacity and is tried again with growing sleeps, the
+              same 10 minutes, then the standard tier), on request only: auto
+              keeps Gemini on its Batch API.
   * batch     The provider's batch API (OpenAI Batch API, Anthropic Message
               Batches; half price, results within 24 hours, usually within
               one).  One submission per model for all the axes being run;
@@ -40,7 +44,13 @@ Transports (--transport, default auto; added 2026-11-01):
               (up to --batch_fallback_max).  Work and state under
               <experiments_dir>/_tier_eval_batches/<model>/; a rerun collects
               batches still in flight before submitting anything.  Usage under
-              <model>:batch, the real-time remainder under <model>.
+              <model>:batch, the real-time remainder under <model>.  Grouped and
+              stacked runs (--axes_per_call, --axis_index, --stack) too, since
+              2026-11-05: a group's axis-map entry lists its members, so a batch
+              collected by a later run rebuilds the job; a batch's calls go into
+              the submission one after another, so a chunk splits at most one
+              cached prefix; the submission's estimated cost is logged first,
+              since --budget_usd does not stop a batch.
   * realtime  Every request in real time through the rate limiter (the
               behaviour before 2026-11-01).
   auto picks batch for an Anthropic model, real time for a Gemini model; for an
@@ -51,6 +61,22 @@ Transports (--transport, default auto; added 2026-11-01):
   the batch).  The choice is logged and recorded in each cell's
   scores_descriptions.json _provenance (transport, request_settings,
   max_tokens).
+
+Gemini's explicit cache (--gemini_cache explicit, 2026-11-05; default implicit, every
+run before then): with --stack and a cached-prefix rubric (r1_pn, rk_pn, rk_pl, rk_pa),
+each answer batch's prefix (the question and the answers) goes into an explicit cache
+and its calls send the cache's name and the suffix (the axes) only.  Measured live that
+day on 3.1 Flash-Lite: 96% of prompt tokens read from an explicit cache on Flex and in
+batch, against about 60% live, 45-57% on Flex and 17% in batch for the implicit cache.
+Live and Flex: a cache per answer batch, made just before its calls and deleted after
+them, several batches in flight.  Batch: each chunk's caches made just before it is
+submitted (its inline requests then carry suffixes only), deleted once every chunk using
+them is collected, recorded in the batch state so that a resumed run deletes what a
+stopped one left.  A cache that cannot be made sends its batch's calls whole.  Charged:
+creation as cache-written tokens at the tier's input rate (an assumption), reads at a
+tenth, storage as token-hours at the tier's storage rate (judge_pricing).  It changes the
+prompt from one user message to two consecutive user turns, so a paired quality check
+against implicit cells comes before adoption.
 
 Request settings per model (reasoning effort, thinking) come from
 assistant_axis/judge.py's JUDGE_REQUEST_SETTINGS, the requests pipeline step 3
@@ -182,7 +208,8 @@ from results_analysis.judge_tier_transport import provider_for_model  # noqa: E4
 from results_analysis import judge_tier_rubrics as jr  # noqa: E402
 from assistant_axis.judge import RateLimiter, warn_if_low_parse_rate  # noqa: E402
 from assistant_axis.judge_pricing import (  # noqa: E402
-    BATCH_SUFFIX, MultiModelUsage, TokenUsage, anthropic_usage, gemini_usage, openai_usage, price_for_model,
+    BATCH_SUFFIX, MultiModelUsage, TokenUsage, anthropic_usage, cache_storage_rate, gemini_usage, openai_usage,
+    price_for_model,
 )
 from assistant_axis.entity_id import entity_id, parse_entity_id  # noqa: E402
 from assistant_axis.atomic_io import atomic_write_bytes, atomic_write_text  # noqa: E402
@@ -256,10 +283,10 @@ CHECKPOINT_VERSION = 1
 #: Header fields an answer log must share with the run that resumes it.
 CHECKPOINT_KEYS = ("version", "judge_model", "cell_label", "rubric_version", "request_settings", "max_tokens",
                    "name_format", "swap_poles", "directions", "direction_pass", "stack", "stack_seed",
-                   "response_design")
+                   "response_design", "gemini_cache")
 #: What an answer log's header means by leaving a key out: it predates the key.
 CHECKPOINT_DEFAULTS = {"name_format": "mechanical", "swap_poles": False, "directions": "own", "direction_pass": 0,
-                       "stack": 0, "stack_seed": 1, "response_design": "question"}
+                       "stack": 0, "stack_seed": 1, "response_design": "question", "gemini_cache": "implicit"}
 
 
 def load_pole_description(instructions_dir: Path, pair_type: str, name: str) -> str:
@@ -503,17 +530,27 @@ class AxisJob:
     #: job's own cell holds the answer logs and every item's k scores, each member gets its own cell.
     members: List["AxisJob"] = field(default_factory=list, repr=False)
 
-    def map_entry(self) -> Dict[str, str]:
+    def map_entry(self) -> Dict[str, Any]:
         """How the batch axis map records this axis (absolute paths, so a rerun
-        from another directory finds the same entry)."""
-        return {"axis_dir": self.axis_dir, "pos": self.pos, "neg": self.neg, "pair_type": self.pair_type,
-                "projections_file": str(Path(self.projections_file).resolve()),
-                "output_dir": str(Path(self.output_dir).resolve())}
+        from another directory finds the same entry).  A multi-axis job records its
+        members too (2026-11-05, when grouped and stacked runs were wired for the batch
+        APIs): a batch collected by a later run that does not list the group rebuilds
+        the job from this entry, and without its members it could neither parse a
+        stacked reply nor write the members' cells.  A one-axis entry has no
+        ``members`` key, so maps written before then still match."""
+        entry: Dict[str, Any] = {"axis_dir": self.axis_dir, "pos": self.pos, "neg": self.neg,
+                                 "pair_type": self.pair_type,
+                                 "projections_file": str(Path(self.projections_file).resolve()),
+                                 "output_dir": str(Path(self.output_dir).resolve())}
+        if self.members:
+            entry["members"] = [m.map_entry() for m in self.members]
+        return entry
 
     @classmethod
-    def from_map_entry(cls, entry: Dict[str, str]) -> "AxisJob":
+    def from_map_entry(cls, entry: Dict[str, Any]) -> "AxisJob":
         return cls(entry["axis_dir"], entry["pos"], entry["neg"], entry["pair_type"],
-                   Path(entry["projections_file"]), Path(entry["output_dir"]))
+                   Path(entry["projections_file"]), Path(entry["output_dir"]),
+                   members=[cls.from_map_entry(m) for m in entry.get("members") or []])
 
 
 def read_axes_file(path: Path) -> List[Tuple[str, str, str, str]]:
@@ -730,6 +767,23 @@ DIRECTION_PASS = 0
 STACK = 0
 STACK_SEED = 1
 SLOT_MARK = "#s"
+#: --gemini_cache (2026-11-05): "implicit" (the default, every run before then): a Gemini request sends its whole
+#: prompt and Google's implicit cache reads what it reads (about 60% of prompt tokens live, 45-57% on Flex, 17% in
+#: the Batch API, measured that day).  "explicit": with --stack and a two-part (cached-prefix) rubric, each answer
+#: batch's prefix goes into an explicit cache (judge.gemini_create_cache) and its calls carry the cache's name and
+#: the suffix only (96% read on Flex and in the Batch API alike).  This changes the prompt from one user message to
+#: two consecutive user turns (the cached prefix, then the suffix), so a paired quality check against implicit
+#: cells comes before it is adopted.  Gemini models only; set in main_async.
+GEMINI_CACHE = "implicit"
+#: Explicit caches' TTLs by transport, a backstop: each is deleted after its calls (live and Flex: after the
+#: answer batch's calls; batch: once every chunk using it is collected).  Flex calls can take 15 minutes and
+#: retry for ten before their standard-tier fallback, a batch an hour or more.
+GEMINI_CACHE_TTL_S = {"realtime": 900.0, "flex": 7200.0, "batch": 6 * 3600.0}
+#: How many answer batches (prefixes) a live or Flex run with explicit caches keeps in flight at once is
+#: --max_in_flight over the calls a prefix has (its slots), at least this.
+GEMINI_CACHE_MIN_PREFIXES = 1
+#: The cachedContent of a batch request written before its cache exists (the runner sets the name at submission).
+PENDING_CACHE = "cachedContents/pending"
 #: Roger's instruction design (2026-11-04): for instruction positions 1-5 (rows) the direction of each judge
 #: (Luna, Haiku, Gemini): A or B, and on the fifth a coin per axis, d.  Each instruction is judged both ways
 #: across the judges (2:1), each judge 3:2, and by weight (4:3:3) 27:23 or 23:27.  Per axis (seeded by its
@@ -865,6 +919,11 @@ def _group_plan(job: "AxisJob", names: Sequence[str], model: str) -> Tuple[List[
     return stack_plan(job, [stack_real(n) for n in names], int(names[0].split(SLOT_MARK, 1)[1]), model)
 
 
+def explicit_cache_for(model: str) -> bool:
+    """Whether ``model``'s calls in this run go on explicit caches (--gemini_cache explicit, a Gemini model)."""
+    return GEMINI_CACHE == "explicit" and provider_for_model(model) == "google"
+
+
 def build_prompt(job: "AxisJob", etype: str, name: str, desc: str) -> str:
     """The judge prompt of this run's rubric for one entity of ``job``."""
     return RUBRIC.build(job.axis_spec, job.pair_type, etype, name, desc, show=NAME_SHOW)
@@ -967,6 +1026,14 @@ class _Charge:
     def charge(self, key: str, prompt_tokens: int, completion_tokens: int) -> None:
         self.charge_usage(key, TokenUsage(int(prompt_tokens), int(completion_tokens)))
 
+    def charge_cache(self, key: str, write_tokens: float = 0, storage_token_hours: float = 0.0) -> None:
+        """An explicit cache's creation (its tokens written, at the tier's input rate: an assumption) or its
+        storage (token-hours): charged to every tracker, not as a judge call (n_calls 0), and not kept in
+        ``charges``: the live path logs it on a ``cache`` line of the answer log."""
+        w = int(round(write_tokens))
+        for t in self.trackers:
+            t.charge(key, w, 0, w, 0, cache_storage_token_hours=float(storage_token_hours), n_calls=0)
+
 
 @dataclass
 class RunContext:
@@ -1056,6 +1123,8 @@ def write_cell(cell: Cell, mrun: ModelRun, max_tokens: int) -> None:
                   "n_entities": len(cell.expected), "n_scored": len(scores)}
     if DIRECTIONS != "own":
         provenance.update(direction_summary(cell))
+    if explicit_cache_for(model):
+        provenance["gemini_cache"] = "explicit"
     if cell.refused:
         provenance["refused"] = sorted(cell.refused)
     if cell.parse_retries:
@@ -1226,7 +1295,8 @@ def checkpoint_header(mrun: "ModelRun", max_tokens: int) -> Dict[str, Any]:
             "rubric_version": RUBRIC.version, "request_settings": mrun.settings, "max_tokens": max_tokens,
             "name_format": NAME_FORMAT, "swap_poles": SWAP_POLES, "directions": DIRECTIONS,
             "direction_pass": DIRECTION_PASS, "stack": STACK, "stack_seed": STACK_SEED,
-            "response_design": response_design_in_effect()}
+            "response_design": response_design_in_effect(),
+            "gemini_cache": "explicit" if explicit_cache_for(mrun.model) else "implicit"}
 
 
 def prompt_digest(prompt: str) -> str:
@@ -1261,9 +1331,10 @@ def read_answer_log(path: Path) -> Tuple[Optional[Dict[str, Any]], Dict[str, Dic
     return header, answers
 
 
-def read_reasks(path: Path) -> List[Dict[str, Any]]:
+def read_reasks(path: Path, kind: str = "reask") -> List[Dict[str, Any]]:
     """The ``reask`` lines of an answer log: each a reply that left members unread and was asked again,
-    with that reply's charges, which no answer line carries."""
+    with that reply's charges, which no answer line carries.  ``kind="cache"``: the explicit caches'
+    creation and storage charges (2026-11-05)."""
     out = []
     with open(path, encoding="utf-8") as f:
         for line in f:
@@ -1271,7 +1342,7 @@ def read_reasks(path: Path) -> List[Dict[str, Any]]:
                 rec = json.loads(line)
             except ValueError:
                 continue
-            if rec.get("kind") == "reask":
+            if rec.get("kind") == kind:
                 out.append(rec)
     return out
 
@@ -1294,7 +1365,8 @@ def resume_cell(cell: Cell, mrun: "ModelRun", header: Dict[str, Any]) -> int:
             f.write("\n")   # a torn last line must not swallow the next answer
     found, answers = read_answer_log(path)
     reasks = read_reasks(path)
-    if not answers and not reasks:
+    cache_lines = read_reasks(path, "cache")
+    if not answers and not reasks and not cache_lines:
         return 0
     if found is None:
         raise CheckpointMismatchError(f"{path}: no header line, so its settings are unknown: move it aside to "
@@ -1311,6 +1383,8 @@ def resume_cell(cell: Cell, mrun: "ModelRun", header: Dict[str, Any]) -> int:
         cell.parse_retries += 1
         for key, *counts in rec.get("charges") or []:
             cell.usage.charge(key, *counts)
+    for rec in cache_lines:
+        _Charge(cell.usage).charge_cache(rec["key"], rec.get("write_tokens") or 0, rec.get("storage_token_hours") or 0.0)
     descs = {name: (etype, desc) for etype, name, desc in cell.job.entities}
     taken = stale = 0
     for name, rec in answers.items():
@@ -1562,7 +1636,11 @@ def key_name(model: str) -> str:
     return {"anthropic": "ANTHROPIC_API_KEY", "google": "GEMINI_API_KEY"}.get(provider_for_model(model), "OPENAI_API_KEY")
 
 
-def make_gemini_client():
+def make_gemini_client(service_tier: Optional[str] = None):
+    """generateContent's client; for Flex (2026-11-05) with FLEX_TIMEOUT_S, since a Flex answer can take 15
+    minutes (each attempt is bounded by the time left before the standard-tier fallback)."""
+    if service_tier == "flex":
+        return tt.make_gemini_client(os.environ["GEMINI_API_KEY"], timeout_s=tt.FLEX_TIMEOUT_S)
     return tt.make_gemini_client(os.environ["GEMINI_API_KEY"])
 
 
@@ -1594,7 +1672,8 @@ async def run_live(ctx: RunContext, mrun: ModelRun, todo: List[AxisJob], *, tier
     if provider_for_model(model) == "anthropic":
         client, fallback = make_anthropic_client(), None
     elif provider_for_model(model) == "google":
-        client, fallback = make_gemini_client(), None
+        # Flex is a body field, so one client serves both tiers (its timeout the long one for Flex)
+        client, fallback = (make_gemini_client("flex") if tier == "flex" else make_gemini_client()), None
     else:
         client = make_openai_client(tier)
         fallback = make_openai_client(None) if tier == "flex" else None
@@ -1634,10 +1713,20 @@ async def run_live(ctx: RunContext, mrun: ModelRun, todo: List[AxisJob], *, tier
     def gate() -> bool:
         return bool(fatal) or ctx.over_budget()
 
+    explicit = explicit_cache_for(model) and n_per > 1
+    live_caches: Dict[str, str] = {}    # prefix digest -> the explicit cache holding it, while its calls run
+    holds: Dict[int, int] = {}          # a cell's caches still alive: its write waits for their storage charge
+
+    def maybe_write(i: int) -> None:
+        cell = cells[i]
+        if cell.finished and not cell.written and not holds.get(i):
+            write_cell(cell, mrun, ctx.max_tokens)
+
     def call(prompt: str, charge: _Charge) -> Any:
+        cached = live_caches.get(prompt_digest(tt.prompt_parts(prompt)[0])) if explicit else None
         return tt.call_model(model, prompt, ctx.max_tokens, rate_limiter, charge, client=client,
                              settings=mrun.settings, service_tier=tier, fallback_client=fallback,
-                             stats=mrun.stats, gate=gate)
+                             stats=mrun.stats, gate=gate, cached_content=cached)
 
     async def one(item: Tuple[int, Any, Any, Any], *, probing: bool = False) -> None:
         nonlocal unfinished
@@ -1681,8 +1770,7 @@ async def run_live(ctx: RunContext, mrun: ModelRun, todo: List[AxisJob], *, tier
                 append_answer(cell, model, header, name, text, charge.charges, prompt)
             record(mrun, cell, name, text)
         ctx.note_answer()
-        if cell.finished and not cell.written:
-            write_cell(cell, mrun, ctx.max_tokens)
+        maybe_write(i)
 
     try:
         if probe and items:
@@ -1698,12 +1786,74 @@ async def run_live(ctx: RunContext, mrun: ModelRun, todo: List[AxisJob], *, tier
                 mrun.transport_reason += "; the probe was answered on Flex"
                 logger.info(f"[{model}] probe: Flex accepted; add {model!r}: {{'flex': True}} to "
                             f"MODEL_CAPABILITIES in assistant_axis/judge.py")
-        await run_bounded(one, items, ctx.max_in_flight)
+        if explicit:
+            await run_on_explicit_caches(ctx, mrun, cells, items, one, live_caches, client, header,
+                                         "flex" if tier == "flex" else "realtime", holds, maybe_write)
+        else:
+            await run_bounded(one, items, ctx.max_in_flight)
     finally:
         ctx.live_pending -= unfinished   # requests never sent (a refused probe, a cancelled run)
     if fatal:
         raise fatal[0]
     return True
+
+
+async def run_on_explicit_caches(ctx: RunContext, mrun: ModelRun, cells: Dict[int, Cell], items: List[Any], one: Any,
+                                 live_caches: Dict[str, str], client: Any, header: Dict[str, Any],
+                                 transport: str, holds: Dict[int, int], maybe_write: Any) -> None:
+    """Live and Flex calls on explicit caches (--gemini_cache explicit, 2026-11-05): the calls grouped by their
+    answer batch (one prefix), each batch's cache created just before its calls and deleted after them
+    (try/finally; a failed delete is logged, the TTL the backstop, and its storage then charged to the TTL), several
+    batches in flight at once, at most --max_in_flight calls in all.  A cache that cannot be created leaves its
+    batch's calls whole (implicit).  The creation (as cache-written tokens at the tier's input rate, an
+    assumption) and the storage (token-hours, create to delete) go to the cell's usage and, as ``cache`` lines, to
+    its answer log, so a rerun counts them; a cell is written only once none of its caches is alive (``holds``),
+    so that its usage.json has their storage."""
+    model = mrun.model
+    key = tt.price_key(model, transport)
+    ttl = GEMINI_CACHE_TTL_S[transport]
+    units: Dict[Tuple[int, str], List[Any]] = {}
+    prefixes: Dict[Tuple[int, str], str] = {}
+    for item in items:
+        i, group = item[0], item[1]
+        prefix, suffix = tt.prompt_parts(build_group(cells[i].job, group, model))
+        if suffix is None:
+            raise ValueError(f"--gemini_cache explicit: {RUBRIC.name} built a one-part prompt")
+        k = (i, prompt_digest(prefix))
+        units.setdefault(k, []).append(item)
+        prefixes[k] = prefix
+    biggest = max((len(v) for v in units.values()), default=1)
+    lanes = max(GEMINI_CACHE_MIN_PREFIXES, ctx.max_in_flight // max(1, biggest))
+    logger.info(f"[{model}] explicit caches: {len(items)} calls on {len(units)} answer batches, up to {lanes} "
+                f"batches in flight, TTL {ttl:.0f} s")
+
+    async def unit(k: Tuple[int, str]) -> None:
+        cell = cells[k[0]]
+        holds[k[0]] = holds.get(k[0], 0) + 1
+        cache = None
+        if not ctx.over_budget():
+            cache = await tt.gemini_create_cache(client, model, prefixes[k], ttl,
+                                                 display_name=f"judge-tier {cell_name(model)} {k[1]}")
+        if cache is not None:
+            _Charge(cell.usage, mrun.usage, ctx.run_usage).charge_cache(key, cache.tokens)
+            _append_log(cell, model, header, {"kind": "cache", "event": "create", "name": cache.name, "key": key,
+                                              "write_tokens": cache.tokens, "at": _utc_now()})
+            live_caches[k[1]] = cache.name
+        try:
+            await asyncio.gather(*(one(item) for item in units[k]))
+        finally:
+            if cache is not None:
+                live_caches.pop(k[1], None)
+                ok = await tt.gemini_delete_cache(client, cache.name)
+                hours = cache.storage_token_hours(None if ok else cache.created + cache.ttl_s)
+                _Charge(cell.usage, mrun.usage, ctx.run_usage).charge_cache(key, 0, hours)
+                _append_log(cell, model, header, {"kind": "cache", "event": "delete" if ok else "left to expire",
+                                                  "name": cache.name, "key": key, "storage_token_hours": hours,
+                                                  "at": _utc_now()})
+            holds[k[0]] -= 1
+            maybe_write(k[0])
+
+    await run_bounded(unit, list(units), lanes)
 
 
 def close_live_cells(mrun: ModelRun, max_tokens: int) -> None:
@@ -1757,6 +1907,18 @@ class AxisMap:
                                      indent=2, sort_keys=True) + "\n", self.path, logger_obj=logger)
 
 
+def saved_score(v: Any) -> Any:
+    """A score as ``collected/a<idx>.json`` keeps it, back in a cell: a number, None, a multi-axis item's list of
+    scores, or a stacked item's ``{member index: score}`` (JSON makes the indices strings)."""
+    if v is None:
+        return None
+    if isinstance(v, dict):
+        return {int(m): (None if x is None else int(x)) for m, x in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [None if x is None else int(x) for x in v]
+    return int(v)
+
+
 def custom_id(idx: int, name: str) -> str:
     cid = f"a{idx}|{name}"
     if not CUSTOM_ID_RE.fullmatch(cid):
@@ -1794,6 +1956,15 @@ def batch_settings(ctx: RunContext, mrun: ModelRun) -> Dict[str, Any]:
     if ctx.entities_per_call > 1:
         out.update(entities_per_call=ctx.entities_per_call, shuffle_seed=ctx.shuffle_seed,
                    batch_design=ctx.batch_design)
+    # grouped and stacked runs (2026-11-05): a custom id names a group by its place in axis_groups, which these
+    # decide, so batches of another stacking or other members must not be collected under them; recorded only
+    # when set, so the settings of every earlier batch run read as before
+    if STACK:
+        out.update(stack=STACK, stack_seed=STACK_SEED)
+    if AXIS_INDEX is not None:
+        out["axis_index"] = list(AXIS_INDEX)
+    if explicit_cache_for(mrun.model):
+        out["gemini_cache"] = "explicit"
     return out
 
 
@@ -1824,6 +1995,69 @@ def item_groups(full: List[Tuple[str, str, Any]], ctx: RunContext) -> List[List[
     return grid_batches(full, ctx.entities_per_call, ctx.batch_design)
 
 
+#: About four characters a token (the estimate of --response_chars), for the submission estimate.
+CHARS_PER_TOKEN = 4.0
+
+
+def axes_per_call_of_run() -> int:
+    """How many axes each call of this run scores: --stack k, the --axis_index members, or one."""
+    if STACK:
+        return STACK
+    if AXIS_INDEX is not None:
+        return len(AXIS_INDEX)
+    return 1
+
+
+def est_out_per_call(n_per: int) -> int:
+    """The dry run's token model for a call's output: per entity (and per axis it scores) when batched."""
+    if n_per > 1:
+        return EST_BATCH_OUT_PER_ENTITY * n_per * axes_per_call_of_run()
+    return EST_OUT_PER_ENTITY
+
+
+@dataclass
+class SubmissionEstimate:
+    """A coarse cost of a batch submission, logged before it is sent (2026-11-05: --budget_usd does not stop a
+    batch, so the log says what one will cost): input from the prompts' own length at CHARS_PER_TOKEN, output
+    from the dry run's token model, both at the price of ``key``.  With two-part prompts it gives a second figure,
+    each prefix written to the cache once and read back on its other calls (cache_rate_factors), which is what
+    Anthropic's breakpoint did in its batches on 2026-11-05 (98% of requests read their prefix); the first figure
+    reads nothing."""
+    key: str
+    out_per_call: int
+    n: int = 0
+    tokens_in: float = 0.0
+    tokens_in_cached: float = 0.0       # in units of plain input tokens
+    _prefixes: Set[int] = field(default_factory=set, repr=False)
+
+    def add(self, prompt: Any) -> None:
+        from assistant_axis.judge import prompt_parts
+        from assistant_axis.judge_pricing import cache_rate_factors
+        a, b = prompt_parts(prompt)
+        ta, tb = len(a) / CHARS_PER_TOKEN, len(b or "") / CHARS_PER_TOKEN
+        self.n += 1
+        self.tokens_in += ta + tb
+        if b is None:
+            self.tokens_in_cached += ta
+            return
+        write, read = cache_rate_factors(self.key)
+        h = hash(a)
+        self.tokens_in_cached += tb + ta * (read if h in self._prefixes else write)
+        self._prefixes.add(h)
+
+    def costs(self) -> Tuple[float, float]:
+        rate_in, rate_out = price_for_model(self.key)
+        out = self.n * self.out_per_call * rate_out / 1e6
+        return self.tokens_in * rate_in / 1e6 + out, self.tokens_in_cached * rate_in / 1e6 + out
+
+    def describe(self) -> str:
+        plain, cached = self.costs()
+        text = f"estimated ${plain:.2f} at {self.key}'s price with no cache reads"
+        if self._prefixes:
+            text += f", ${cached:.2f} with each of the {len(self._prefixes)} prefixes written once and read on its other calls"
+        return text + f" (coarse: {CHARS_PER_TOKEN:g} characters a token in, {self.out_per_call} tokens a call out)"
+
+
 async def run_batch(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob]) -> None:
     """Judge every entity of the not-done axes of ``jobs`` through the
     provider's batch API: one submission for all axes, results collected into
@@ -1841,8 +2075,17 @@ async def run_batch(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob]) -> Non
         runner = AnthropicBatchRunner(client, work / "chunks", work / "batch_state.json",
                                       poll_seconds=ctx.batch_poll_seconds, adopt_lost_batches=False, logger=logger)
     elif provider == "google":
+        cache_kw: Dict[str, Any] = {}
+        if explicit_cache_for(model):
+            async def create(prefix: str, ttl: float) -> Optional[Tuple[str, int]]:
+                c = await tt.gemini_create_cache(client, model, prefix, ttl, display_name=f"judge-tier {cell_name(model)}")
+                return (c.name, c.tokens) if c is not None else None
+
+            cache_kw = dict(cache_create=create, cache_delete=lambda name: tt.gemini_delete_cache(client, name),
+                            cache_ttl_s=GEMINI_CACHE_TTL_S["batch"],
+                            on_cache_done=lambda cids, rec: cache_done(cids, rec))
         runner = GeminiBatchRunner(client, work / "chunks", work / "batch_state.json", model=model,
-                                   poll_seconds=ctx.batch_poll_seconds, logger=logger)
+                                   poll_seconds=ctx.batch_poll_seconds, logger=logger, **cache_kw)
     else:
         runner = OpenAIBatchRunner(client, work / "chunks", work / "batch_state.json",
                                    poll_seconds=ctx.batch_poll_seconds,
@@ -1881,9 +2124,11 @@ async def run_batch(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob]) -> Non
         p = collected_path(idx)
         if p.exists():
             data = json.loads(p.read_text())
-            cell.scores = {k: (None if v is None else int(v)) for k, v in data.get("scores", {}).items()}
+            cell.scores = {k: saved_score(v) for k, v in data.get("scores", {}).items()}
             cell.truncated = set(data.get("truncated") or [])
             cell.usage = MultiModelUsage.from_dict(data.get("usage") or {})
+            cell.swapped = {k: ({int(m): bool(w) for m, w in v.items()} if isinstance(v, dict) else bool(v))
+                            for k, v in (data.get("swapped") or {}).items()}
         # answers a live or Flex run saved are not asked again (they are not in collected/, and a
         # result for the same entity from a batch already counts)
         resume_cell(cell, mrun, header)
@@ -1935,10 +2180,15 @@ async def run_batch(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob]) -> Non
             return
         parsed = ({} if isinstance(reply, tt.Truncated) or not reply else parse_group(cell.job, members, mrun.model, reply))
         sw = group_swapped(cell.job, members, mrun.model) if DIRECTIONS != "own" else None
+        # --stack: each item's axes and their directions, as the live path's answer records keep them (the
+        # members' cells count the directions from these)
+        stacked = dict(zip(*_group_plan(cell.job, members, mrun.model))) if STACK else None
         retry = bool(reply) and not isinstance(reply, tt.Truncated) and any(parsed.get(k) is None for k in range(1, len(members) + 1))
         for k, gname in enumerate(members, 1):
             if not retry or parsed.get(k) is not None:
                 record(mrun, cell, gname, reply, score=parsed.get(k) if parsed else None, swapped=sw)
+                if stacked is not None:
+                    cell.swapped[gname] = stacked
         if retry:
             to_reask.append((cell, members, reply))
 
@@ -1981,6 +2231,22 @@ async def run_batch(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob]) -> Non
             record(mrun, cell, name, reply)
         touched.add(idx)
 
+    def cache_done(cids: List[str], rec: Dict[str, Any]) -> None:
+        """An explicit cache a batch run created, now deleted (--gemini_cache explicit): its creation and storage
+        charged to the cells of the requests that used it, by their share of them (a prefix can serve the same
+        answers in two groups' cells)."""
+        by_idx: Dict[int, int] = {}
+        for cid in cids:
+            by_idx[split_custom_id(cid)[0]] = by_idx.get(split_custom_id(cid)[0], 0) + 1
+        total = sum(by_idx.values()) or 1
+        for idx, n in sorted(by_idx.items()):
+            cell = cell_for(idx)
+            trackers = (mrun.usage, ctx.run_usage) if cell is None or cell.written else (cell.usage, mrun.usage, ctx.run_usage)
+            _Charge(*trackers).charge_cache(batch_key, rec.get("tokens", 0) * n / total,
+                                            rec.get("storage_token_hours", 0.0) * n / total)
+            if cell is not None and not cell.written:
+                touched.add(idx)
+
     def flush() -> None:
         """Called after each batch's results, before the runner marks it
         collected: complete cells are written, the others saved under
@@ -1995,7 +2261,7 @@ async def run_batch(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob]) -> Non
             else:
                 atomic_write_text(json.dumps({"axis": amap.axes.get(idx), "settings": settings_now,
                                               "scores": cell.scores, "truncated": sorted(cell.truncated),
-                                              "usage": cell.usage.as_dict()},
+                                              "usage": cell.usage.as_dict(), "swapped": cell.swapped},
                                              indent=2, sort_keys=True) + "\n",
                                   collected_path(idx), logger_obj=logger)
         touched.clear()
@@ -2017,7 +2283,9 @@ async def run_batch(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob]) -> Non
     # 2. One submission for everything still missing.
     def pending():
         """``(cid, idx, prompt)`` for every request still to submit: one per entity, or with
-        batched judging one per group with any member unscored."""
+        batched judging one per group with any member unscored.  Under --stack the calls of one
+        answer batch (one cached prefix) come one after another, as axis_groups gives them, so a
+        chunk boundary splits at most one prefix's calls between two submissions."""
         for idx in current:
             cell = cells[idx]
             if cell.written:
@@ -2044,14 +2312,29 @@ async def run_batch(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob]) -> Non
         amap.save()   # before the submission, so a rerun can route what it collects
         if n_per > 1:
             atomic_write_text(json.dumps(groups, indent=0, sort_keys=True) + "\n", groups_path, logger_obj=logger)
+        estimate = SubmissionEstimate(batch_key, out_per_call=est_out_per_call(n_per))
+
+        explicit = explicit_cache_for(model)
+
+        def requests():
+            for cid, idx, prompt in pending():
+                estimate.add(prompt)
+                prefix, suffix = tt.prompt_parts(prompt)
+                if explicit and suffix is not None:
+                    # the suffix only, on a cache of the prefix the runner creates before the chunk is submitted
+                    yield cid, tt.request_for(model, prompt, ctx.max_tokens, mrun.settings,
+                                              cached_content=PENDING_CACHE), prefix
+                else:
+                    yield cid, tt.request_for(model, prompt, ctx.max_tokens, mrun.settings)
+
         chunks = runner.write_chunks(
-            ((cid, tt.request_for(model, prompt, ctx.max_tokens, mrun.settings))
-             for cid, idx, prompt in pending()),
+            requests(),
             # the runner's own default unless --batch_chunk_requests says otherwise
             **({"max_requests": ctx.batch_chunk_requests} if ctx.batch_chunk_requests != DEFAULT_BATCH_CHUNK_REQUESTS
                else {}))
         logger.info(f"[{model}] batch: {n_pending} requests in {len(chunks)} chunk(s) for "
-                    f"{sum(1 for i in current if not cells[i].written)} axes")
+                    f"{sum(1 for i in current if not cells[i].written)} axes; {estimate.describe()}"
+                    + ("; --budget_usd does not stop a batch submission" if ctx.budget_usd is not None else ""))
         unanswered.update(await runner.run(chunks, on_result, flush))
     elif not inflight:
         logger.info(f"[{model}] batch: nothing to submit")
@@ -2075,6 +2358,13 @@ async def run_batch(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob]) -> Non
                 if cell is None or cell.written or (not is_group and name in cell.scores):
                     return
                 prompt = tt.prompt_of_request(request)
+                if is_group:
+                    # the group's own prompt, rebuilt: a two-part prompt keeps its parts (and its cache
+                    # breakpoint), which the request's flattened text would lose
+                    by_name = {e[1]: e for e in cell.job.entities}
+                    members = group_members(cid) or []
+                    if members and all(n in by_name for n in members):
+                        prompt = build_group(cell.job, [by_name[n] for n in members], model)
                 charge = _Charge(cell.usage, mrun.usage, ctx.run_usage)
                 mrun.in_flight += 1
                 try:
@@ -2751,7 +3041,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--axes_per_call", type=int, default=1,
                         help="With an rk_* rubric (required) and --axes_file: judge this many consecutive axes of the "
                              "file in each call (the response text paid once for all of them); each axis still gets "
-                             "its own cell, and the group's answer log lives under _tier_eval_multi/.  Live and Flex only.")
+                             "its own cell, and the group's answer log lives under _tier_eval_multi/.  Any transport "
+                             "(the batch APIs since 2026-11-05).")
     parser.add_argument("--directions", choices=DIRECTION_MODES, default="own",
                         help="Which way each call presents its axis (Roger, 2026-11-04: balance the directions so that "
                              "no valence asymmetry enters a result).  own (default): the axis's order.  descriptions: "
@@ -2764,8 +3055,17 @@ def build_parser() -> argparse.ArgumentParser:
                              "one axis a call, a batch's M calls one after another, so its prefix stays cached), each batch's M axes "
                              "partitioned afresh at random into groups of k (a random letter order, each axis's "
                              "direction a coin per call), so that leakage between stacked axes is noise, not a fixed "
-                             "bias; every batch sent once per group.  Live and Flex only.")
+                             "bias; every batch sent once per group.  Any transport: through a batch API a batch's "
+                             "calls go one after another into the submission, so a chunk splits few prefixes.")
     parser.add_argument("--stack_seed", type=int, default=1, help="With --stack: the seed of the partitions.")
+    parser.add_argument("--gemini_cache", choices=("implicit", "explicit"), default="implicit",
+                        help="Gemini models' prompt cache (2026-11-05).  implicit (default): the whole prompt each "
+                             "call, Google's implicit cache reading what it reads (about 60%% live, 45-57%% on Flex, "
+                             "17%% in the Batch API).  explicit: with --stack and a cached-prefix rubric (r1_pn, "
+                             "rk_pn, rk_pl, rk_pa), each answer batch's prefix in an explicit cache (96%% read on Flex "
+                             "and in batch), its calls sending the suffix only; live and Flex create a cache before a "
+                             "batch's calls and delete it after them, the Batch API per chunk before submission and "
+                             "after collection.  Changes the prompt to two user turns: run a paired check first.")
     parser.add_argument("--direction_pass", type=int, default=0,
                         help="With --directions descriptions: which of the judge's passes this run is, from 0.")
     parser.add_argument("--swap_poles", action="store_true",
@@ -2878,7 +3178,8 @@ async def main_async(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     global CELL_LABEL, RUBRIC, NAME_FORMAT, NAME_SHOW, INSTRUCTION_ROUND, RESPONSES_DIR, RESPONSE_SPLIT, RESPONSE_PART, \
-        RESPONSE_CHARS, AXIS_INDEX, SWAP_POLES, DIRECTIONS, DIRECTION_PASS, STACK, STACK_SEED, RESPONSE_DESIGN
+        RESPONSE_CHARS, AXIS_INDEX, SWAP_POLES, DIRECTIONS, DIRECTION_PASS, STACK, STACK_SEED, RESPONSE_DESIGN, \
+        GEMINI_CACHE
     CELL_LABEL = args.cell_label or ""
     SWAP_POLES = bool(args.swap_poles)
     DIRECTIONS, DIRECTION_PASS = args.directions, args.direction_pass
@@ -2912,6 +3213,17 @@ async def main_async(argv: Optional[Sequence[str]] = None) -> int:
             parser.error(f"--directions {DIRECTIONS} needs a --cell_label, so that its cells stand apart")
     if DIRECTION_PASS and DIRECTIONS != "descriptions":
         parser.error("--direction_pass goes with --directions descriptions")
+    GEMINI_CACHE = args.gemini_cache
+    if GEMINI_CACHE == "explicit":
+        rubric = jr.get(args.rubric)
+        if not any(provider_for_model(m) == "google" for m in args.judge_model):
+            parser.error("--gemini_cache explicit applies to Gemini models: none is judged")
+        if not STACK:
+            parser.error("--gemini_cache explicit needs --stack, so that an answer batch's calls go together on one "
+                         "cache")
+        if not rubric.two_part:
+            parser.error(f"--gemini_cache explicit needs a cached-prefix rubric (a two-part prompt: "
+                         f"{', '.join(sorted(n for n, r in jr.RUBRICS.items() if r.two_part))}), not {rubric.name}")
     RUBRIC = jr.with_poles_swapped(jr.get(args.rubric)) if SWAP_POLES else jr.get(args.rubric)
     if SWAP_POLES and not CELL_LABEL:
         parser.error("--swap_poles needs a --cell_label, so that its cells stand apart from the axis's own")
@@ -2976,8 +3288,9 @@ async def main_async(argv: Optional[Sequence[str]] = None) -> int:
                 choice = tt.choose_transport(model, args.transport)
             except (tt.JudgeRequestError, ValueError) as e:
                 parser.error(str(e))
-        if args.axes_per_call > 1 and choice.transport == "batch":
-            parser.error(f"{model}: --axes_per_call is not wired for the Batch API yet; --transport flex or realtime")
+        # --axes_per_call (an rk_* rubric, --axis_index, --stack) through the batch APIs since 2026-11-05 (Roger:
+        # "Yes, we're going to need these"): a group is one job with its members in the axis map, so a batch
+        # collected by a later run rebuilds them.
         runs.append(ModelRun(model=model, settings=tt.judge_request_settings(model, overrides), choice=choice))
 
     if args.repair_truncated:
@@ -3012,6 +3325,8 @@ async def main_async(argv: Optional[Sequence[str]] = None) -> int:
                     *([tt.price_key(mrun.model, "batch")] if mrun.choice.probe else [])}:
             try:
                 price_for_model(key)
+                if explicit_cache_for(mrun.model):
+                    cache_storage_rate(key)     # an explicit cache bills storage: priced before it is made
             except KeyError as e:
                 parser.error(e.args[0] if e.args else f"no price for {key!r}")
 
