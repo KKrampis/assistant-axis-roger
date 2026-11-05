@@ -255,10 +255,11 @@ BATCH_REPLIES_ARCHIVE = "batch_replies.jsonl.gz"
 CHECKPOINT_VERSION = 1
 #: Header fields an answer log must share with the run that resumes it.
 CHECKPOINT_KEYS = ("version", "judge_model", "cell_label", "rubric_version", "request_settings", "max_tokens",
-                   "name_format", "swap_poles", "directions", "direction_pass", "stack", "stack_seed")
+                   "name_format", "swap_poles", "directions", "direction_pass", "stack", "stack_seed",
+                   "response_design")
 #: What an answer log's header means by leaving a key out: it predates the key.
 CHECKPOINT_DEFAULTS = {"name_format": "mechanical", "swap_poles": False, "directions": "own", "direction_pass": 0,
-                       "stack": 0, "stack_seed": 1}
+                       "stack": 0, "stack_seed": 1, "response_design": "question"}
 
 
 def load_pole_description(instructions_dir: Path, pair_type: str, name: str) -> str:
@@ -302,16 +303,36 @@ def cell_usage_path(d: Path) -> Path:
 
 
 #: Response judging (an r1_* rubric; set in main_async): the pipeline tree holding
-#: ``<kind>/responses/<entity>.jsonl`` and ``<kind>/scores/<entity>.json`` (--responses_dir); which third of
-#: an entity's questions this cell judges (--response_split M --response_part K: the questions with
-#: (q + entity rank) % M == K; part None for all); and a cut on the answer text in characters
-#: (--response_chars; None for whole).
+#: ``<kind>/responses/<entity>.jsonl`` and ``<kind>/scores/<entity>.json`` (--responses_dir); which part of
+#: an entity's responses this cell judges (--response_split M --response_part K, cut as RESPONSE_DESIGN says;
+#: part None for all); and a cut on the answer text in characters (--response_chars; None for whole).
 RESPONSES_DIR: Optional[Path] = None
 #: With --axes_per_call: judge only these members of each group (--axis_index), one axis per call with r1_pn,
 #: several with rk_pn, so that every run sends the same batches and a cached prefix is read back.
 AXIS_INDEX: Optional[Tuple[int, ...]] = None
 RESPONSE_SPLIT = 3
 RESPONSE_PART: Optional[int] = None
+#: How a part is cut (--response_design; Roger, 2026-11-04).  "golden": a response's place on the unit circle is
+#: frac((5 Q + p) / phi), Q the absolute question number (the questions file's id, not the position after step 1's
+#: every-third selection or step 3's filter), p the instruction (0 to 4), phi the golden ratio, computed exactly as
+#: Fibonacci hashing (golden_part); part K of M is the interval [K/M, (K+1)/M).  It depends on the question and the
+#: instruction only (no entity rank), has no period for step 1's stride to alias with (5Q + p mod 3 is p mod 3 when
+#: every Q is a multiple of 3, as in both trees, which gave thirds of 40/40/20), keeps the parts within 1% of equal at
+#: thirds and 3% at ninths on our trees (a plain hash: 8% and 28%), and splits every question's five instructions
+#: 1/2/2 over the thirds.  Parts nest as intervals: a ninth's parts 0, 1 and 2 lie inside the third's part 0.  Not
+#: for fifths (Roger: avoid cutting by five).  response_judging_plan.md section 4b has the measurements.  "question":
+#: the questions with (q + entity rank) % M == K, q the position in the tree, every cell before 2026-11-04; a ninth's
+#: parts 0, 3 and 6 lie inside the third's part 0.
+RESPONSE_DESIGN = "golden"
+#: Fibonacci hashing's constant, round(2**64 / phi): (n * GOLDEN_64) mod 2**64 is frac(n / phi) in 64-bit fixed point.
+GOLDEN_64 = 0x9E3779B97F4A7C15
+#: Instructions an entity has; the golden design numbers a question's responses 5 Q + p.
+INSTRUCTIONS_PER_ENTITY = 5
+#: Where a response record without ``question_id`` (trees made before 2026-10-12) finds its absolute question
+#: number: its question's text in this file, whose ids are the questions' places in it.
+QUESTIONS_FILE = Path(__file__).resolve().parents[1] / "data" / "extraction_questions.jsonl"
+#: Question text to absolute number: from the records' ``question_id`` as they are read, else QUESTIONS_FILE.
+QUESTION_IDS: Dict[str, int] = {}
 RESPONSE_CHARS: Optional[int] = None
 RESPONSE_CUT_MARK = " […]"
 
@@ -336,6 +357,8 @@ def load_entity_responses(responses_dir: Path, etype: str, name: str) -> Optiona
             p, q = int(rec["prompt_index"]), int(rec["question_index"])
             if kept.get(f"pos_p{p}_q{q}") != 3:
                 continue
+            if rec.get("question_id") is not None:
+                note_question_id(rec["question"], int(rec["question_id"]), path)
             answer = rec["conversation"][-1]["content"]
             if RESPONSE_CHARS is not None and len(answer) > RESPONSE_CHARS:
                 answer = answer[:RESPONSE_CHARS].rstrip() + RESPONSE_CUT_MARK
@@ -371,21 +394,73 @@ def entity_text_loader() -> Any:
     return load
 
 
+def note_question_id(text: str, qid: int, where: Any = None) -> None:
+    """Record a question's absolute number from a response record; two numbers for one text is an error."""
+    if QUESTION_IDS.setdefault(text, qid) != qid:
+        raise ValueError(f"{where}: question {text[:60]!r} has question_id {qid} here and {QUESTION_IDS[text]} elsewhere")
+
+
+def absolute_question(text: str) -> int:
+    """A question's absolute number: its records' ``question_id``, or its place in QUESTIONS_FILE (the May tree's
+    records have none; its texts all sit at 3 x question_index there, step 1 having taken every third)."""
+    if text not in QUESTION_IDS:
+        if not getattr(absolute_question, "loaded", None) == QUESTIONS_FILE and QUESTIONS_FILE.exists():
+            with open(QUESTIONS_FILE) as f:
+                for i, line in enumerate(x for x in f if x.strip()):
+                    rec = json.loads(line)
+                    QUESTION_IDS.setdefault(rec["question"], int(rec.get("id", i)))
+            absolute_question.loaded = QUESTIONS_FILE
+        if text not in QUESTION_IDS:
+            raise ValueError(f"question {text[:60]!r}: its records carry no question_id and it is not in "
+                             f"{QUESTIONS_FILE}, so its absolute number is unknown (--response_design question "
+                             f"does without)")
+    return QUESTION_IDS[text]
+
+
+def golden_point(question: int, instruction: int) -> int:
+    """A response's place on the unit circle in 64-bit fixed point: frac((5 question + instruction) / phi)."""
+    if not 0 <= instruction < INSTRUCTIONS_PER_ENTITY:
+        raise ValueError(f"instruction {instruction}: the golden design numbers 5 per question")
+    return ((INSTRUCTIONS_PER_ENTITY * question + instruction) * GOLDEN_64) % (1 << 64)
+
+
+def golden_part(question: int, instruction: int, split: int) -> int:
+    """The part (0 to split - 1) of the golden design a response falls in: floor(point x split)."""
+    return (golden_point(question, instruction) * split) >> 64
+
+
 def response_items(entities: Sequence[Tuple[str, str, Any]], part: Optional[int],
-                   split: int = RESPONSE_SPLIT) -> List[Tuple[str, str, Any]]:
+                   split: int = RESPONSE_SPLIT, design: Optional[str] = None) -> List[Tuple[str, str, Any]]:
     """The response items of ``entities`` (each ``(etype, name, [(p, q, question, answer), ...])``), one
-    ``(etype, key, (question, answer))`` per kept response: all of them, or, with ``part``, the entity's
-    questions with ``(q + rank) % split == part`` (Roger's coverage, 2026-11-03, with split 3: the thirds go
-    to the judges round-robin over the entities, ``rank`` the entity's place in the sorted names, so that
-    every response is judged once at the 1/3 level and each judge sees every entity on a third of its
-    questions; split 9's parts 0, 3 and 6 lie inside split 3's part 0, so a ninth is a subsample of a third)."""
+    ``(etype, key, (question, answer))`` per kept response: all of them, or, with ``part``, the part ``design``
+    (default RESPONSE_DESIGN) cuts.  "golden": ``golden_part(Q, p, split) == part``, Q the absolute question
+    number, every entity the same cells, so that the judges' parts each hold every entity (Roger's round-robin
+    coverage, 2026-11-03: the parts together judge every response once); split 9's parts 3K to 3K + 2 lie inside
+    split 3's part K.  "question": ``(q + rank) % split == part``, q the position in the tree and ``rank`` the
+    entity's place in the sorted names (the cells before 2026-11-04); split 9's parts 0, 3 and 6 lie inside split
+    3's part 0.  Either way a ninth is a subsample of a third."""
+    design = design or RESPONSE_DESIGN
+    if design not in ("golden", "question"):
+        raise ValueError(f"response design {design!r}: golden or question")
     ranks = {name: r for r, name in enumerate(sorted(name for _, name, _ in entities))}
     out: List[Tuple[str, str, Any]] = []
     for etype, name, items in entities:
         for p, q, question, answer in items:
-            if part is None or (q + ranks[name]) % split == part:
-                out.append((etype, response_item_key(name, p, q), (question, answer)))
+            if part is not None:
+                at = golden_part(absolute_question(question), p, split) if design == "golden" else (q + ranks[name]) % split
+                if at != part:
+                    continue
+            out.append((etype, response_item_key(name, p, q), (question, answer)))
     return out
+
+
+def response_design_in_effect() -> str:
+    """The design that cut this run's responses: RESPONSE_DESIGN when a response rubric judges a part, else
+    "question", which is also what a cell or log that predates the setting means (a run that cuts nothing
+    matches either)."""
+    if getattr(RUBRIC, "text_source", None) == "responses" and RESPONSE_PART is not None:
+        return RESPONSE_DESIGN
+    return "question"
 
 
 def entity_means(scores: Dict[str, float]) -> Dict[str, float]:
@@ -994,6 +1069,7 @@ def write_cell(cell: Cell, mrun: ModelRun, max_tokens: int) -> None:
     if RUBRIC.text_source == "responses":
         provenance.update({"responses_dir": str(RESPONSES_DIR), "response_split": RESPONSE_SPLIT,
                            "response_part": RESPONSE_PART, "response_chars": RESPONSE_CHARS,
+                           "response_design": RESPONSE_DESIGN if RESPONSE_PART is not None else None,
                            "n_items": len(cell.expected), "n_items_scored": len(scores)})
         provenance["n_entities"] = len({response_item_entity(k) for k in cell.expected})
         if job.members:
@@ -1149,7 +1225,8 @@ def checkpoint_header(mrun: "ModelRun", max_tokens: int) -> Dict[str, Any]:
     return {"kind": "header", "version": CHECKPOINT_VERSION, "judge_model": mrun.model, "cell_label": CELL_LABEL,
             "rubric_version": RUBRIC.version, "request_settings": mrun.settings, "max_tokens": max_tokens,
             "name_format": NAME_FORMAT, "swap_poles": SWAP_POLES, "directions": DIRECTIONS,
-            "direction_pass": DIRECTION_PASS, "stack": STACK, "stack_seed": STACK_SEED}
+            "direction_pass": DIRECTION_PASS, "stack": STACK, "stack_seed": STACK_SEED,
+            "response_design": response_design_in_effect()}
 
 
 def prompt_digest(prompt: str) -> str:
@@ -2092,9 +2169,11 @@ def direction_summary(cell: Cell) -> Dict[str, Any]:
     return out
 
 
-def refuse_done_cells_of_another_direction(jobs: Sequence[AxisJob], model: str) -> None:
+def refuse_done_cells_judged_otherwise(jobs: Sequence[AxisJob], model: str) -> None:
     """A finished cell is skipped, so one judged under other --directions than this run's would pass for this
-    run's: stop instead, naming it (Roger, 2026-11-04: an unnoticed direction asymmetry could invalidate results)."""
+    run's: stop instead, naming it (Roger, 2026-11-04: an unnoticed direction asymmetry could invalidate results).
+    Likewise a response cell cut under another --response_design (the default became golden on 2026-11-04, so a
+    rerun of an older label would otherwise report its by-question cells as this run's)."""
     for job in jobs:
         if not cell_done(job, model):
             continue
@@ -2107,11 +2186,16 @@ def refuse_done_cells_of_another_direction(jobs: Sequence[AxisJob], model: str) 
         if found != (DIRECTIONS, DIRECTION_PASS if DIRECTIONS == "descriptions" else 0):
             raise SystemExit(f"{cell_dir(job, model)} was judged under --directions {found[0]} (pass {found[1]}), not this "
                              f"run's {DIRECTIONS} (pass {DIRECTION_PASS}): use another --cell_label")
+        design = (prov.get("response_design") or "question") if prov.get("response_part") is not None else "question"
+        if design != response_design_in_effect():
+            raise SystemExit(f"{cell_dir(job, model)} was cut under --response_design {design}, not this run's "
+                             f"{response_design_in_effect()}: pass --response_design {design} to resume or reread it, "
+                             f"or use another --cell_label")
 
 
 async def run_model(ctx: RunContext, mrun: ModelRun, jobs: List[AxisJob]) -> None:
     model = mrun.model
-    refuse_done_cells_of_another_direction(jobs, model)
+    refuse_done_cells_judged_otherwise(jobs, model)
     todo = [job for job in jobs if not cell_done(job, model)]
     for job in jobs:
         if cell_done(job, model):
@@ -2655,10 +2739,15 @@ def build_parser() -> argparse.ArgumentParser:
                              "(default 3, the thirds of the round-robin coverage; 9 for a ninth, whose parts 0, 3 "
                              "and 6 are the thirds of third 0).")
     parser.add_argument("--response_part", type=int, default=None,
-                        help="With an r1_* rubric: judge only the part of each entity's questions with "
-                             "(question + entity rank) %% --response_split equal to this (the round-robin "
-                             "coverage: the judges' thirds together judge every response once).  Default: every "
-                             "kept response.")
+                        help="With an r1_* rubric: judge only this part of the responses, cut as --response_design "
+                             "says (the round-robin coverage: the judges' parts together judge every response "
+                             "once).  Default: every kept response.")
+    parser.add_argument("--response_design", choices=("golden", "question"), default="golden",
+                        help="How --response_part cuts: golden (default since 2026-11-04), the responses whose point "
+                             "frac((5 x absolute question number + instruction) / golden ratio) lies in the part's "
+                             "interval, every entity the same cells (RESPONSE_DESIGN says why; avoid a split of 5); "
+                             "question, the questions with (question + entity rank) %% --response_split equal to "
+                             "the part, as every cell before 2026-11-04 (pass it to resume or reread those).")
     parser.add_argument("--axes_per_call", type=int, default=1,
                         help="With an rk_* rubric (required) and --axes_file: judge this many consecutive axes of the "
                              "file in each call (the response text paid once for all of them); each axis still gets "
@@ -2789,7 +2878,7 @@ async def main_async(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     global CELL_LABEL, RUBRIC, NAME_FORMAT, NAME_SHOW, INSTRUCTION_ROUND, RESPONSES_DIR, RESPONSE_SPLIT, RESPONSE_PART, \
-        RESPONSE_CHARS, AXIS_INDEX, SWAP_POLES, DIRECTIONS, DIRECTION_PASS, STACK, STACK_SEED
+        RESPONSE_CHARS, AXIS_INDEX, SWAP_POLES, DIRECTIONS, DIRECTION_PASS, STACK, STACK_SEED, RESPONSE_DESIGN
     CELL_LABEL = args.cell_label or ""
     SWAP_POLES = bool(args.swap_poles)
     DIRECTIONS, DIRECTION_PASS = args.directions, args.direction_pass
@@ -2855,6 +2944,7 @@ async def main_async(argv: Optional[Sequence[str]] = None) -> int:
     AXIS_INDEX = args.axis_index
     RESPONSES_DIR = Path(args.responses_dir) if args.responses_dir else None
     RESPONSE_SPLIT, RESPONSE_PART, RESPONSE_CHARS = args.response_split, args.response_part, args.response_chars
+    RESPONSE_DESIGN = args.response_design
     if args.repair_truncated and RUBRIC.text_source != "descriptions":
         parser.error("--repair_truncated repairs description cells only")
     NAME_FORMAT = args.name_format

@@ -10,7 +10,8 @@ need), scaled to 0..100.  Unlike the percentile rubrics, Jev sees one answer at 
 to calibrate against.
 
 The responses are judge_tier_cost_eval.py's: an entity's pos responses step 3 scored 3, under
---responses_dir, the part of each entity's questions given by --response_split / --response_part.  The cells
+--responses_dir, the part given by --response_split / --response_part, cut as --response_design says (golden,
+the default since 2026-11-04, or question, as the logs before it; judge_tier_cost_eval.RESPONSE_DESIGN).  The cells
 are that tool's response cells, ``<axis>_tier_eval/<model><label>/`` with scores_responses.json (every item's
 score and the per-entity means), correlations.json and usage.json (each request's usage shared equally over
 the axes), so the pilot readouts compare them with the other arms.  Every answer is saved as it arrives,
@@ -254,6 +255,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--responses_dir", required=True, help="<kind>/responses/<entity>.jsonl and <kind>/scores/<entity>.json")
     p.add_argument("--response_split", type=int, default=3)
     p.add_argument("--response_part", type=int, default=None)
+    p.add_argument("--response_design", choices=("golden", "question"), default="golden",
+                   help="how --response_part cuts (judge_tier_cost_eval.py --response_design); question for the logs "
+                        "before 2026-11-04")
     p.add_argument("--model", default=DEFAULT_MODEL,
                    help=f"the name requested: a versioned ID (default {DEFAULT_MODEL}, pinned) or an alias "
                         "(jev-latest, jev-preview), whose answers change when it moves")
@@ -289,6 +293,7 @@ async def main_async(argv=None) -> int:
     # the tool's response loading: every entity of every axis, one canonical key per entity
     ev.RUBRIC = jr.get("rk_hn")
     ev.RESPONSES_DIR, ev.RESPONSE_SPLIT, ev.RESPONSE_PART = Path(args.responses_dir), args.response_split, args.response_part
+    ev.RESPONSE_DESIGN = args.response_design
     ev.AXIS_INDEX = None        # every axis of the group: Jev answers each axis's question in the one request
     jobs = ev.jobs_from_axes_file(Path(args.axes_file), E)
     group = ev.group_jobs(jobs, len(jobs), E)[0]
@@ -301,6 +306,8 @@ async def main_async(argv=None) -> int:
               "response_part": args.response_part}
     if QUESTION_TYPE != "score":        # only then, so that the logs written before the flag still resume
         header["question_type"] = QUESTION_TYPE
+    if args.response_part is not None and args.response_design != "question":   # likewise: those logs cut by question
+        header["response_design"] = args.response_design
     work = E / JEV_DIRNAME / args.cell_label.lstrip("@")
     log_path = work / "answers.jsonl"
     found, answers = read_log(log_path)
@@ -388,7 +395,8 @@ async def main_async(argv=None) -> int:
     requested = [found["model"], args.model] if found is not None and found.get("model") != args.model else args.model
     provenance = {"judge_model": resolved, "model_requested": requested, "levels": LEVELS, "question_type": QUESTION_TYPE, "cell_label": args.cell_label,
                   "text_source": "responses", "responses_dir": str(args.responses_dir), "response_split": args.response_split,
-                  "response_part": args.response_part, "multi_axis": [m.axis_dir for m in group.members],
+                  "response_part": args.response_part,
+                  "response_design": args.response_design if args.response_part is not None else None, "multi_axis": [m.axis_dir for m in group.members],
                   "answers_log": str(log_path), "n_items": len(items)}
     model_name = resolved[0] if len(resolved) == 1 else args.model
     for axis, rho, n in write_cells(group, answers, model_name, args.cell_label, usage, provenance):

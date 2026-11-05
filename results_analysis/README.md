@@ -2687,6 +2687,27 @@ the pair list's order**, which puts the good pole high on the 18 moral axes.  On
 about +0.03 ρ from it.  Evidence and tables: § 4c of
 [`response_judging_plan.md`](../reports/judge_pareto/response_judging_plan.md).
 
+### Response judging: parts are cut the golden way (Roger, 2026-11-04)
+
+`judge_tier_cost_eval.py --response_split M --response_part K` judges a part of each entity's kept
+responses; `--response_design` says how it is cut.  **`golden`, the default since 2026-11-04,** places each
+response at frac((5Q + p) / φ) on the unit circle, Q the absolute question number (the record's
+`question_id`, or for a tree made before 2026-10-12 its question's place in
+[`data/extraction_questions.jsonl`](../data/extraction_questions.jsonl); never the position after step 1's
+every-third selection), p the instruction, φ the golden ratio, and part K is the interval [K/M, (K+1)/M)
+(`golden_part`, exact Fibonacci hashing).  Every entity gets the same cells; the parts are within 1% of
+equal at thirds and 3% at ninths on our trees, every question's five instructions split 1/2/2 over the
+thirds, and a ninth's parts 3K to 3K+2 lie inside the third's part K.  Avoid M = 5.  **`question`** keeps the
+questions with `(question + entity rank) % M == K`, as every response cell before that date was cut; pass it
+to resume or reread those cells (and `scripts/judge_responses_jev.py`'s logs).  A finished cell of the other
+design is refused, as is an interrupted one at its log's header; a cell with no `response_design` in its
+provenance counts as `question`.
+
+Why not simpler forms: on both trees every absolute question number is a multiple of 3, so 5Q + p mod 3 is
+p mod 3 (thirds of 40/40/20); a plain hash balances only by chance (8% off at thirds, 28% at ninths) and
+loses up to 0.012 ρ at small shares.  Measurements and caveats:
+[response_judging_plan.md](../reports/judge_pareto/response_judging_plan.md) § 4b.
+
 ### Description judging: the settled method (Roger, 2026-11-02)
 
 [`judge_descriptions.py`](./judge_descriptions.py) judges axes from the entities'

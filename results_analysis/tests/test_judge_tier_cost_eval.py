@@ -280,7 +280,7 @@ def _respond(resp: Path, kind: str, name: str) -> None:
     recs, scores = [], {}
     for p in range(RESP_INSTRUCTIONS):
         for q in range(RESP_QUESTIONS):
-            recs.append({"label": "pos", "prompt_index": p, "question_index": q, "question": f"Q{q}?",
+            recs.append({"label": "pos", "prompt_index": p, "question_index": q, "question_id": 3 * q, "question": f"Q{q}?",
                          "conversation": [{"role": "system", "content": "be it"}, {"role": "user", "content": f"Q{q}?"},
                                           {"role": "assistant", "content": f"As {name}, answer {p}-{q} at some length."}]})
             scores[f"pos_p{p}_q{q}"] = 1 if q == 5 else 2 if (p, q) == (1, 4) else 3
@@ -2525,10 +2525,94 @@ def test_response_items_the_parts_and_the_cut(world, monkeypatch):
     assert ev.response_item_entity("pilot|R|p1q4") == "pilot|R" and ev.response_question("pilot|R|p1q4") == 4
     ninth, third = {k for _, k, _ in ev.response_items(ents, 0, 9)}, {k for _, k, _ in parts[0]}
     assert ninth and ninth < third                                           # a ninth is a subsample of a third
+    # the designs (2026-11-04): golden, the default, every entity the same cells, from the absolute question number
+    # (the records' question_id, 3 x q here as in both trees); question, (q + rank) % split, whole questions
+    cells = lambda part: {n: {(p, q) for _, k, _ in part if k.split("|")[0] == n
+                              for p, q in [map(int, k.rsplit("|p", 1)[1].split("q"))]} for n in ("calm", "bold")}
+    have = {n: {(p, q) for p, q, _, _ in it} for _, n, it in ents}
+    for k in range(3):
+        gold = cells(parts[k])
+        assert all(gold[n] == {(p, q) for p, q in have[n] if ev.golden_part(3 * q, p, 3) == k} for n in gold)
+        assert {k for _, k, _ in ev.response_items(ents, 3 * k + 1, 9)} <= {k for _, k, _ in parts[k]}    # nested
+    byq = cells(ev.response_items(ents, 0, 3, design="question"))
+    assert all(len({p for p, x in byq[n] if x == q}) == len({p for p, x in have[n] if x == q}) for n in byq for _, q in byq[n])
+    assert byq != cells(parts[0]) and {k for _, k, _ in ev.response_items(ents, 0, 9, "question")} < \
+        {k for _, k, _ in ev.response_items(ents, 0, 3, "question")}
+    with pytest.raises(ValueError):
+        ev.response_items(ents, 0, 3, design="diagonal")
     monkeypatch.setattr(ev, "RESPONSE_CHARS", 10)
     cut = ev.load_entity_responses(world.resp, "traits", "calm")[0][3]
     assert cut == "As calm, a" + ev.RESPONSE_CUT_MARK
     assert ev.entity_means({"calm|p0q0": 60, "calm|p1q2": 40, "bold|p0q0": 10}) == {"bold": 10.0, "calm": 50.0}
+
+
+def test_the_golden_design_is_balanced_nested_and_needs_the_absolute_question(tmp_path, monkeypatch):
+    """Roger's design, 2026-11-04: frac((5 Q + p) / phi) over the absolute question number Q.  On both trees' ids
+    (every third of 300) the thirds are within 1% of equal and the ninths within 3%, every question's five
+    instructions split 1/2/2 over the thirds, ninths nest in thirds; the fixed-point form is the float one; the
+    absolute number comes from question_id, else the questions file, else nothing."""
+    import math
+    import numpy as np
+    qs = [3 * k for k in range(100)]
+    for M, tol in ((3, 0.01), (9, 0.03)):
+        share = np.bincount([ev.golden_part(q, p, M) for q in qs for p in range(5)], minlength=M) / 500
+        assert max(abs(share - 1 / M)) * M <= tol
+    assert all(sorted(np.bincount([ev.golden_part(q, p, 3) for p in range(5)], minlength=3)) == [1, 2, 2] for q in range(300))
+    assert all(ev.golden_part(q, p, 9) // 3 == ev.golden_part(q, p, 3) and ev.golden_part(q, p, 27) // 3 == ev.golden_part(q, p, 9)
+               for q in range(300) for p in range(5))
+    assert all(ev.golden_part(q, p, 3) == int(((5 * q + p) * (math.sqrt(5) - 1) / 2 % 1.0) * 3) for q in range(300) for p in range(5))
+    with pytest.raises(ValueError):
+        ev.golden_part(0, 5, 3)
+    qf = tmp_path / "questions.jsonl"
+    qf.write_text("".join(json.dumps({"id": i, "question": f"T{i}?"}) + "\n" for i in range(9)))
+    monkeypatch.setattr(ev, "QUESTIONS_FILE", qf)
+    monkeypatch.setattr(ev, "QUESTION_IDS", {})
+    assert ev.absolute_question("T6?") == 6                          # a record without question_id: the file
+    ev.note_question_id("Z?", 42)
+    assert ev.absolute_question("Z?") == 42                          # the record's own number first
+    with pytest.raises(ValueError):
+        ev.note_question_id("Z?", 43)                                # one text, two numbers
+    with pytest.raises(ValueError):
+        ev.absolute_question("unknown?")
+
+
+def test_a_response_cell_of_another_design_is_refused_not_passed_off(world, monkeypatch):
+    """--response_design (2026-11-04): the default became golden, so a done cell cut by question (or one from
+    before the setting, its provenance silent) is refused by a golden run rather than skipped as done; an
+    interrupted one is refused at its log's header; under --response_design question both resume as before."""
+    std = FakeOpenAI()
+    _openai(monkeypatch, std=std)
+    base = ["--transport", "realtime", "--rubric", "r1_hn", "--cell_label", "@dq", "--entities_per_call", "3",
+            "--responses_dir", str(world.resp), "--response_part", "0"]
+    old = [*base, "--response_design", "question"]
+    try:
+        assert _run(world, "gpt-4.1-mini", extra=old) == 0
+        n = len(std.calls)
+        d = world.exp / "alpha_vs_beta_tier_eval" / "gpt-4.1-mini@dq"
+        sp = d / "scores_responses.json"
+        data = json.loads(sp.read_text())
+        assert data["_provenance"]["response_design"] == "question"
+        with pytest.raises(SystemExit):
+            _run(world, "gpt-4.1-mini", extra=base)                     # golden: refused, not skipped
+        assert _run(world, "gpt-4.1-mini", extra=old) == 0 and len(std.calls) == n
+        del data["_provenance"]["response_design"]                      # a cell from before the setting
+        sp.write_text(json.dumps(data))
+        with pytest.raises(SystemExit):
+            _run(world, "gpt-4.1-mini", extra=base)
+        assert _run(world, "gpt-4.1-mini", extra=old) == 0 and len(std.calls) == n
+        # interrupted: the answer log's header says question
+        (d / "usage.json").unlink()
+        (d / ev.ANSWERS_PARTIAL).write_bytes(gzip.decompress((d / "answers.jsonl.gz").read_bytes()))
+        (d / "answers.jsonl.gz").unlink()
+        with pytest.raises((SystemExit, ev.CheckpointMismatchError)):
+            _run(world, "gpt-4.1-mini", extra=base)
+        assert _run(world, "gpt-4.1-mini", extra=old) == 0 and len(std.calls) == n
+        # the golden cell judges other items than the question cell of the same part
+        assert _run(world, "gpt-4.1-mini", extra=[*base[:4], "--cell_label", "@dd", *base[6:]]) == 0
+        dd = json.loads((world.exp / "alpha_vs_beta_tier_eval" / "gpt-4.1-mini@dd" / "scores_responses.json").read_text())
+        assert set(dd["items"]) != set(data["items"]) and dd["_provenance"]["response_design"] == "golden"
+    finally:
+        ev.RESPONSE_DESIGN = "golden"
 
 
 def test_response_groups_share_a_question_and_the_rubric_shows_it_once(world, monkeypatch):
@@ -2569,6 +2653,7 @@ def test_a_response_run_writes_per_entity_means_and_items(world, monkeypatch):
     assert data["items"] and all(k.rsplit("|", 1)[1].startswith("p") for k in data["items"])
     prov = data["_provenance"]
     assert (prov["text_source"], prov["response_split"], prov["response_part"], prov["response_chars"]) == ("responses", 3, 0, None)
+    assert prov["response_design"] == "golden"
     assert prov["n_items"] == len(data["items"]) and prov["n_entities"] == 5 and prov["n_scored"] == 5
     assert "responses" in json.loads((d / "correlations.json").read_text()) and (d / "usage.json").exists()
     assert ev.cell_scores_path(d).name == "scores_responses.json"
