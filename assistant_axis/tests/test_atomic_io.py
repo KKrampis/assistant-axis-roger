@@ -119,6 +119,111 @@ def test_atomic_write_uses_tmpdir_env(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Opt-in fsync and per-thread staging names (review 7 D6, walk-through E4)
+# ---------------------------------------------------------------------------
+
+class TestFsyncAndThreadStaging:
+    WRITERS = {
+        "text": lambda dest, **kw: atomic_io.atomic_write_text("t", dest, **kw),
+        "bytes": lambda dest, **kw: atomic_io.atomic_write_bytes(b"b", dest, **kw),
+        "append_jsonl": lambda dest, **kw: atomic_io.append_jsonl({"a": 1}, dest, **kw),
+        "write_jsonl": lambda dest, **kw: atomic_io.write_jsonl([{"a": 1}], dest, **kw),
+    }
+
+    @pytest.mark.parametrize("writer", sorted(WRITERS))
+    def test_fsync_is_off_by_default(self, tmp_path, monkeypatch, writer):
+        monkeypatch.setenv("TMPDIR", str(tmp_path / "stage"))
+        with mock.patch("assistant_axis.atomic_io.os.fsync") as fs:
+            self.WRITERS[writer](tmp_path / "out.json")
+        fs.assert_not_called()
+
+    @pytest.mark.parametrize("writer", sorted(WRITERS))
+    def test_fsync_flushes_the_copy_before_the_rename(
+        self, tmp_path, monkeypatch, writer,
+    ):
+        monkeypatch.setenv("TMPDIR", str(tmp_path / "stage"))
+        dest = tmp_path / "out.json"
+        inprogress = dest.with_suffix(dest.suffix + ".inprogress")
+        seen = []
+
+        def spy(fd):
+            # At the flush the copy sits beside dest, not yet renamed.
+            seen.append((inprogress.exists(), dest.exists()))
+
+        with mock.patch("assistant_axis.atomic_io.os.fsync", side_effect=spy):
+            self.WRITERS[writer](dest, fsync=True)
+        assert seen == [(True, False)]
+        assert dest.exists() and not inprogress.exists()
+
+    def test_a_failed_fsync_is_retried_like_a_failed_copy(self, tmp_path):
+        src = tmp_path / "src"
+        dest = tmp_path / "dest"
+        src.write_text("payload")
+        calls = {"n": 0}
+
+        def flaky(fd):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise OSError("simulated fsync EIO")
+
+        with mock.patch("assistant_axis.atomic_io.os.fsync", side_effect=flaky):
+            atomic_io._retry_copy(src, dest, attempts=3, base_delay_s=0.01,
+                                  fsync=True)
+        assert dest.read_text() == "payload"
+        assert calls["n"] == 2
+
+    def test_staging_name_carries_pid_and_thread_id(self, tmp_path, monkeypatch):
+        import threading
+        monkeypatch.setenv("TMPDIR", str(tmp_path))
+        dest = Path("somewhere/config.json")
+        here = atomic_io._staging_path(dest)
+        there = {}
+        t = threading.Thread(
+            target=lambda: there.setdefault("p", atomic_io._staging_path(dest)))
+        t.start()
+        t.join()
+        assert here != there["p"]
+        assert f".{os.getpid()}.{threading.get_ident()}." in here.name
+        assert atomic_io._staging_path(dest, ".pt.tmp").name.endswith(".pt.tmp")
+
+    def test_two_threads_writing_the_same_name_keep_their_own_bytes(
+        self, tmp_path, monkeypatch,
+    ):
+        """Both threads stage before either copies (a barrier forces the
+        interleaving).  With a per-process staging name the second write
+        overwrote the first's staging file, so both destinations got the
+        same bytes (or the first cleanup removed the other's staging)."""
+        import threading
+        monkeypatch.setenv("TMPDIR", str(tmp_path / "stage"))
+        barrier = threading.Barrier(2, timeout=10)
+        real_copy = atomic_io._retry_copy
+
+        def copy_after_both_staged(*a, **kw):
+            barrier.wait()
+            return real_copy(*a, **kw)
+
+        errors = []
+
+        def write(sub, text):
+            try:
+                atomic_io.atomic_write_text(text, tmp_path / sub / "config.json")
+            except BaseException as e:  # noqa: BLE001 -- surfaced below
+                errors.append(e)
+
+        with mock.patch("assistant_axis.atomic_io._retry_copy",
+                        side_effect=copy_after_both_staged):
+            ts = [threading.Thread(target=write, args=(s, s * 3))
+                  for s in ("a", "b")]
+            for t in ts:
+                t.start()
+            for t in ts:
+                t.join()
+        assert errors == []
+        assert (tmp_path / "a" / "config.json").read_text() == "aaa"
+        assert (tmp_path / "b" / "config.json").read_text() == "bbb"
+
+
+# ---------------------------------------------------------------------------
 # Read retry helpers
 # ---------------------------------------------------------------------------
 
@@ -155,6 +260,39 @@ class TestReadRetries:
         with mock.patch.object(Path, "read_text", always_fail):
             with pytest.raises(OSError, match="permanent failure"):
                 atomic_io.read_text_with_retry(p, attempts=3, base_delay_s=0.01)
+
+    def test_a_missing_file_is_raised_at_once(self, tmp_path):
+        """P8.4 (2026-10-12): FileNotFoundError is not an NFS hiccup; each
+        missing file used to cost the full 265 s retry schedule."""
+        import time as _time
+        sleeps = []
+        with mock.patch.object(_time, "sleep", lambda s: sleeps.append(s)):
+            with pytest.raises(FileNotFoundError):
+                atomic_io.read_text_with_retry(tmp_path / "absent.txt")
+            with pytest.raises(FileNotFoundError):
+                atomic_io.torch_load_with_retry(tmp_path / "absent.pt")
+        assert sleeps == []
+        assert FileNotFoundError in atomic_io.NON_TRANSIENT_READ_ERRORS
+
+    def test_estale_is_still_retried(self, tmp_path):
+        """A stale NFS handle is an OSError with errno ESTALE, not a
+        FileNotFoundError: it stays transient."""
+        import errno
+        p = tmp_path / "x.txt"
+        p.write_text("payload")
+        n_calls = {"n": 0}
+        real_read = Path.read_text
+
+        def stale_then_ok(self_, encoding="utf-8"):
+            n_calls["n"] += 1
+            if n_calls["n"] < 2:
+                raise OSError(errno.ESTALE, "Stale file handle")
+            return real_read(self_, encoding=encoding)
+
+        with mock.patch.object(Path, "read_text", stale_then_ok):
+            assert atomic_io.read_text_with_retry(p, attempts=3, base_delay_s=0.01) == "payload"
+        assert n_calls["n"] == 2
+        assert not isinstance(OSError(errno.ESTALE, "x"), FileNotFoundError)
 
     def test_read_text_does_not_retry_unicode_decode_error(self, tmp_path):
         """Non-OSError exceptions (e.g. corrupt content) should propagate immediately."""
@@ -429,6 +567,84 @@ class TestTorchSaveWithRetry:
         assert p.exists()
         assert n_load_calls["n"] == 3
 
+    def test_dest_never_holds_unverified_bytes(self, tmp_path, monkeypatch):
+        """Verification runs on the ``.inprogress`` copy and the rename comes
+        last (since 2026-10-12): while the load check runs, ``dest`` does
+        not exist yet, so a crash mid-verification cannot leave a file that
+        skip-if-exists resume logic takes for a finished one."""
+        import torch
+        monkeypatch.setattr(atomic_io.time, "sleep", lambda s: None)
+        p = tmp_path / "out.pt"
+        seen = []
+        real_torch_load = torch.load
+
+        def spying_load(f, *args, **kwargs):
+            seen.append((str(f), p.exists()))
+            return real_torch_load(f, *args, **kwargs)
+
+        with mock.patch("torch.load", spying_load):
+            atomic_io.torch_save_with_retry({"x": torch.tensor([1, 2])}, p)
+        assert seen == [(str(p) + ".inprogress", False)]
+        assert p.exists()
+        assert not Path(str(p) + ".inprogress").exists()
+
+    def test_failed_overwrite_keeps_the_previous_file(self, tmp_path, monkeypatch):
+        """A save that fails every attempt used to unlink ``dest`` -- for an
+        ``--overwrite`` run, the previous good file."""
+        import shutil
+        import torch
+        monkeypatch.setattr(atomic_io.time, "sleep", lambda s: None)
+        p = tmp_path / "out.pt"
+        torch.save({"x": torch.tensor([7.0])}, p)
+        before = p.read_bytes()
+        real_copy = shutil.copy2
+
+        def always_flipping_copy(src, dst, *a, **kw):
+            real_copy(src, dst, *a, **kw)
+            with open(dst, "r+b") as f:
+                f.seek(os.path.getsize(dst) // 2)
+                orig = f.read(1)
+                f.seek(os.path.getsize(dst) // 2)
+                f.write(bytes([orig[0] ^ 0xFF]))
+
+        with mock.patch("assistant_axis.atomic_io.shutil.copy2", always_flipping_copy):
+            with pytest.raises(OSError, match="sha256 mismatch"):
+                atomic_io.torch_save_with_retry({"x": torch.tensor([1.0, 2.0])}, p,
+                                                attempts=2)
+        assert p.read_bytes() == before
+        assert not Path(str(p) + ".inprogress").exists()
+
+    def test_unpickling_error_in_verification_is_retried_and_cleaned(
+            self, tmp_path, monkeypatch):
+        """torch.load raises pickle.UnpicklingError on some corrupt files;
+        it escaped the retry and the cleanup before 2026-10-12."""
+        import pickle
+        import torch
+        monkeypatch.setattr(atomic_io.time, "sleep", lambda s: None)
+        p = tmp_path / "out.pt"
+        n = {"calls": 0}
+        real_torch_load = torch.load
+
+        def flaky_load(*args, **kwargs):
+            n["calls"] += 1
+            if n["calls"] == 1:
+                raise pickle.UnpicklingError("invalid load key, 'x'.")
+            return real_torch_load(*args, **kwargs)
+
+        with mock.patch("torch.load", flaky_load):
+            atomic_io.torch_save_with_retry({"x": torch.tensor([1])}, p,
+                                            attempts=3, verify_sha256=False)
+        assert n["calls"] == 2
+        assert p.exists()
+
+        q = tmp_path / "never.pt"
+        with mock.patch("torch.load", side_effect=pickle.UnpicklingError("bad")):
+            with pytest.raises(pickle.UnpicklingError):
+                atomic_io.torch_save_with_retry({"x": torch.tensor([1])}, q,
+                                                attempts=1, verify_sha256=False)
+        assert not q.exists()
+        assert not Path(str(q) + ".inprogress").exists()
+
     def test_verify_off_skips_checks(self, tmp_path):
         """With both verifications disabled, no re-hash and no load
         happens after copy -- file is treated as written-correctly
@@ -459,3 +675,14 @@ class TestTorchSaveWithRetry:
         assert n_load_calls["n"] == 0
         loaded = real_torch_load(p, weights_only=False)
         assert torch.equal(loaded["x"], torch.tensor([1, 2]))
+
+
+def test_read_jsonl_keeps_a_line_holding_a_raw_unicode_line_separator(tmp_path):
+    """A JSON string may hold U+2028 / U+2029 / U+0085 raw; str.splitlines()
+    would break the record in two malformed halves and drop it (2026-10-12)."""
+    from assistant_axis.atomic_io import read_jsonl_with_retry
+    path = tmp_path / "records.jsonl"
+    path.write_text('{"a": "x y"}\n{"b": "p\u0085q"}\r\n{"c": 1}\n', encoding="utf-8")
+    assert read_jsonl_with_retry(path, skip_malformed=False) == [
+        {"a": "x y"}, {"b": "p\u0085q"}, {"c": 1},
+    ]

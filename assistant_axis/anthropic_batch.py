@@ -125,6 +125,7 @@ class AnthropicBatchRunner:
                  poll_seconds: float = 60.0,
                  max_failed_poll_rounds: int = MAX_FAILED_POLL_ROUNDS,
                  max_create_retries: int = MAX_CREATE_RETRIES,
+                 adopt_lost_batches: bool = True,
                  logger: Optional[logging.Logger] = None):
         self.client = client
         self.work_dir = Path(work_dir)
@@ -132,6 +133,11 @@ class AnthropicBatchRunner:
         self.poll_seconds = poll_seconds
         self.max_failed_poll_rounds = max_failed_poll_rounds
         self.max_create_retries = max_create_retries
+        #: A batch carries nothing that names its requests, so a lost submission is recognised only by
+        #: its time and its number of requests.  Leave this off wherever other runs on the account can
+        #: submit batches of the same size: their batch would be taken for this one's, and its replies
+        #: read as answers to this one's prompts.
+        self.adopt_lost_batches = adopt_lost_batches
         self.log = logger or logging.getLogger(__name__)
         self.state: Dict[str, Any] = self._load_state()
 
@@ -184,6 +190,10 @@ class AnthropicBatchRunner:
         step-3 ``custom_id`` of every request in a batch still to be
         collected (the caller must not submit those again)."""
         for rec in [r for r in self.state["chunks"] if r.get("submitting_ts") and not r.get("batch_id")]:
+            if not self.adopt_lost_batches:
+                self.log.warning(f"{Path(rec['path']).name}: its submission got no answer; sending it again (a batch "
+                                 f"it may have created would be a charged duplicate, and is left alone)")
+                continue
             try:
                 batch = await self._find_batch(rec)
             except Exception as e:  # noqa: BLE001 -- then the chunk is sent again

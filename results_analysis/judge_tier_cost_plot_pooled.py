@@ -19,12 +19,17 @@ comparable); the models left out are named in the title and on stderr.
 --min_axes N lowers the bar, e.g. --min_axes 60 keeps a legacy judge that
 is missing one axis, and --min_axes 1 shows everything as before.
 
-Price basis: batch and Flex cells are billed at half the real-time price, so
-their recorded cost (usage.json's total_cost_usd) is not comparable with a
-real-time cell's.  By default (--price_basis list) every cell's cost is
-recomputed from its recorded token counts at the model's real-time price;
---price_basis batch prices everything at the batch rate, and
---price_basis recorded plots the cost as billed.
+Price basis: a cell's recorded cost (usage.json's total_cost_usd) depends on
+the transport it happened to go by, so by default every cell's cost is
+recomputed from its recorded token counts.  Since 2026-11-03 the default is
+--price_basis batch, the real price (Roger: "We should probably be computing
+Pareto at real price, in case someone offered a bigger or smaller discount for
+batch"): each model at its own batch or Flex rate (judge_pricing's
+_BATCH_PRICE_FACTORS; the list price for a model with none).  Every judge here
+is half price that way, so the frontier is the one the list price gave; the
+dollars are half.  --price_basis list prices everything at the real-time list
+price (the default until 2026-11-03, and the basis of every table before it),
+and --price_basis recorded plots the cost as billed.
 
 Usage:
     # After running judge_tier_cost_eval.py on 18+ axes:
@@ -44,6 +49,7 @@ Usage:
 
 import argparse
 import json
+import math
 import re
 import sys
 from collections import defaultdict
@@ -56,29 +62,49 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from assistant_axis.judge_pricing import (
-    GPT_MINI_RATE_IN, GPT_MINI_RATE_OUT, SONNET4_RATE_IN, SONNET4_RATE_OUT,
-    price_for_model,
+    GPT_MINI_RATE_IN, GPT_MINI_RATE_OUT, SONNET_RATE_IN, SONNET_RATE_OUT,
+    cache_rate_factors, price_for_model,
 )
 from assistant_axis.plot_metadata import png_metadata
+from assistant_axis.provenance import (
+    CACHE_POLICIES, InputSpec, current_file_input, current_files_input, load_and_register,
+)
 
-PROVIDER_COLOR = {"openai": "#7FB069", "anthropic": "#D9636B", "google": "#5B8DEF"}
+PROVIDER_COLOR = {"openai": "#7FB069", "anthropic": "#D9636B", "google": "#5B8DEF", "typesafe": "#E39B2D",
+                  "blend": "#8E6BBF"}
 
 EST_IN_PER_ENTITY = 320 + 150
 EST_OUT_PER_ENTITY = 80
 
 
 def provider_of(model: str) -> str:
+    if "+" in model:                # judges blended: gpt-5.6-luna+claude-haiku-5-5@...
+        return "blend"
     if model.startswith("gemini"):
         return "google"
+    if model.startswith("jev"):     # TypeSafe AI's Jev (2026-11-04)
+        return "typesafe"
     return "openai" if model.startswith(("gpt-", "o1-", "o3-", "o4-")) else "anthropic"
+
+
+#: Every cell file this process has read, for the figure's recorded inputs.  The cells are bare JSON
+#: with no envelope of their own, so their drift is seen when a later audit compares these files.
+READ_FILES: set = set()
+
+
+def read_json(path: Path) -> Any:
+    """``path``'s JSON, noted in :data:`READ_FILES`."""
+    with open(path) as f:
+        data = json.load(f)
+    READ_FILES.add(Path(path))
+    return data
 
 
 def load_rho(correlations_path: Path, slot: int,
              mode: str = "descriptions", metric: str = "raw") -> Optional[Tuple[float, int]]:
     if not correlations_path.exists():
         return None
-    with open(correlations_path) as f:
-        d = json.load(f)
+    d = read_json(correlations_path)
     r = d.get("result", d)
     try:
         cell = r[mode][str(slot)][metric]
@@ -87,7 +113,9 @@ def load_rho(correlations_path: Path, slot: int,
         return None
 
 
-PRICE_BASES = ("list", "batch", "recorded")
+PRICE_BASES = ("batch", "list", "recorded")
+#: The real price (2026-11-03): each model at its own batch or Flex rate.
+DEFAULT_PRICE_BASIS = "batch"
 
 
 def _base_model(key: str) -> str:
@@ -98,33 +126,58 @@ def _base_model(key: str) -> str:
     return key
 
 
-def load_measured_cost(usage_path: Path, price_basis: str = "list") -> Optional[float]:
+def basis_rates(model: str, price_basis: str) -> Tuple[float, float]:
+    """``model``'s ``(input, output)`` rates per 1M tokens on ``price_basis``: its real-time list
+    price, or (``batch``) its own batch or Flex rate, the list price when it has none.  Raises
+    ``KeyError`` for a model the pricing table does not know."""
+    if price_basis == "batch":
+        try:
+            return price_for_model(f"{model}:batch")
+        except KeyError:
+            pass
+    return price_for_model(model)
+
+
+def price_factor(model: str, price_basis: str) -> float:
+    """What ``price_basis`` pays for ``model`` as a fraction of its list price (1.0 when unknown)."""
+    try:
+        return basis_rates(model, price_basis)[0] / price_for_model(model)[0]
+    except (KeyError, ZeroDivisionError):
+        return 1.0
+
+
+def load_measured_cost(usage_path: Path, price_basis: str = DEFAULT_PRICE_BASIS) -> Optional[float]:
     """A cell's cost from its ``usage.json``.
 
     ``recorded``: the cost the run was billed (``total_cost_usd``), which mixes
-    real-time cells with batch and Flex cells billed at half price.  ``list``
-    (the default) and ``batch`` recompute the cost from the recorded token
-    counts at the model's real-time price or its batch price, whatever
-    transport the cell was judged by, so that every point on one plot is
-    priced the same way.  A model the pricing table does not know falls back
-    to the recorded cost with a warning.
+    real-time cells with batch and Flex cells billed at their discount.  ``batch``
+    (the default, the real price) and ``list`` recompute the cost from the
+    recorded token counts at each model's own batch or Flex rate (:func:`basis_rates`)
+    or at its real-time price, whatever transport the cell was judged by, so that
+    every point on one plot is priced the same way.  A model the pricing table
+    does not know falls back to the recorded cost with a warning.
     """
     if not usage_path.exists():
         return None
-    with open(usage_path) as f:
-        d = json.load(f)
+    d = read_json(usage_path)
     if price_basis == "recorded" or not d.get("per_model"):
         return d.get("total_cost_usd")
     total = 0.0
     for key, entry in d["per_model"].items():
         model = _base_model(entry.get("model") or key)
         try:
-            rate_in, rate_out = price_for_model(model if price_basis == "list" else f"{model}:batch")
+            rate_in, rate_out = basis_rates(model, price_basis)
         except KeyError:
             print(f"WARNING: {usage_path}: no {price_basis} price for {model!r}; using the recorded cost",
                   file=sys.stderr)
             return d.get("total_cost_usd")
-        total += (entry.get("prompt_tokens", 0) * rate_in
+        # cache-written and cache-read tokens (part of prompt_tokens) at their factors of the input rate, as
+        # billed (judge_pricing.cache_rate_factors; before 2026-11-04 they were repriced as plain input, which
+        # put a cached-prefix arm at five times its bill)
+        written, read = int(entry.get("cache_write_tokens", 0)), int(entry.get("cache_read_tokens", 0))
+        write_factor, read_factor = cache_rate_factors(model)
+        plain = entry.get("prompt_tokens", 0) - written - read
+        total += ((plain + written * write_factor + read * read_factor) * rate_in
                   + entry.get("completion_tokens", 0) * rate_out) / 1e6
     return total
 
@@ -146,11 +199,9 @@ def cell_max_tokens(cell_dir: Path, legacy: bool = False) -> Optional[int]:
     ``args.max_tokens``, else None (not recorded)."""
     try:
         if legacy:
-            with open(cell_dir / "config.json") as f:
-                value = (json.load(f).get("args") or {}).get("max_tokens")
+            value = (read_json(cell_dir / "config.json").get("args") or {}).get("max_tokens")
             return int(value) if value is not None else None
-        with open(cell_dir / "scores_descriptions.json") as f:
-            prov = json.load(f).get("_provenance") or {}
+        prov = read_json(cell_dir / "scores_descriptions.json").get("_provenance") or {}
         value = prov.get("max_tokens")
         return int(value) if value is not None else TIER_EVAL_DEFAULT_MAX_TOKENS
     except (OSError, ValueError, TypeError, AttributeError):
@@ -184,8 +235,14 @@ def estimate_cost(n_entities: int, rate_in: float, rate_out: float) -> float:
             + n_entities * EST_OUT_PER_ENTITY * rate_out) / 1e6
 
 
-def pareto_frontier(points: List[Tuple[float, float]]) -> List[int]:
-    """Return indices of Pareto-optimal points (min cost, max quality)."""
+def pareto_frontier(points: List[Tuple[float, float]], hull: bool = True) -> List[int]:
+    """Indices of the frontier points ``(cost, quality)``, cheapest first: not dominated (min cost, max
+    quality) and, with ``hull`` (the default since 2026-11-03; Roger: "Only count points on the Pareto
+    frontier if they are on its convex hull"), on the upper convex hull.  Quality is 1/(1 - mean rho), as
+    every caller passes it; the hull is taken on mean rho = 1 - 1/quality against linear cost, the units of
+    an exchange rate (rho per $ per axis), so that a point under the chord of its neighbours, the best
+    choice at no exchange rate, is left off.  A point on the chord itself stays.  ``hull=False``: the
+    non-dominated points alone, the rule before that date."""
     indices = []
     for i, (cost_i, quality_i) in enumerate(points):
         dominated = False
@@ -197,13 +254,30 @@ def pareto_frontier(points: List[Tuple[float, float]]) -> List[int]:
                 break
         if not dominated:
             indices.append(i)
-    return sorted(indices, key=lambda i: points[i][0])
+    indices = sorted(indices, key=lambda i: points[i][0])
+    if not hull:
+        return indices
+
+    def xy(i: int) -> Tuple[float, float]:
+        cost, quality = points[i]
+        return cost, (1.0 - 1.0 / quality) if quality else -math.inf
+
+    kept: List[int] = []
+    for i in indices:
+        while len(kept) >= 2:
+            (xa, ya), (xb, yb), (xc, yc) = xy(kept[-2]), xy(kept[-1]), xy(i)
+            if (xb - xa) * (yc - ya) - (yb - ya) * (xc - xa) > 1e-15:    # b lies under the chord a-c
+                kept.pop()
+            else:
+                break
+        kept.append(i)
+    return kept
 
 
 def collect_tier_eval_data(
     tier_eval_dirs: List[Path],
     slot: int,
-    price_basis: str = "list",
+    price_basis: str = DEFAULT_PRICE_BASIS,
 ) -> Dict[str, List[dict]]:
     """
     Returns {model: [{rho, cost, cost_is_measured, axis_name}, ...]}
@@ -257,12 +331,10 @@ def rho_from_stored_scores(cell_dir: Path, axis_name: str, slot: int,
         return None
     from results_analysis.axis_judge_correlation import compute_correlations  # heavy; only when needed
 
-    with open(scores_path) as f:
-        sd = json.load(f)
+    sd = read_json(scores_path)
     scores = {k: v for k, v in sd.get("result", sd).items()
               if isinstance(v, (int, float)) and not isinstance(v, bool)}
-    with open(proj_path) as f:
-        pd_ = json.load(f)
+    pd_ = read_json(proj_path)
     projections = {int(s): v for s, v in pd_.get("result", pd_).items() if s.lstrip("-").isdigit()}
     poles = set(axis_name.split("_vs_", 1))
     corr = compute_correlations({mode: scores}, projections, [slot], poles)
@@ -275,15 +347,14 @@ def rho_from_stored_scores(cell_dir: Path, axis_name: str, slot: int,
 def collect_legacy_data(
     legacy_axis_dirs: List[Path],
     slot: int,
-    price_basis: str = "list",
+    price_basis: str = DEFAULT_PRICE_BASIS,
 ) -> Dict[str, List[dict]]:
     """
     Load gpt-4.1-mini and claude-sonnet-4 from the non-tier-eval axis dirs.
     These predate usage.json; costs are estimated at the real-time price
     (``list``, also used for ``recorded``: they were judged in real time) or
-    at half of it (``batch``).
+    at the model's own batch rate (``batch``).
     """
-    factor = 0.5 if price_basis == "batch" else 1.0
     per_model: Dict[str, List[dict]] = defaultdict(list)
 
     legacy_cells = [
@@ -291,7 +362,7 @@ def collect_legacy_data(
         # 1024), kept apart from any tier-eval cell of the same model (gpt-4.1-mini rejudged at
         # T=0 and max_tokens 200 on 2026-11-01 sits under <axis>_tier_eval/gpt-4.1-mini/).
         ("gpt-4.1-mini (May)", "gpt", GPT_MINI_RATE_IN, GPT_MINI_RATE_OUT),
-        ("claude-sonnet-4 (May)", "sonnet", SONNET4_RATE_IN, SONNET4_RATE_OUT),
+        ("claude-sonnet-4 (May)", "sonnet", SONNET_RATE_IN, SONNET_RATE_OUT),
     ]
 
     for axis_dir in legacy_axis_dirs:
@@ -308,7 +379,7 @@ def collect_legacy_data(
             if result is None:
                 continue
             rho, n = result
-            cost = estimate_cost(n, rin, rout) * factor
+            cost = estimate_cost(n, rin, rout) * price_factor(model.split(" (")[0], price_basis)
             per_model[model].append({
                 "rho": rho, "n": n, "cost": cost,
                 "cost_is_measured": False,
@@ -320,7 +391,8 @@ def collect_legacy_data(
 
 
 def rho_from_robustness(per_model: Dict[str, List[dict]], robustness_json: Path,
-                        variant: str = "s6_l25_raw") -> Dict[str, List[dict]]:
+                        variant: str = "s6_l25_raw",
+                        *, inputs: Optional[list] = None, policy: str = "warn") -> Dict[str, List[dict]]:
     """Replace every entry's rho and n with judge_tier_robustness.py's for ``variant``.
 
     The robustness tool recomputes rho from the stored scores and drops the nine
@@ -328,9 +400,10 @@ def rho_from_robustness(per_model: Dict[str, List[dict]], robustness_json: Path,
     judged a collision name's role description against the trait's cached
     projection; its s6_l25_raw values are therefore the corrected version of the
     cells' correlations.json.  An entry the JSON lacks is dropped with a note."""
-    with open(robustness_json) as f:
-        d = json.load(f)
-    r = d.get("result", d)
+    # load_and_register unwraps the envelope, checks its recorded inputs under ``policy``, and
+    # records the file as one of the figure's inputs.
+    r, _spec, _check = load_and_register(robustness_json, dep_key="robustness_json", inputs=inputs, policy=policy)
+    r = r.get("result", r)       # a JSON with no provenance block keeps its "result" wrapper
     rho, n = r["rho"], r.get("n", {})
     out: Dict[str, List[dict]] = defaultdict(list)
     for model, entries in per_model.items():
@@ -493,7 +566,8 @@ def place_labels(ax, points: Sequence[Tuple[float, float]], labels: Sequence[str
     never read as another point's); failing that, the least bad one.  A label
     may have several lines.  Call after the axes limits, scale and position
     are final.  ``leaders``: ``"far"`` draws a leader line only for a label
-    placed away from its point, ``"all"`` for every label."""
+    placed away from its point, ``"all"`` for every label.  A point whose label
+    is empty gets none but still keeps the others off it."""
     k = ax.figure.dpi / 72.0
     disp = ax.transData.transform(np.asarray(points, dtype=float))
     ab = ax.get_window_extent()
@@ -512,6 +586,8 @@ def place_labels(ax, points: Sequence[Tuple[float, float]], labels: Sequence[str
 
     placed: List[Tuple[float, float, float, float]] = []
     for i in sorted(range(len(labels)), key=lambda i: (not bold[i], -disp[i][1])):
+        if not labels[i]:
+            continue
         lines = labels[i].split("\n")
         w = (0.62 if bold[i] else 0.56) * fontsize * max(len(t) for t in lines) * k
         h = 1.1 * fontsize * k * len(lines)
@@ -545,14 +621,16 @@ def cost_ticks(lo: float, hi: float) -> List[float]:
 
 PRICE_BASIS_LABEL = {
     "list": "real-time list price",
-    "batch": "batch price (half of list)",
+    "batch": "real price: each judge's batch or Flex rate",
     "recorded": "as billed (mixed transports)",
 }
 
 
 def plot(agg: Dict[str, dict], slot: int, n_total_axes: int, output_path: Path,
-         excluded: Optional[Dict[str, dict]] = None, price_basis: str = "list",
-         rho_note: str = "", left_out: Sequence[str] = (), links: Sequence[Tuple[str, str]] = ()) -> None:
+         excluded: Optional[Dict[str, dict]] = None, price_basis: str = DEFAULT_PRICE_BASIS,
+         rho_note: str = "", left_out: Sequence[str] = (), links: Sequence[Tuple[str, str]] = (),
+         links_label: str = "same judge: old rubric → new rubric",
+         inputs: Optional[list] = None) -> None:
     fig, ax = plt.subplots(figsize=(11, 8))
 
     model_list = sorted(agg.items(), key=lambda kv: kv[1]["mean_cost"])
@@ -615,6 +693,8 @@ def plot(agg: Dict[str, dict], slot: int, n_total_axes: int, output_path: Path,
              f"[◆ = Pareto-optimal (bold label), ● = dominated]")
     if price_basis == "list":
         title += "\nCost at real-time list price; Flex and Batch are half price for every judge here"
+    elif price_basis == "batch":
+        title += "\nCost at each judge's batch or Flex price (half of list for every judge here)"
     if any(not d["cost_is_measured"] for d in agg.values()):
         title += "\nFilled = measured cost (usage.json)  Hollow = estimated (legacy tiers)"
     key = label_key(list(agg))
@@ -646,20 +726,19 @@ def plot(agg: Dict[str, dict], slot: int, n_total_axes: int, output_path: Path,
     if any(d["provider"] == "google" for d in agg.values()):
         provider_handles.insert(2, plt.Line2D([0], [0], marker="o", color="w", markerfacecolor=PROVIDER_COLOR["google"],
                                               markeredgecolor=PROVIDER_COLOR["google"], markersize=10, label="Google"))
+    if any(d["provider"] == "blend" for d in agg.values()):
+        provider_handles.insert(2, plt.Line2D([0], [0], marker="o", color="w", markerfacecolor=PROVIDER_COLOR["blend"],
+                                              markeredgecolor=PROVIDER_COLOR["blend"], markersize=10, label="Blend of judges"))
     if links:
-        provider_handles.append(plt.Line2D([0], [0], color="#555555", lw=1.1, alpha=0.75,
-                                           label="same judge: old rubric → new rubric"))
-    # Room for the labels of the lowest and highest points (a label pushed down by
-    # the collision rule used to land on the x-axis title), and the legend in the
-    # corner a cost/quality frontier leaves empty (high cost, high quality is
-    # rare; low cost, low quality is where cheap judges sit).
-    ax.legend(handles=provider_handles, loc="lower right", fontsize=9)
+        provider_handles.append(plt.Line2D([0], [0], color="#555555", lw=1.1, alpha=0.75, label=links_label))
+    # "best" looks at the point labels too: a fixed corner covered the label of whichever
+    # judge sat there (claude-haiku-4-5 at the lower right, 2026-11-02).
+    ax.legend(handles=provider_handles, loc="best", fontsize=9)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=150, bbox_inches="tight",
                 metadata=png_metadata(
                     title=f"Judge-tier Pareto, description judging ({n_total_axes} axes, slot {slot})",
-                    author="Claude",
-                    source_text=Path(__file__).read_text(),
+                    inputs=inputs,
                 ))
     plt.close(fig)
     print(f"Wrote {output_path}")
@@ -693,12 +772,12 @@ def main() -> None:
                         help="Plot only models judged on at least this many axes. Default: the "
                              "headline axis count (the most any model has), so every plotted "
                              "model covers the same axes; --min_axes 1 shows everything.")
-    parser.add_argument("--price_basis", choices=PRICE_BASES, default="list",
-                        help="How a point's cost is priced.  'list' (default): every cell recomputed "
-                             "from its token counts at the model's real-time price, whatever transport "
-                             "judged it (batch and Flex cells are billed at half price, so their recorded "
-                             "cost is not comparable with real-time cells); 'batch': the same at the "
-                             "batch price; 'recorded': usage.json's total_cost_usd as billed.")
+    parser.add_argument("--price_basis", choices=PRICE_BASES, default=DEFAULT_PRICE_BASIS,
+                        help="How a point's cost is priced.  'batch' (default since 2026-11-03, the real "
+                             "price): every cell recomputed from its token counts at the model's own batch "
+                             "or Flex rate, whatever transport judged it; 'list': the same at the real-time "
+                             "list price (the default before); 'recorded': usage.json's total_cost_usd as "
+                             "billed, which mixes transports.")
     parser.add_argument("--robustness_json", type=str, default=None,
                         help="judge_tier_robustness.json: take each cell's rho from it (variant "
                              "--robustness_variant) instead of the cell's correlations.json.  Its rho is "
@@ -716,6 +795,14 @@ def main() -> None:
     parser.add_argument("--links", nargs="+", default=[], metavar="OLD:NEW",
                         help="Pairs of cell names joined by an arrow, e.g. gpt-6-luna:gpt-6-luna@c5 (a judge's "
                              "old-rubric point to its new-rubric point).")
+    parser.add_argument("--links_label", default="same judge: old rubric → new rubric",
+                        help="What the arrows mean, for the legend.")
+    parser.add_argument("--axes_file", type=str, default=None,
+                        help="With --experiments_dir: only the axes this file lists "
+                             "(scripts/tier_eval_axes_20.tsv, for the 20-axis figures).")
+    parser.add_argument("--cache-policy", dest="cache_policy", choices=CACHE_POLICIES, default="warn",
+                        help="What to do when --robustness_json's recorded inputs have changed: strict | warn "
+                             "(default) | rebuild | off.")
     parser.add_argument("--output", type=str, required=True)
     args = parser.parse_args()
     links = []
@@ -727,6 +814,10 @@ def main() -> None:
     if args.experiments_dir:
         exp_dir = Path(args.experiments_dir)
         tier_eval_dirs = sorted(exp_dir.glob("*_tier_eval"))
+        if args.axes_file:
+            listed = {line.split()[0] for line in Path(args.axes_file).read_text().splitlines()
+                      if line.strip() and not line.startswith("#")}
+            tier_eval_dirs = [d for d in tier_eval_dirs if d.name[: -len("_tier_eval")] in listed]
     else:
         tier_eval_dirs = [Path(p) for p in args.tier_eval_dirs]
 
@@ -737,6 +828,7 @@ def main() -> None:
 
     print(f"Found {len(tier_eval_dirs)} tier_eval dirs", file=sys.stderr)
 
+    inputs: List[InputSpec] = [current_file_input("axes_file", Path(args.axes_file))] if args.axes_file else []
     per_model = collect_tier_eval_data(tier_eval_dirs, args.slot, args.price_basis)
 
     if args.legacy and not args.no_legacy:
@@ -773,7 +865,8 @@ def main() -> None:
             print(f"WARNING: --robustness_variant {args.robustness_variant} is not slot {args.slot}",
                   file=sys.stderr)
         per_model = rho_from_robustness({m: v for m, v in per_model.items() if m not in excluded_raw},
-                                        Path(args.robustness_json), args.robustness_variant)
+                                        Path(args.robustness_json), args.robustness_variant,
+                                        inputs=inputs, policy=args.cache_policy)
 
     if not per_model:
         print("ERROR: no data found at all.", file=sys.stderr)
@@ -799,8 +892,9 @@ def main() -> None:
         sys.exit(1)
     rho_note = (f"rho from {Path(args.robustness_json).name}, variant {args.robustness_variant} "
                 f"(collision names dropped on bare-keyed axes)") if args.robustness_json else ""
+    inputs.append(current_files_input("cell_files", sorted(READ_FILES)))
     plot(agg, args.slot, n_total, Path(args.output), excluded=excluded, price_basis=args.price_basis,
-         rho_note=rho_note, left_out=left_out, links=links)
+         rho_note=rho_note, left_out=left_out, links=links, links_label=args.links_label, inputs=inputs)
 
 
 if __name__ == "__main__":

@@ -1,8 +1,10 @@
 """Tests for ``assistant_axis.entity_id``.
 
-The 9 known content-bearing collision names (May 2026 corpus audit)
+The 11 known content-bearing collision names (nine from the May 2026
+corpus audit; ``specialist`` and ``parent`` joined in September 2026)
 are covered explicitly so a future regression to bare-name keys is
-caught by name.
+caught by name.  ``test_collision_regression.py`` checks the list
+against the stems actually on disk, so it cannot go stale silently.
 """
 import pytest
 
@@ -27,9 +29,11 @@ COLLISION_NAMES = [
     "cosmopolitan",
     "generalist",
     "pacifist",
+    "parent",
     "patient",
     "perfectionist",
     "romantic",
+    "specialist",
     "stoic",
 ]
 
@@ -365,7 +369,7 @@ class TestNormalizeToFileName:
         assert normalize_to_file_name("Patient") != "Patient"
 
     def test_collision_names_unchanged(self):
-        """The 9 collision names (Bug A) are all single-word lowercase
+        """The 11 collision names (Bug A) are all single-word lowercase
         already; normalise must not mangle them."""
         for name in COLLISION_NAMES:
             assert normalize_to_file_name(name) == name
@@ -445,7 +449,7 @@ class TestDisplayFormName:
             assert normalize_to_file_name(display) == file_form
 
     def test_collision_names_unchanged(self):
-        """All 9 collision names are single-word; display-form
+        """All 11 collision names are single-word; display-form
         rendering must not mangle them."""
         for name in COLLISION_NAMES:
             assert display_form_name(name) == name
@@ -693,6 +697,26 @@ class TestResolveRenamedStem:
         finally:
             clear_corpus_display_cache()
 
+    def test_kind_none_looks_in_both_kinds_traits_first(self, tmp_path: Path):
+        """A steering config's pole names carry no kind (housekeeping item 5 (a))."""
+        self._corpus(tmp_path, "traits", {"lazy": {"renamed_from": "slothful"},
+                                          "twice": {"renamed_from": "both"}})
+        self._corpus(tmp_path, "roles", {
+            "instrumentally_aligned_ai": {"renamed_from": "aligned_artificial_intelligence"},
+            "slothful": {}, "twice_role": {"renamed_from": "both"}})
+        try:
+            assert resolve_renamed_stem("aligned_artificial_intelligence", None, data_dir=tmp_path) \
+                == "instrumentally_aligned_ai"
+            # a file of either kind keeps its stem
+            assert resolve_renamed_stem("slothful", None, data_dir=tmp_path) == "slothful"
+            assert resolve_renamed_stem("lazy", None, data_dir=tmp_path) == "lazy"
+            # an old stem recorded by both kinds goes to the trait
+            assert resolve_renamed_stem("both", None, data_dir=tmp_path) == "twice"
+            assert resolve_renamed_stem("free text (HEXACO)", None, data_dir=tmp_path) \
+                == "free text (HEXACO)"
+        finally:
+            clear_corpus_display_cache()
+
     def test_kinds_do_not_leak_into_each_other(self, tmp_path: Path):
         self._corpus(tmp_path, "traits", {"aggressive": {"renamed_from": {"stem": "militant"}}})
         self._corpus(tmp_path, "roles", {"soldier": {}})
@@ -710,3 +734,226 @@ class TestResolveRenamedStem:
     def test_unknown_kind_raises(self, tmp_path: Path):
         with pytest.raises(ValueError):
             resolve_renamed_stem("calm", "axes", data_dir=tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# judge_label / judge_negative_label / judge_form_of_label (W19, 2026-10-09)
+# ---------------------------------------------------------------------------
+
+import re  # noqa: E402
+import unicodedata  # noqa: E402
+
+from assistant_axis.entity_id import (  # noqa: E402
+    JUDGE_LABEL_FORM,
+    STANDARD_SUFFIX_FORMS,
+    judge_form_of_label,
+    judge_form_of_negative_label,
+    judge_label,
+    judge_negative_label,
+)
+
+_SUFFIX = re.compile(r"\(([^()]*)\)\s*$")
+
+
+def _corpus_traits() -> dict:
+    tdir = default_data_dir() / "traits" / "instructions"
+    out = {p.stem: json.loads(p.read_text(encoding="utf-8")) for p in tdir.glob("*.json")}
+    assert len(out) > 100, f"corpus not found under {tdir}"
+    return out
+
+
+def _corpus_role_stems() -> list:
+    stems = [p.stem for p in (default_data_dir() / "roles" / "instructions").glob("*.json")]
+    assert len(stems) > 100
+    return stems
+
+
+def _capitalised_suffix(label: str):
+    m = _SUFFIX.search(label or "")
+    if m and m.group(1).strip()[:1].isupper():
+        return unicodedata.normalize("NFC", m.group(1).strip())
+    return None
+
+
+class TestJudgeFormOfLabel:
+    """The string-level suffix rewrite, and the table Roger left to the
+    main agent (2026-10-09)."""
+
+    def test_table_is_the_agreed_one(self):
+        assert STANDARD_SUFFIX_FORMS == {
+            "HEXACO": "HEXACO", "VALS": "VALS", "DISC": "DISC", "VARK": "VARK",
+            "Tönnies": "Tönnies",
+            "Big Five": "the Big Five", "MBTI": "the MBTI", "Enneagram": "the Enneagram",
+            "BFAS": "the BFAS", "IPIP-NEO": "the IPIP-NEO", "Tarot": "the Tarot",
+            "Dark Tetrad": "the Dark Tetrad", "Light Triad": "the Light Triad",
+            "Holland": "Holland's RIASEC", "Bartle": "Bartle's player types",
+            "Baumrind": "Baumrind's parenting styles", "Hall": "Edward Hall",
+            "Kohlberg": "Kohlberg's stages", "Allport": "Allport's religious orientation",
+            "Gelfand": "Gelfand's tight and loose cultures",
+            "Inglehart-Welzel": "the Inglehart-Welzel map",
+        }
+        assert JUDGE_LABEL_FORM == "judge-display-v1"
+
+    @pytest.mark.parametrize("label, expected", [
+        ("careless (HEXACO)", "careless (from HEXACO)"),
+        ("Organization (HEXACO)", "Organization (from HEXACO)"),
+        ("Intellect (BFAS)", "Intellect (from the BFAS)"),
+        ("open (Big Five)", "open (from the Big Five)"),
+        ("ENFJ (MBTI)", "ENFJ (from the MBTI)"),
+        ("achiever (VALS)", "achiever (from VALS)"),
+        ("artistic (Holland)", "artistic (from Holland's RIASEC)"),
+        ("high-context (Hall)", "high-context (from Edward Hall)"),
+        ("secular-rational (Inglehart-Welzel)", "secular-rational (from the Inglehart-Welzel map)"),
+        ("Gemeinschaft (Tönnies)", "Gemeinschaft (from Tönnies)"),
+        ("the fool (Tarot)", "the fool (from the Tarot)"),
+        ("non-careless (HEXACO)", "non-careless (from HEXACO)"),
+        # an unlisted standard takes the default form
+        ("cultural-capital (Bourdieu)", "cultural-capital (from Bourdieu)"),
+        # not a standard: lower-case suffix, or no suffix at all
+        ("humorous/serious (tentative, PC10)", "humorous/serious (tentative, PC10)"),
+        ("systems-thinker", "systems-thinker"),
+        ("devil's advocate", "devil's advocate"),
+        ("", ""),
+    ])
+    def test_rewrite(self, label, expected):
+        assert judge_form_of_label(label) == expected
+
+    def test_idempotent(self):
+        for label in ("careless (HEXACO)", "artistic (Holland)", "open (Big Five)", "plain"):
+            once = judge_form_of_label(label)
+            assert judge_form_of_label(once) == once
+
+    def test_decomposed_umlaut_finds_the_table_entry(self):
+        nfd = unicodedata.normalize("NFD", "Gemeinschaft (Tönnies)")
+        assert unicodedata.normalize("NFC", judge_form_of_label(nfd)) == "Gemeinschaft (from Tönnies)"
+
+
+class TestJudgeLabel:
+    """The judge display form of every corpus entity (whole corpus)."""
+
+    def test_examples(self):
+        assert judge_label("careless_hexaco") == "careless (from HEXACO)"
+        assert judge_label("careless_hexaco|T") == "careless (from HEXACO)"
+        assert judge_label("enfj_mbti", "traits") == "ENFJ (from the MBTI)"
+        assert judge_label("gemeinschaft_tonnies") == "Gemeinschaft (from Tönnies)"
+        assert judge_label("systems_thinker") == "systems-thinker"
+        assert judge_label("devils_advocate", "roles") == "devil's advocate"
+        assert judge_label("instrumentally_aligned_ai|R") == "instrumentally-aligned AI"
+        assert judge_label("coral_reef", "roles") == "coral reef"
+
+    def test_unknown_names_fall_back_to_the_mechanical_form(self):
+        # a renamed pole's old stem, a stem with no file: exactly as under v3
+        assert judge_label("aligned_artificial_intelligence") == "aligned artificial intelligence"
+        assert judge_label("careless_hexaco", "roles") == "careless hexaco"
+        assert judge_label("") == ""
+        # free text from a config is rewritten too
+        assert judge_label("careless (HEXACO)") == "careless (from HEXACO)"
+
+    def test_role_override_applies_without_a_file(self, tmp_path: Path):
+        try:
+            assert judge_label("devils_advocate", "roles", data_dir=tmp_path / "nope") == "devil's advocate"
+        finally:
+            clear_corpus_display_cache()
+
+    def test_every_trait_renders_from_its_label(self):
+        bad = []
+        for stem, doc in _corpus_traits().items():
+            label = doc["positive_label"]
+            got = judge_label(stem, "traits")
+            if got != judge_form_of_label(label) or "_" in got:
+                bad.append((stem, label, got))
+                continue
+            # capitals, hyphens and diacritics come from the label: the label
+            # minus its suffix is kept verbatim
+            m = _SUFFIX.search(label)
+            head = label[:m.start()].rstrip() if m and _capitalised_suffix(label) else label
+            if not got.startswith(head):
+                bad.append((stem, label, got))
+        assert bad == [], bad[:10]
+
+    def test_every_role_renders_like_the_role_generator(self):
+        from data_analysis.regenerate_role_instructions import role_display_name
+        bad = [(s, judge_label(s, "roles")) for s in _corpus_role_stems()
+               if judge_label(s, "roles") != judge_form_of_label(role_display_name(s))
+               or "_" in judge_label(s, "roles")]
+        assert bad == [], bad[:10]
+
+    def test_every_capitalised_suffix_in_the_corpus_is_in_the_table(self):
+        found = set()
+        for doc in _corpus_traits().values():
+            for key in ("positive_label", "negative_label"):
+                s = _capitalised_suffix(doc.get(key))
+                if s:
+                    found.add(s)
+        assert found, "expected the standards-derived traits"
+        assert found - set(STANDARD_SUFFIX_FORMS) == set()
+
+    def test_every_capitalised_suffix_in_the_live_queue_is_in_the_table(self):
+        """Entries not adopted or superseded may carry a suffix with the
+        default form (Bourdieu); everything else must be decided here."""
+        queue = json.loads((default_data_dir() / "seed_queue.json").read_text(encoding="utf-8"))
+        missing = {}
+        for e in queue["entries"]:
+            if e.get("status") in ("not_adopted", "superseded"):
+                continue
+            s = _capitalised_suffix(e.get("label"))
+            if s and s not in STANDARD_SUFFIX_FORMS:
+                missing.setdefault(s, []).append(e["stem"])
+        assert missing == {}, missing
+
+
+class TestJudgeNegativeLabel:
+    def test_examples(self):
+        assert judge_negative_label("careless_hexaco") == "conscientious (from HEXACO)"
+        assert judge_negative_label("enfj_mbti") == "non-ENFJ (from the MBTI)"
+        assert judge_negative_label("open_big_five|T") == "closed (from the Big Five)"
+
+    def test_roles_and_unknown_stems_raise(self):
+        with pytest.raises(KeyError):
+            judge_negative_label("devils_advocate|R")
+        with pytest.raises(KeyError):
+            judge_negative_label("no_such_trait_at_all")
+
+    def test_string_level_rules(self, tmp_path: Path):
+        tdir = tmp_path / "traits" / "instructions"; tdir.mkdir(parents=True)
+        (tdir / "systems_thinker.json").write_text(json.dumps(
+            {"positive_label": "systems-thinker", "negative_label": "non-systems-thinker"}))
+        try:
+            # 1. names a corpus trait: that trait's own label, whatever the spelling
+            assert judge_form_of_negative_label("systems thinker", "x", data_dir=tmp_path) == "systems-thinker"
+            # 2. the trait's own non-X placeholder
+            assert judge_form_of_negative_label("non-careless (HEXACO)", "careless (HEXACO)",
+                                                data_dir=tmp_path) == "non-careless (from HEXACO)"
+            # 3. anything else: the stored string (suffix rewrite only)
+            assert judge_form_of_negative_label("academic", "experiential", data_dir=tmp_path) == "academic"
+            assert judge_form_of_negative_label("", "x", data_dir=tmp_path) == ""
+        finally:
+            clear_corpus_display_cache()
+
+    def test_every_trait_renders(self):
+        traits = _corpus_traits()
+        bad = []
+        for stem, doc in traits.items():
+            got = judge_negative_label(stem)
+            neg = doc["negative_label"]
+            partner = normalize_to_file_name(neg)
+            if "_" in got:
+                bad.append((stem, got))
+            elif partner in traits:
+                if got != judge_label(partner, "traits"):
+                    bad.append((stem, got))
+            elif neg == f"non-{doc['positive_label']}":
+                if got != "non-" + judge_label(stem, "traits"):
+                    bad.append((stem, got))
+            elif got != judge_form_of_label(neg):
+                bad.append((stem, got))
+        assert bad == [], bad[:10]
+
+
+def test_judge_helpers_are_exported():
+    import importlib
+    import sys
+    importlib.import_module("assistant_axis.entity_id")
+    mod = sys.modules["assistant_axis.entity_id"]
+    assert {"STANDARD_SUFFIX_FORMS", "JUDGE_LABEL_FORM", "judge_form_of_label", "judge_label",
+            "judge_negative_label", "judge_form_of_negative_label"} <= set(mod.__all__)

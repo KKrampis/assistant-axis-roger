@@ -611,3 +611,144 @@ def test_load_validated_json_subtree_input(tmp_path: Path) -> None:
     payload, check = prov.load_validated_json(out, policy="strict")
     assert payload == {"x": 1}
     assert check.ok
+
+
+# ---------------------------------------------------------------------------
+# Corpus content hashes (AGENT_NOTES housekeeping item 3, 2026-10-10)
+# ---------------------------------------------------------------------------
+
+_FIELDS = ("positive_label", "description", "instruction[*].pos")
+
+
+def _corpus(root: Path) -> list:
+    """Two traits and a role; returns every JSON path (the metadata set)."""
+    t = root / "traits" / "instructions"
+    r = root / "roles" / "instructions"
+    t.mkdir(parents=True)
+    r.mkdir(parents=True)
+    (t / "lazy.json").write_text(json.dumps({
+        "positive_label": "lazy", "negative_label": "industrious",
+        "description": "This means doing as little as possible.",
+        "instruction": [{"pos": "Rest.", "neg": "Work."}],
+        "questions": ["q1"], "arrangement": {"kind": "pair", "members": ["industrious", "lazy"]}}))
+    (t / "industrious.json").write_text(json.dumps({
+        "positive_label": "industrious", "negative_label": "lazy",
+        "description": "This means working hard.",
+        "instruction": [{"pos": "Work.", "neg": "Rest."}]}))
+    (r / "mechanic.json").write_text(json.dumps({
+        "description": "A mechanic fixes engines.", "instruction": [{"pos": "Fix."}]}))
+    return sorted(t.glob("*.json")) + sorted(r.glob("*.json"))
+
+
+def _rewrite(path: Path, **changes) -> None:
+    """Edit a JSON file and move its mtime forward, so the metadata
+    fingerprint drifts even within the same second."""
+    doc = json.loads(path.read_text())
+    doc.update(changes)
+    path.write_text(json.dumps(doc))
+    st = os.stat(path)
+    os.utime(path, (st.st_atime + 10, st.st_mtime + 10))
+
+
+def _corpus_spec(root: Path, paths: list, entities=None) -> prov.InputSpec:
+    entities = entities or [("traits", "lazy"), ("traits", "industrious"), ("roles", "mechanic")]
+    return prov.current_corpus_files_input(
+        "corpus_instructions", paths, root=root, entities=entities, fields=_FIELDS)
+
+
+def test_corpus_content_keys_entities_by_id_and_hashes_fields(tmp_path: Path) -> None:
+    paths = _corpus(tmp_path)
+    spec = _corpus_spec(tmp_path, paths)
+    c = spec.content
+    assert c["version"] == prov.CORPUS_CONTENT_VERSION and c["fields"] == list(_FIELDS)
+    assert list(c["entities"]) == ["industrious|T", "lazy|T", "mechanic|R"]
+    assert all(isinstance(h, str) and len(h) == 16 for h in c["entities"].values())
+    assert spec.kind == "multi" and len(spec.member_paths) == 3
+    assert prov.validate_recorded([spec]).statuses[0].status == "ok"
+
+
+def test_metadata_only_edit_is_equivalent_content(tmp_path: Path) -> None:
+    """The case the change is for: tags, arrangement, questions, a neg
+    instruction, generator.  Metadata drifts; the read fields do not."""
+    paths = _corpus(tmp_path)
+    spec = _corpus_spec(tmp_path, paths)
+    lazy = tmp_path / "traits" / "instructions" / "lazy.json"
+    _rewrite(lazy, tags=["x"], questions=["q1", "q2"], generator={"model": "m"},
+             instruction=[{"pos": "Rest.", "neg": "Toil hard."}])
+    chk = prov.validate_recorded([spec])
+    st = chk.statuses[0]
+    assert st.status == "equivalent_content" and chk.ok
+    assert "3 entities' positive_label/description/instruction[*].pos are unchanged" in st.detail
+    assert chk.equivalent() == [st]
+
+
+def test_a_read_field_edit_is_drift_naming_the_entity(tmp_path: Path) -> None:
+    paths = _corpus(tmp_path)
+    spec = _corpus_spec(tmp_path, paths)
+    _rewrite(tmp_path / "traits" / "instructions" / "lazy.json",
+             description="This means avoiding effort.")
+    chk = prov.validate_recorded([spec])
+    st = chk.statuses[0]
+    assert st.status == "drift" and not chk.ok
+    assert "1 of 3 entities changed in positive_label/description/instruction[*].pos: lazy|T" in st.detail
+    # the current block is attached, so a report can show the new hashes
+    assert st.current.content["entities"]["lazy|T"] != spec.content["entities"]["lazy|T"]
+
+
+def test_label_and_pos_edits_count_and_a_deleted_file_is_drift(tmp_path: Path) -> None:
+    paths = _corpus(tmp_path)
+    spec = _corpus_spec(tmp_path, paths)
+    _rewrite(tmp_path / "traits" / "instructions" / "industrious.json",
+             positive_label="Industrious")
+    _rewrite(tmp_path / "roles" / "instructions" / "mechanic.json",
+             instruction=[{"pos": "Repair."}])
+    st = prov.validate_recorded([spec]).statuses[0]
+    assert st.status == "drift" and "2 of 3 entities changed" in st.detail
+    (tmp_path / "traits" / "instructions" / "lazy.json").unlink()
+    st = prov.validate_recorded([spec]).statuses[0]
+    assert st.status == "drift" and "(1 no longer have a file)" in st.detail
+
+
+def test_an_entity_the_consumer_does_not_read_is_not_hashed(tmp_path: Path) -> None:
+    """The entity set is what the consumer opens (load_corpus: a vector and a
+    file); a corpus file with no vector can change freely."""
+    paths = _corpus(tmp_path)
+    spec = _corpus_spec(tmp_path, paths, entities=[("traits", "lazy")])
+    _rewrite(tmp_path / "traits" / "instructions" / "industrious.json",
+             description="This means grinding.")
+    st = prov.validate_recorded([spec]).statuses[0]
+    assert st.status == "equivalent_content"
+
+
+def test_a_record_without_content_validates_as_before(tmp_path: Path) -> None:
+    """Records written before 2026-10-10 carry no content block: metadata
+    drift stays drift, so nothing is reclassified by the change itself."""
+    paths = _corpus(tmp_path)
+    spec = prov.current_files_input("corpus_instructions", paths)
+    assert spec.content is None
+    _rewrite(tmp_path / "traits" / "instructions" / "lazy.json", tags=["x"])
+    assert prov.validate_recorded([spec]).statuses[0].status == "drift"
+
+
+def test_content_round_trips_through_json_and_envelopes(tmp_path: Path) -> None:
+    paths = _corpus(tmp_path)
+    spec = _corpus_spec(tmp_path, paths)
+    blobs = prov.inputs_to_jsonable([spec])
+    assert "content" in blobs[0]
+    assert prov.inputs_from_jsonable(json.loads(json.dumps(blobs))) == [spec]
+    assert "content" not in prov.inputs_to_jsonable([_spec("f")])[0]
+    _rewrite(tmp_path / "roles" / "instructions" / "mechanic.json", tags=["garage"])
+    out = tmp_path / "cache.json"
+    out.write_text(json.dumps(_envelope({"x": 1}, [spec])))
+    payload, check = prov.load_validated_json(out, policy="strict")
+    assert payload == {"x": 1} and check.ok
+
+
+def test_an_unknown_content_version_is_drift(tmp_path: Path) -> None:
+    paths = _corpus(tmp_path)
+    spec = _corpus_spec(tmp_path, paths)
+    import dataclasses
+    spec = dataclasses.replace(spec, content={**spec.content, "version": "corpus_fields_v99"})
+    _rewrite(tmp_path / "traits" / "instructions" / "lazy.json", tags=["x"])
+    st = prov.validate_recorded([spec]).statuses[0]
+    assert st.status == "drift" and "cannot compare" in st.detail

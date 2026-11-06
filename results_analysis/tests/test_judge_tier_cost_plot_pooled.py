@@ -12,9 +12,11 @@ import sys
 from pathlib import Path
 
 import matplotlib
+import pytest
 
 matplotlib.use("Agg")
 
+from results_analysis import judge_tier_cost_plot_pooled as ptp  # noqa: E402
 from results_analysis.judge_tier_cost_plot_pooled import (  # noqa: E402
     aggregate,
     collect_tier_eval_data,
@@ -89,6 +91,19 @@ def test_price_basis_puts_batch_and_realtime_cells_on_one_footing(tmp_path: Path
     assert load_measured_cost(batched, "recorded") == 0.28              # as billed
     flex = _usage(tmp_path / "f.json", "gpt-4.1-mini:flex", "gpt-4.1-mini:flex", 1_000_000, 100_000, 0.28)
     assert abs(load_measured_cost(flex, "list") - 0.56) < 1e-9
+
+
+def test_the_default_is_the_real_price_each_model_at_its_own_discount(tmp_path: Path) -> None:
+    """Since 2026-11-03 (Roger: "computing Pareto at real price, in case someone offered a bigger
+    or smaller discount for batch"): each model at its own batch or Flex rate, list where it has none."""
+    gemini = _usage(tmp_path / "g.json", "gemini-3.1-flash-lite", "gemini-3.1-flash-lite", 1_000_000, 100_000, 0.40)
+    assert abs(load_measured_cost(gemini) - 0.20) < 1e-9               # judged in real time, priced at its batch rate
+    qwen = _usage(tmp_path / "q.json", "qwen3-32b", "qwen3-32b", 1_000_000, 1_000_000, 0.36)
+    assert abs(load_measured_cost(qwen) - 0.8 * 0.36) < 1e-9           # DeepInfra's batch: 20% off, not 50%
+    no_batch = _usage(tmp_path / "n.json", "qwen3-8b-base", "qwen3-8b-base", 1_000_000, 0, 0.0)
+    assert load_measured_cost(no_batch) == pytest.approx(load_measured_cost(no_batch, "list"))
+    assert ptp.price_factor("claude-sonnet-4", "batch") == 0.5 and ptp.price_factor("claude-sonnet-4", "list") == 1.0
+    assert ptp.price_factor("qwen3-8b-base", "batch") == 1.0 and ptp.price_factor("mystery-model", "batch") == 1.0
 
 
 def test_price_basis_falls_back_to_recorded_for_an_unpriced_model(tmp_path: Path, capsys) -> None:
@@ -210,3 +225,49 @@ def test_include_models_is_an_allow_list(tmp_path: Path) -> None:
     assert r.returncode == 0, r.stderr
     agg = r.stderr.split("Aggregated results")[1]
     assert "full" in agg and "partial" not in agg and "--include_models nosuch: no such cell" in r.stderr
+
+
+def test_place_labels_skips_an_empty_label_but_keeps_its_point_as_an_obstacle():
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from results_analysis.judge_tier_cost_plot_pooled import place_labels
+    fig, ax = plt.subplots()
+    ax.set_xlim(0, 10); ax.set_ylim(0, 10)
+    place_labels(ax, [(5.4, 5), (5, 5)], ["", "seen"], [False, False])
+    assert [t.get_text() for t in ax.texts] == ["seen"]
+    assert tuple(ax.texts[0].get_position()) != (7, 0)            # the first choice, to the right, would cover the empty point
+    plt.close(fig)
+
+
+def test_the_frontier_keeps_only_points_on_its_convex_hull() -> None:
+    # (cost, quality = 1/(1 - rho)); the hull is taken on rho against linear cost
+    q = lambda rho: 1 / (1 - rho)
+    pts = [(0.0095, q(0.708)),     # 0: cheapest, a hull end
+           (0.0101, q(0.721)),     # 1: on the hull
+           (0.0190, q(0.735)),     # 2: not dominated, but under the chord 1-3 (0.7455 there): off (Roger, 2026-11-03)
+           (0.0201, q(0.7485)),    # 3: on the hull
+           (0.0391, q(0.759)),     # 4: on the hull
+           (0.0300, q(0.740)),     # 5: dominated by 3
+           (0.0587, q(0.7666)),    # 6: on the hull
+           (0.0782, q(0.7666))]    # 7: dominated by 6 (same rho, dearer)
+    assert ptp.pareto_frontier(pts) == [0, 1, 3, 4, 6]
+    assert ptp.pareto_frontier(pts, hull=False) == [0, 1, 2, 3, 4, 6]
+    # a point exactly on the chord of its neighbours stays
+    line = [(0.01, q(0.70)), (0.02, q(0.72)), (0.03, q(0.74))]
+    assert ptp.pareto_frontier(line) == [0, 1, 2]
+
+
+def test_measured_cost_prices_cache_tokens_as_billed(tmp_path: Path) -> None:
+    """A cached-prefix cell (2026-11-04): reads at a tenth of the input rate, writes at 1.25 times."""
+    from results_analysis.judge_tier_cost_plot_pooled import load_measured_cost
+    u = tmp_path / "usage.json"
+    u.write_text(json.dumps({"total_cost_usd": 0.2758, "per_model": {"gpt-5.6-luna:flex": {
+        "model": "gpt-5.6-luna:flex", "prompt_tokens": 11_645_195, "cache_read_tokens": 11_174_972,
+        "completion_tokens": 195_087}}}))
+    plain = 11_645_195 - 11_174_972
+    want = ((plain + 11_174_972 * 0.1) * 0.10 + 195_087 * 0.60) / 1e6
+    assert load_measured_cost(u, "batch") == pytest.approx(want) and abs(want - 0.2758) < 0.001
+    u.write_text(json.dumps({"per_model": {"gpt-5.6-luna:flex": {"model": "gpt-5.6-luna:flex", "prompt_tokens": 1_000_000,
+                                                                 "cache_write_tokens": 1_000_000, "completion_tokens": 0}}}))
+    assert load_measured_cost(u, "batch") == pytest.approx(1.25 * 0.10)

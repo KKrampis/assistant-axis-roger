@@ -1,10 +1,12 @@
 # Judge-tier evaluation: what changed on 2026-11-01, and why
 
 For Konstantinos and the Claude sessions working with him.  Roger and Claude
-made these changes on 2026-11-01, starting from `personas-konstantinos` at
+made these changes on 2026-11-01 and 02, starting from `personas-konstantinos` at
 c7743467, and merged your later commits (9b3d6a5c, ccf7bbb3) back in.  This
 file explains what the pull request contains, the decisions behind it, and how
-to carry on from here.  The per-plot notes hold the full numbers:
+to carry on from here.  Section 3d says where the method stood on 2 November, and section 3e
+what changed on 3 and 4 November (instruction judging, balanced pole order, Jev as a fourth
+judge, response judging).  The per-plot notes hold the full numbers:
 [`pareto_pooled_61axes_notes.md`](../../roger/axis_judge_experiments/pareto_pooled_61axes_notes.md)
 and
 [`pareto_pooled_20axes_notes.md`](../../roger/axis_judge_experiments/pareto_pooled_20axes_notes.md).
@@ -152,9 +154,13 @@ recorded token counts to the cent at the corrected price.  The Sol cells'
 `usage.json` still records cost at the old price ($18.36 recorded, $12.51
 billed); the plots recompute it.
 
-Prompt caching does not apply to this task.  The part of each prompt shared
+Prompt caching cannot lower this task's costs.  The part of each prompt shared
 across an axis is 244 tokens, below every judge's minimum (OpenAI 1,024;
-Anthropic 512 to 4,096).
+Anthropic 512 to 4,096), so nothing could be read back.  It can raise them:
+GPT-5.6 and later write any prompt of 1,024 tokens or more to the cache by
+default, at 1.25x the input rate.  Single-entity prompts are far below that;
+batched prompts at N=20 are not (section 3c), so the tools turn caching off
+since 2026-11-02.
 
 ### 2.6 How ρ is computed for the plots
 
@@ -280,6 +286,172 @@ time (eight, with an OS download in the background, dropped every connection
 at once), and give batched replies room (`--max_tokens 1500` for Haiku 5.5,
 which writes about 60 tokens per entity).
 
+## 3c. 2026-11-02: tuning the batched method
+
+The method in 3b used two passes at ten entities per call because that is where the
+tuning stopped, not because it had been tested.  A grid on the 30 development axes then
+varied one thing at a time for GPT-5.6 Luna, GPT-6 Luna and Haiku 5.5: passes (1 to 4),
+entities per call N (5, 7, 10, 15, 20) and reasoning effort (none, low, medium).
+
+**Use N=20, two passes, no reasoning.**
+
+- **N=20** costs about 11% less than N=10 with prompt caching off (see below) and is no
+  worse.  On all 61 axes it gains
+  +0.0072 [+0.0032, +0.0111] for Luna, +0.0036 [-0.0001, +0.0073] for GPT-6 Luna and
+  -0.0001 [-0.0033, +0.0030] for Haiku (95% bootstrap over axes).  N=30 is untested.
+- **More passes** help with diminishing returns: the third adds about 0.009, the fourth
+  about 0.004.
+- **Reasoning** costs a third to 70% more with no gain distinguishable from zero.
+- **A second judge beats more passes of the first.**  Luna + Haiku, two passes each at
+  N=20, beats Luna alone by +0.0119 [+0.0047, +0.0177] on all 61 axes and +0.0115 [+0.0040,
+  +0.0187] on the 31 held out of the tuning.  GPT-6 Luna adds nothing to Luna.
+
+| 61 axes, slot 6, layer 25, raw | ρ | $/axis at list price |
+|---|---|---|
+| GPT-6 Luna, N=20, 2 passes | 0.712 | $0.019 |
+| GPT-5.6 Luna, N=20, 2 passes | 0.732 | $0.042 |
+| GPT-5.6 Luna + Haiku 5.5, N=20, 2 passes each | 0.744 | $0.084 |
+
+These three are the frontier in 12 of 12 projection variants.  GPT-5.6 Terra (0.731 at
+$0.44) is now dominated.  The winners were chosen on the 30 development axes and then run on
+the 31 held-out ones.  Flex and Batch prices are half the list prices shown; the grid and
+the held-out check cost $18.77 as billed.
+
+**These N=20 cells ran with OpenAI's prompt caching on, the default**, and 93% of their prompts
+pass its 1,024-token minimum.  Calculated from the logged tokens, the write premium takes Luna
+from $0.0423 to $0.0452 an axis at list and GPT-6 Luna from $0.0189 to $0.0204, about $0.13 in
+all at Flex prices, which neither `usage.json` nor these tables show.  With caching on, N=15
+($0.0441 and $0.0197) is slightly cheaper than N=20; the comparison above holds with it off.
+Every OpenAI send on this branch has turned it off since 2026-11-02: in a live check of both
+Lunas, a 1,355-token prompt wrote about 1,350 tokens by default and none with the field.  Haiku
+5.5 is not affected, since Anthropic caches only when asked.
+
+Plots: [`pareto_pooled_61axes_grid.png`](../../roger/axis_judge_experiments/pareto_pooled_61axes_grid.png),
+[`judge_tier_grid_dev30.png`](../../roger/axis_judge_experiments/judge_tier_grid_dev30/judge_tier_grid_dev30.png),
+[`judge_tier_robustness_61axes_grid.png`](../../roger/axis_judge_experiments/judge_tier_robustness_61axes_grid.png).
+Full tables, caveats and commands: update 3 of
+[`pareto_pooled_61axes_notes.md`](../../roger/axis_judge_experiments/pareto_pooled_61axes_notes.md).
+
+**The whole grid under the 12 projection variants** (30 development axes only, the only axes
+that have it):
+[`batch size`](../../roger/axis_judge_experiments/judge_tier_grid_dev30/judge_tier_grid_12way_batch_size.png),
+[`passes`](../../roger/axis_judge_experiments/judge_tier_grid_dev30/judge_tier_grid_12way_passes.png),
+[`reasoning`](../../roger/axis_judge_experiments/judge_tier_grid_dev30/judge_tier_grid_12way_reasoning.png),
+[`whole grid`](../../roger/axis_judge_experiments/judge_tier_grid_dev30/judge_tier_grid_12way_all.png).
+Four settings are on the whole grid's frontier in all 12: GPT-6 Luna with one pass at N=10
+($0.011) and at N=20 ($0.019), Luna at N=20 ($0.042) and Luna + Haiku at N=20 ($0.084).  No
+reasoning arm, no four-pass arm and no two-pass arm at N of 10 or less is on it in any variant.
+
+**Gemini is not on the frontier.**  `gemini-3.1-flash-lite` at N=20 and two passes scores 0.687
+at $0.068 on the 30 development axes, level with Haiku (0.684 at $0.042) at 60% more;
+`gemini-3.5-flash-lite` scores 0.653 at $0.108.  As Luna's second opinion, 3.1 gives 0.714 at
+$0.110 against Haiku's 0.716 at $0.084.  Neither was run on the held-out axes.
+`gemini-3.5-flash-lite` is out of the running (Roger, 2026-11-02).  `gemini-3.1-flash-lite` has
+an earliest shutdown date of 2027-05-07 on
+[Google's deprecations page](https://ai.google.dev/gemini-api/docs/deprecations), which names
+3.5 as its replacement.
+
+## 3d. 2026-11-02, evening: Gemini's grid, the decision, and the port to production
+
+**The decision (Roger):** N=20, two passes, no reasoning.  The default judges are GPT-5.6
+Luna and Haiku 5.5, blended; Gemini 3.1 Flash-Lite stays a supported third judge, and 3.5 is
+out of the running.  Two judges are the default (Roger, the same day): the two-model ensemble was
+found significantly better than either model alone, while three models bring three pairs and a trio
+to evaluate, so the default stays close to what was being done until a third judge is proven.  The
+default is one line in [`judge_descriptions.py`](../../results_analysis/judge_descriptions.py), and
+May 2027 for 3.1 is not a concern to him.
+
+**Gemini 3.1 on the full grid** (30 development axes, $21.09 at list), change in ρ from
+each judge's own N=10, two passes, no reasoning:
+
+| | GPT-5.6 Luna | GPT-6 Luna | Haiku 5.5 | Gemini 3.1 |
+|---|---:|---:|---:|---:|
+| N=5 | −0.005 | −0.006 | −0.008 | −0.008 |
+| N=20 | +0.006 | +0.004 | −0.001 | +0.005 |
+| 1 pass | −0.023 | −0.027 | −0.022 | −0.028 |
+| 3 passes | +0.010 | +0.009 | +0.009 | +0.009 |
+| low reasoning | +0.004 | −0.003 | +0.005 | −0.010 |
+| medium reasoning | +0.002 | −0.003 | +0.005 | −0.006 |
+| medium reasoning, cost | ×1.66 | ×1.70 | ×1.58 | ×3.37 |
+
+Batch size and passes act the same.  Reasoning hurts Gemini (low: [−0.015, −0.005]) and medium
+is dear.  N=20 and 1 and 3 passes are on Gemini's own frontier in 12 of 12 variants, N=5 and N=7
+never: [`judge_tier_grid_shapes.png`](../../roger/axis_judge_experiments/judge_tier_grid_dev30/judge_tier_grid_shapes.png),
+[`judge_tier_grid_own_frontier.png`](../../roger/axis_judge_experiments/judge_tier_grid_dev30/judge_tier_grid_own_frontier.png).
+
+**Ensemble size** (N=20, two passes each): Luna 0.704, Luna + Haiku 0.716 (+0.012 [−0.000, +0.022]),
+with Gemini 0.720 (+0.004 [−0.001, +0.010], ahead in 9 of 12 variants).  A third pass of Luna and
+Haiku at N=10 gains as much, +0.005 [+0.001, +0.009], for $0.143 against $0.152.  3.1 beats 3.5 by +0.034 [+0.019, +0.051], ahead
+in 12 of 12 variants, for less money.
+
+**What the production audit found.**  `judge.py` and this tool sent byte-identical bodies, but
+production's axis judge had no batched rubric, sent T=0 and no reasoning setting, and turned the HTTP
+400 Luna and Haiku 5.5 answer into None for every entity.  So the tool moved to production on top of
+`judge.py` as the one request layer, which also gave step 3 the Flex limits and the out-of-credits
+stop.  Double-checked: 141,719 of 141,719 recorded prompts rebuild byte-for-byte with
+`--name_format mechanical`, 49,668 of 49,668 groups at N other than 10 reproduce from their seed, the
+wire bodies match on all five paths including Gemini, and a real run through all three judges works
+end to end.
+
+**Two faults found on the way.**  A failed call used to finish its cell: an outage left eight empty
+cells marked done, which the averaging took in (now `judge.FAILED`, the cell stays open, and averaging
+refuses a short source).  And Luna sometimes writes `SCORE: thirty-five`: 978 ratings of 1.4 million,
+now parsed and filled into the cells from their logs, which moves no mean ρ in the third decimal
+except where the tables above were rebuilt.
+
+## 3e. 2026-11-03 and 04: instruction judging, balanced pole order, Jev, and responses
+
+Shorter here; each item links to the full account.
+
+- **Instruction judging (2026-11-03).**  Every judge judges each of an entity's five instructions,
+  one instruction per entity per call (`i1_p0`), 20 entities a call:
+  [`judge_instruction_grid.py`](../../scripts/judge_instruction_grid.py) `--design rounds`.  Roger's
+  rule, against choosing among some twenty arms a few thousandths apart: one pass of every model.
+  Luna + Haiku + Gemini at 1x scored 0.777 at $0.178 an axis, against Luna alone at 0.767
+  ([`results_analysis/README.md`](../../results_analysis/README.md) § "Instruction judging: the
+  settled method").  The same rule put Gemini into description judging: the trio at 2x, 0.752 at
+  $0.076.
+- **Prices and the frontier.**  Cost is now the price actually paid: each judge's Flex or Batch
+  rate, with cached tokens priced.  Gemini runs through its Batch API
+  ([`gemini_batch.py`](../../assistant_axis/gemini_batch.py)).  A point is on the Pareto frontier
+  only when it is on the upper convex hull of mean ρ against cost.
+- **Pole order balanced (2026-11-04, Roger's rule).**  Every axis prompt names one pole first, and
+  the order matters: Luna's repeats in the same order agree more than in opposite orders, and on
+  axes with a morally good pole Luna scores better with that pole high.  So no judging runs in one
+  fixed order any more.  Descriptions take one pass each way, instructions follow Roger's table
+  (`judge_tier_cost_eval.INSTRUCTION_DIRECTIONS`), and responses take a coin per call.  **Scores made
+  before 2026-11-04 are in the pair list's order**, which favoured the 18 moral axes by about
+  +0.03 ρ on descriptions.  Account: § 4c of
+  [`response_judging_plan.md`](./response_judging_plan.md).
+- **Jev (TypeSafe AI) as a fourth judge (2026-11-04).**  Batched, 160 entities a request, one
+  yes/no-probability question per entity ("nearer the second end than most of the other
+  entries?"), at $0.042 per million input tokens with output free.  Alone it scores above every
+  other judge (descriptions 0.745 against Luna's 0.709 at one pass): [`jev_judging.md`](./jev_judging.md).  The drivers request
+  the pinned version, `jev-1.14.0`, and stop if any answer comes from another version.  **The standard since then, in both modes: Luna + Haiku +
+  Gemini + Jev, two passes each, one each way, weighted 4 : 3 : 3 : 12.**  Descriptions: 0.766 at
+  $0.084 an axis; instructions: 0.789 at $0.398.  **Jev's weight is chosen for resilience, not
+  fitted to the mean.**  The mean-ρ fit gave 24, which made the blend 68% Jev in effect, ranking
+  entities as Jev alone does (0.99); Roger: "That's not an ensemble, that's an addendum".  Jev's
+  bad axes are one class, the style axes (precise vs vague −0.105 against the trio in both
+  modes), and the per-axis gaps are fat-tailed, so 12, the weight with the smallest worst-axis
+  shortfall (0.026 and 0.036, against 0.043 and 0.048 at 24), replaced it for a mean ρ within
+  noise; dropping each entity's outlying score, which Roger also asked about, does worse
+  ([`jev_judging.md`](./jev_judging.md) § "Jev's weight: 12, for resilience",
+  [`jev_weight_resilience.py`](../../scripts/jev_weight_resilience.py)).  Luna + Haiku + Jev at
+  2x is within 0.0005 of the four in both modes, for about 60% of the cost; the figures are
+  [`judge_description_12way.png`](../../roger/axis_judge_experiments/instruction_judging_12way/judge_description_12way.png)
+  and
+  [`judge_instruction_12way.png`](../../roger/axis_judge_experiments/instruction_judging_12way/judge_instruction_12way.png),
+  with [notes](../../roger/axis_judge_experiments/instruction_judging_12way/notes.md).
+- **Response judging** (in progress, 12 axes): the batched method with a cached prefix, what
+  share of the responses to judge, and the cost Pareto:
+  [`response_judging_plan.md`](./response_judging_plan.md) and
+  [`judge_response_pareto.png`](../../roger/axis_judge_experiments/response_pareto/judge_response_pareto.png).
+  Its hollow extrapolated points (1/3 and all of the responses) are unreliable.  The round-robin
+  ensembles' extrapolated segments rise more steeply than their measured curves, and the 1.86
+  correction was fitted on Luna alone.  The measured points, from 1/45 to 1/9 of the responses,
+  are sound.
+
 ## 4. Open questions
 
 - **Was gpt-4.1-mini helped by the vectors?**  No, as far as the step-3
@@ -296,9 +468,8 @@ which writes about 60 tokens per entity).
 - **The 20-axis set is selected:** 18 of its axes were the highest-ρ axes of
   an earlier sweep judged by gpt-4.1-mini and Sonnet.  The 61-axis set is
   every axis with cached projections.
-- **Repeat samples.**  Most judges ran once per item at T=1.  Averaging three
-  samples could lift the cheap judges; Roger wants to try it once the
-  shortlist is small.
+- **Repeat samples.**  Answered by 3c: passes in fresh random batch orders are the
+  repeat samples, and two at N=20 is the setting to use.
 - **Other judging tasks.**  This measures description judging only, not
   instruction or response judging, which have different prompts, token mixes
   and caching behaviour.

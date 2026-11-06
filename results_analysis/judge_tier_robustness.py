@@ -162,9 +162,10 @@ from assistant_axis import entity_id, json_metadata, png_metadata  # noqa: E402
 from assistant_axis.entity_id import parse_entity_id  # noqa: E402
 from assistant_axis.judge_loaders import migrate_v1_static_scores  # noqa: E402
 from assistant_axis.judge_pricing import (  # noqa: E402
-    GPT_MINI_RATE_IN, GPT_MINI_RATE_OUT, SONNET4_RATE_IN, SONNET4_RATE_OUT,
+    GPT_MINI_RATE_IN, GPT_MINI_RATE_OUT, SONNET_RATE_IN, SONNET_RATE_OUT,
 )
 from assistant_axis.provenance import (  # noqa: E402
+    CACHE_POLICIES,
     InputSpec,
     current_data_subtree_input,
     current_file_input,
@@ -186,6 +187,7 @@ from results_analysis.judge_tier_cost_plot_pooled import (  # noqa: E402
     display_name,
     label_key,
     place_labels as _place_labels,
+    DEFAULT_PRICE_BASIS,
     PRICE_BASES,
     PRICE_BASIS_LABEL,
     PROVIDER_COLOR,
@@ -193,6 +195,7 @@ from results_analysis.judge_tier_cost_plot_pooled import (  # noqa: E402
     estimate_cost,
     load_measured_cost,
     pareto_frontier,
+    price_factor,
     provider_of,
 )
 
@@ -202,7 +205,9 @@ DEFAULT_SLOTS = [0, 6]
 DEFAULT_LAYERS = [25, 49]
 REGIMES = ("raw", "soft_K", "soft_shear")
 DEFAULT_VARIANT = "s6_l25_raw"   # Konstantinos' projections: slot 6, layer 25, raw
-DEFAULT_PRICE_BAND = 0.25        # USD per axis
+#: USD per axis at DEFAULT_PRICE_BASIS: $0.25 at list price until 2026-11-03, halved with the move to the
+#: real price (every judge here half price), so that the band holds the same judges.
+DEFAULT_PRICE_BAND = 0.125
 DEFAULT_BOOTSTRAP_DRAWS = 2000
 DEFAULT_BOOTSTRAP_SEED = 20261101
 TIER_EVAL_SUFFIX = "_tier_eval"
@@ -214,7 +219,7 @@ LEGACY_CELLS = (
     # "(May)": the May 2026 cells (T=0, max_tokens 1024), kept apart from a tier-eval cell of the
     # same model (gpt-4.1-mini at T=0 and max_tokens 200, <axis>_tier_eval/gpt-4.1-mini/).
     ("gpt-4.1-mini (May)", "gpt", GPT_MINI_RATE_IN, GPT_MINI_RATE_OUT),
-    ("claude-sonnet-4 (May)", "sonnet", SONNET4_RATE_IN, SONNET4_RATE_OUT),
+    ("claude-sonnet-4 (May)", "sonnet", SONNET_RATE_IN, SONNET_RATE_OUT),
 )
 
 
@@ -393,17 +398,16 @@ def _bare(key: str) -> str:
 
 
 def load_cells(axes: Sequence[AxisDef], experiments_dir: Path, tier_eval_dir: Path,
-               kinds_for_name: Dict[str, set], price_basis: str = "list",
+               kinds_for_name: Dict[str, set], price_basis: str = DEFAULT_PRICE_BASIS,
                inputs: Optional[list] = None,
-               include_legacy: bool = True) -> Tuple[Dict[str, Dict[str, Cell]], List[dict]]:
+               include_legacy: bool = True, policy: str = "warn") -> Tuple[Dict[str, Dict[str, Cell]], List[dict]]:
     """``({model: {axis_dir: Cell}}, skipped)``.  Tier cells first; a legacy
     cell fills an axis only where no tier cell of the same label exists."""
     cells: Dict[str, Dict[str, Cell]] = {}
     skipped: List[dict] = []
-    factor = 0.5 if price_basis == "batch" else 1.0
 
     def _load(path: Path, dep_key: str) -> dict:
-        payload, _spec, _check = load_and_register(path, dep_key=dep_key, inputs=inputs, policy="off")
+        payload, _spec, _check = load_and_register(path, dep_key=dep_key, inputs=inputs, policy=policy)
         return _unwrap(payload)
 
     for ax in axes:
@@ -437,7 +441,7 @@ def load_cells(axes: Sequence[AxisDef], experiments_dir: Path, tier_eval_dir: Pa
             n_scored = sum(1 for k in raw if _bare(k) not in poles)
             cells.setdefault(model, {})[ax.axis_dir] = Cell(
                 model, ax.axis_dir, lift_scores(raw, kinds_for_name), n_scored,
-                estimate_cost(n_scored, rin, rout) * factor, False, sp)
+                estimate_cost(n_scored, rin, rout) * price_factor(model.split(" (")[0], price_basis), False, sp)
     return cells, skipped
 
 
@@ -751,7 +755,7 @@ def bootstrap_keep_order(rho: Dict[str, Dict[str, Dict[str, float]]], top: str, 
 
 def check_vs_cached(cells: Dict[str, Dict[str, Cell]], models: Sequence[str],
                     rho: Dict[str, Dict[str, Dict[str, float]]], n: Dict[str, Dict[str, int]],
-                    vkey: str = "s6_l25_raw", inputs: Optional[list] = None) -> dict:
+                    vkey: str = "s6_l25_raw", inputs: Optional[list] = None, policy: str = "warn") -> dict:
     """Compare the ``s6_l25_raw`` rho with each cell's cached
     ``correlations.json`` (slot 6, raw, layer 25 from projections.json)."""
     rows = []
@@ -762,7 +766,7 @@ def check_vs_cached(cells: Dict[str, Dict[str, Cell]], models: Sequence[str],
             cp = c.scores_path.parent / "correlations.json"
             cached = None
             if cp.exists():
-                payload, _s, _c = load_and_register(cp, dep_key=f"corr_{axis}_{m}", inputs=inputs, policy="off")
+                payload, _s, _c = load_and_register(cp, dep_key=f"corr_{axis}_{m}", inputs=inputs, policy=policy)
                 try:
                     cell = _unwrap(payload)["descriptions"]["6"]["raw"]
                     cached = (float(cell["rho"]), int(cell["n"]))
@@ -806,10 +810,28 @@ def _usd(x: float) -> str:
     return f"\\${x:.2f}" if x >= 0.1 else f"\\${x:.3f}"
 
 
+@dataclass(frozen=True)
+class FigureOptions:
+    """For figures that compare settings rather than judges (scripts/judge_tier_grid_12way.py)."""
+    headline: Optional[str] = None                     # replaces the "Judge ranking ..." title
+    cell_labels: Optional[Dict[str, str]] = None       # cell -> text, for the heatmap rows and the points
+    point_labels: Optional[Dict[str, str]] = None      # cell -> shorter text for the points, where it differs
+    series: Sequence[Sequence[str]] = ()               # arrows through each list of cells, in order
+    label_frontier_only: bool = False                  # leave the other points unlabelled (crowded panels)
+    own_y: bool = False                                # each panel its own y limits, not its row's
+    x_log: Optional[bool] = None                       # None: log when the costs span more than 8x
+    x_ticks: Optional[Sequence[float]] = None          # None: cost_ticks
+    x_log_pad: float = 1.6                             # a log axis runs from the lowest cost over this to the highest times it
+    panel_w: float = 4.2
+    panel_h: float = 3.3
+
+
 def render_figure(out_png: Path, models_by_rho: Sequence[str], variants: Sequence[Variant],
                   per_variant: Dict[str, Dict[str, dict]], frontiers: Dict[str, List[str]],
                   measured: Dict[str, bool], default_key: str, n_axes_total: int,
-                  subtitle: str, inputs: Optional[list]) -> None:
+                  subtitle: str, inputs: Optional[list], options: FigureOptions = FigureOptions()) -> None:
+    """The heatmap above the Pareto panels."""
+    opts = options
     vkeys = [v.key for v in variants]
     n_m, n_v = len(models_by_rho), len(vkeys)
     sl_pairs = list(dict.fromkeys((v.slot, v.layer) for v in variants))
@@ -818,9 +840,9 @@ def render_figure(out_png: Path, models_by_rho: Sequence[str], variants: Sequenc
 
     # Layout in inches, top to bottom.
     n_title_lines = 2 + subtitle.count("\n")
-    top_in, heat_h, mid_in, panel_h, row_gap, bot_in = (0.45 + 0.25 * n_title_lines, 0.5 + 0.38 * n_m,
-                                                        1.55, 3.3, 0.75, 0.6)
-    fig_w = max(16.0, 4.2 * n_cols + 1.5)
+    top_in, heat_h, mid_in, row_gap, bot_in = (0.45 + 0.25 * n_title_lines, 0.5 + 0.38 * n_m, 1.55, 0.75, 0.6)
+    panel_h = opts.panel_h
+    fig_w = max(16.0, opts.panel_w * n_cols + 1.5)
     fig_h = top_in + heat_h + mid_in + n_rows * panel_h + (n_rows - 1) * row_gap + bot_in
     fig = plt.figure(figsize=(fig_w, fig_h))
     heat_top = 1 - top_in / fig_h
@@ -854,7 +876,8 @@ def render_figure(out_png: Path, models_by_rho: Sequence[str], variants: Sequenc
             lbl.set_fontweight("bold")
     cost0 = per_variant[vkeys[0]]
     ax_h.set_yticks(range(n_m))
-    ax_h.set_yticklabels([f"{display_name(m)}  ({_usd(cost0[m]['mean_cost'])}/axis{'' if measured[m] else ' est.'})"
+    ax_h.set_yticklabels([f"{opts.cell_labels[m] if opts.cell_labels else display_name(m)}  "
+                          f"({_usd(cost0[m]['mean_cost'])}/axis{'' if measured[m] else ' est.'})"
                           for m in models_by_rho], fontsize=9)
     for j in range(1, n_v):
         if variants[j].layer != variants[j - 1].layer or variants[j].slot != variants[j - 1].slot:
@@ -866,20 +889,23 @@ def render_figure(out_png: Path, models_by_rho: Sequence[str], variants: Sequenc
 
     # (b) Pareto small multiples
     all_costs = [per_variant[vkeys[0]][m]["mean_cost"] for m in models_by_rho]
-    logx = min(all_costs) > 0 and max(all_costs) / min(all_costs) > 8
+    logx = opts.x_log if opts.x_log is not None else (min(all_costs) > 0 and max(all_costs) / min(all_costs) > 8)
     if logx:
-        x_lo, x_hi = min(all_costs) / 1.6, max(all_costs) * 1.6
+        x_lo, x_hi = min(all_costs) / opts.x_log_pad, max(all_costs) * opts.x_log_pad
     else:
         span = max(all_costs) - min(all_costs) or max(all_costs) or 1.0
         x_lo, x_hi = min(all_costs) - 0.15 * span, max(all_costs) + 0.15 * span
     by_key = {v.key: v for v in variants}
-    for r, regime in enumerate(regimes):
-        row_keys = [variant_key(s, l, regime, K=variants[0].K, L=variants[0].L) for s, l in sl_pairs]
-        qs = [per_variant[k][m]["quality"] for k in row_keys if k in by_key for m in models_by_rho]
+
+    def y_limits(keys: Sequence[str]) -> Tuple[float, float]:
+        qs = [per_variant[k][m]["quality"] for k in keys if k in by_key for m in models_by_rho]
         qs = [q for q in qs if math.isfinite(q)]
         y_lo, y_hi = (min(qs), max(qs)) if qs else (1.0, 2.0)
         pad = 0.14 * (y_hi - y_lo or 0.1)
-        y_lo, y_hi = y_lo - pad, y_hi + pad
+        return y_lo - pad, y_hi + pad
+
+    for r, regime in enumerate(regimes):
+        row_keys = [variant_key(s, l, regime, K=variants[0].K, L=variants[0].L) for s, l in sl_pairs]
         for c, k in enumerate(row_keys):
             ax = fig.add_subplot(gs_p[r, c])
             if k not in by_key:
@@ -890,14 +916,20 @@ def render_figure(out_png: Path, models_by_rho: Sequence[str], variants: Sequenc
             if logx:
                 ax.set_xscale("log")
             ax.set_xlim(x_lo, x_hi)
-            ax.set_ylim(y_lo, y_hi)
-            ticks = _cost_ticks(x_lo, x_hi)
+            ax.set_ylim(*y_limits([k] if opts.own_y else row_keys))
+            ticks = [t for t in opts.x_ticks if x_lo <= t <= x_hi] if opts.x_ticks else _cost_ticks(x_lo, x_hi)
             if ticks:
                 ax.set_xticks(ticks)
                 ax.set_xticklabels([f"\\${t:g}" for t in ticks])
                 ax.minorticks_off()
             ax.plot([per[m]["mean_cost"] for m in fr], [per[m]["quality"] for m in fr], "--",
                     color="#555555", linewidth=1.0, alpha=0.7, zorder=2)
+            for run in opts.series:
+                for a, b in zip(run, run[1:]):
+                    ax.annotate("", xy=(per[b]["mean_cost"], per[b]["quality"]),
+                                xytext=(per[a]["mean_cost"], per[a]["quality"]),
+                                arrowprops=dict(arrowstyle="-|>", color=PROVIDER_COLOR[provider_of(a)], lw=0.9,
+                                                alpha=0.6, shrinkA=3, shrinkB=3, mutation_scale=7), zorder=3)
             pts, labels, bold = [], [], []
             for m in models_by_rho:
                 x, y = per[m]["mean_cost"], per[m]["quality"]
@@ -909,7 +941,10 @@ def render_figure(out_png: Path, models_by_rho: Sequence[str], variants: Sequenc
                            facecolors=col if measured[m] else "none", edgecolors=col,
                            linewidths=1.6, zorder=4)
                 pts.append((x, y))
-                labels.append(_short(m))
+                if opts.label_frontier_only and not on:
+                    labels.append("")
+                else:
+                    labels.append((opts.point_labels or {}).get(m) or (opts.cell_labels or {}).get(m) or _short(m))
                 bold.append(on)
             ax.grid(True, alpha=0.3)
             ax.tick_params(labelsize=7.5)
@@ -927,19 +962,29 @@ def render_figure(out_png: Path, models_by_rho: Sequence[str], variants: Sequenc
                    markeredgecolor=PROVIDER_COLOR["openai"], markersize=8, label="OpenAI"),
         plt.Line2D([0], [0], marker="D", color="w", markerfacecolor="#888888", markersize=8,
                    label="on the frontier (bold label)"),
-        plt.Line2D([0], [0], marker="o", color="w", markerfacecolor="none", markeredgecolor="#888888",
-                   markersize=8, label="hollow = estimated cost"),
         plt.Line2D([0], [0], linestyle="--", color="#555555", label="Pareto frontier"),
     ]
-    title = (f"Judge ranking under {n_v} projection variants, DESCRIPTION judging: {n_axes_total} axes, "
-             f"{n_m} judges (default {default_key})")
+    if not all(measured[m] for m in models_by_rho):
+        handles.insert(3, plt.Line2D([0], [0], marker="o", color="w", markerfacecolor="none", markeredgecolor="#888888",
+                                     markersize=8, label="hollow = estimated cost"))
+    for provider, name in (("google", "Google"), ("typesafe", "TypeSafe (Jev)"), ("blend", "Blend of judges")):
+        if any(provider_of(m) == provider for m in models_by_rho):
+            handles.insert(2, plt.Line2D([0], [0], marker="o", color="w", markerfacecolor=PROVIDER_COLOR[provider],
+                                         markeredgecolor=PROVIDER_COLOR[provider], markersize=8, label=name))
+    title = opts.headline or (f"Judge ranking under {n_v} projection variants, DESCRIPTION judging: "
+                              f"{n_axes_total} axes, {n_m} judges (default {default_key})")
     fig.suptitle(title + "\n" + subtitle, fontsize=12, y=1 - 0.12 / fig_h, va="top")
     y_b = pan_top + 0.42 / fig_h
-    key = label_key(list(models_by_rho))
-    fig.text(0.01, y_b, "(b) Pareto plots, one per variant (rows share y limits; x shared)"
-             + (f"; {key}" if key else ""), fontsize=10, va="center")
-    fig.legend(handles=handles, loc="center right", ncol=5, fontsize=8.5, frameon=False,
-               bbox_to_anchor=(0.99, y_b))
+    key = "" if opts.cell_labels else label_key(list(models_by_rho))
+    # The caption and the legend share a line, and the label key gets its own below: on one
+    # line a long key ran under the legend (2026-11-02).
+    y_cap = y_b + (0.11 / fig_h if key else 0)
+    fig.text(0.01, y_cap, f"(b) Pareto plots, one per variant ({'each its own y limits' if opts.own_y else 'rows share y limits'}; "
+             "x shared)", fontsize=10, va="center")
+    if key:
+        fig.text(0.01, y_b - 0.11 / fig_h, key, fontsize=9, va="center")
+    fig.legend(handles=handles, loc="center right", ncol=len(handles), fontsize=8.5, frameon=False,
+               bbox_to_anchor=(0.99, y_cap))
     out_png = Path(out_png)
     out_png.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_png, dpi=130, bbox_inches="tight",
@@ -993,8 +1038,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Goal/no-goal subspaces for the shear (default: combined).")
     p.add_argument("--default_variant", default=DEFAULT_VARIANT,
                    help=f"The variant the others are compared with (default: {DEFAULT_VARIANT}).")
-    p.add_argument("--price_basis", choices=PRICE_BASES, default="list",
-                   help="Cost basis, as judge_tier_cost_plot_pooled.py (default: list).")
+    p.add_argument("--price_basis", choices=PRICE_BASES, default=DEFAULT_PRICE_BASIS,
+                   help=f"Cost basis, as judge_tier_cost_plot_pooled.py (default: {DEFAULT_PRICE_BASIS}, the real "
+                        f"price, since 2026-11-03; list before).")
     p.add_argument("--legacy", action="store_true",
                    help="Also compare the May 2026 cells, \"gpt-4.1-mini (May)\" and \"claude-sonnet-4 (May)\" "
                         "(T=0, max_tokens 1024, mixed rubric versions; the Sonnet cells mix two models).  Off "
@@ -1014,6 +1060,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--cache_dir", default=None,
                    help=f"Slice cache (default: <output_dir>/{OUTPUT_STEM}_cache).")
     p.add_argument("--no_cache", action="store_true", help="Neither read nor write the slice cache.")
+    p.add_argument("--cache-policy", dest="cache_policy", choices=CACHE_POLICIES, default="warn",
+                   help="What to do when a judge cache's recorded inputs have changed: strict | warn (default) | "
+                        "rebuild | off.  The slice cache has its own check: built from other files, it is rebuilt.")
+    p.add_argument("--stem", default=OUTPUT_STEM,
+                   help=f"Name of the output files, <stem>.json and <stem>.png (default {OUTPUT_STEM}).")
     return p
 
 
@@ -1055,7 +1106,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         inputs.append(current_file_input("axes_file", Path(args.axes_file)))
 
     cells, skipped = load_cells(axes, experiments_dir, tier_eval_dir, kinds_for_name,
-                                args.price_basis, inputs, include_legacy=args.legacy)
+                                args.price_basis, inputs, include_legacy=args.legacy, policy=args.cache_policy)
     if args.include_models:
         for m in args.include_models:
             if m not in cells:
@@ -1118,7 +1169,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     bands = {k: price_bands(per_variant[k], frontiers[k], models, args.price_band) for k in vkeys}
     boot = (bootstrap_keep_order(rho, default_rank[0], default_rank[1], vkeys,
                                  args.bootstrap_draws, args.seed) if len(models) >= 2 else None)
-    check = check_vs_cached(cells, models, rho, n, inputs=inputs) if "s6_l25_raw" in vkeys else None
+    check = check_vs_cached(cells, models, rho, n, inputs=inputs, policy=args.cache_policy) if "s6_l25_raw" in vkeys else None
     t_stats = time.time()
 
     # Print
@@ -1185,8 +1236,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                       "stats": round(t_stats - t_rho, 2)},
     }
     output_dir.mkdir(parents=True, exist_ok=True)
-    title = f"{OUTPUT_STEM}: {len(axes_used)} axes, {len(models)} judges, {len(vkeys)} variants"
-    json_path = output_dir / f"{OUTPUT_STEM}.json"
+    title = f"{args.stem}: {len(axes_used)} axes, {len(models)} judges, {len(vkeys)} variants"
+    json_path = output_dir / f"{args.stem}.json"
     tmp = json_path.with_name(json_path.name + ".tmp")
     tmp.write_text(json.dumps(_clean(json_metadata(payload, title=title, inputs=inputs)), indent=2))
     tmp.replace(json_path)
@@ -1199,7 +1250,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                                                                            for m, k in excluded.items())
     if left_out:
         subtitle += "\nleft out (--exclude_models): " + ", ".join(display_name(m) for m in left_out)
-    png_path = output_dir / f"{OUTPUT_STEM}.png"
+    png_path = output_dir / f"{args.stem}.png"
     render_figure(png_path, default_rank, variants, per_variant, frontiers, measured,
                   args.default_variant, len(axes_used), subtitle, inputs)
     print(f"Wrote {png_path}")

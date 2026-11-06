@@ -49,6 +49,12 @@ Public API (stable):
     read_manifest(data_dir) -> Manifest
     current_data_subtree_input(data_dir, subtree_rel, role, *, extras=None) -> InputSpec
     current_file_input(role, path, *, extras=None) -> InputSpec
+    current_files_input(dep_key, paths, *, extras=None) -> InputSpec
+    current_corpus_files_input(dep_key, paths, *, root, entities, fields,
+                               extras=None) -> InputSpec
+        # current_files_input over corpus instruction JSONs, plus per-entity
+        # content hashes of the fields the consumer reads; a metadata drift
+        # whose hashes match validates as "equivalent_content" (ok).
     validate_inputs(recorded, current) -> ProvenanceCheck
     inputs_to_jsonable(specs) -> list[dict]
     inputs_from_jsonable(blobs) -> list[InputSpec]
@@ -85,7 +91,9 @@ Repo path conventions:
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as _dt
+import functools
 import hashlib
 import json
 import os
@@ -103,11 +111,15 @@ __all__ = [
     "MANIFEST_FILENAME",
     "PROVENANCE_SCHEMA_VERSION",
     "FINGERPRINT_VERSION_TAG",
+    "OK_STATUSES",
+    "CORPUS_CONTENT_VERSION",
     "CACHE_POLICIES",
     "read_manifest",
     "current_data_subtree_input",
     "current_file_input",
     "current_files_input",
+    "corpus_content",
+    "current_corpus_files_input",
     "current_for_recorded",
     "validate_inputs",
     "validate_recorded",
@@ -127,6 +139,14 @@ __all__ = [
 # but was demoted to Phase 7 in favour of judge-step provenance, then
 # deferred entirely after a cost / value review.  Pick this up if and
 # only if one of the failure modes below starts biting in practice.
+#
+# One part of the idea did land (2026-10-10, AGENT_NOTES housekeeping
+# item 3): corpus instruction JSONs recorded as a ``kind="multi"`` input
+# can carry per-entity content hashes of the fields the consumer reads
+# (``InputSpec.content``, ``current_corpus_files_input``), with the
+# ``equivalent_content`` status sketched in step 3 below.  That one bit
+# daily (every metadata edit to any trait file staled every judge cache);
+# dataset subtrees remain metadata-only.
 #
 # WHAT WE HAVE TODAY (the baseline this would replace / augment)
 # --------------------------------------------------------------
@@ -311,6 +331,10 @@ _SUBTREE_SHA_PREFIX_LEN = 12
 # the underlying data) changes.
 FINGERPRINT_VERSION_TAG = "v1"
 
+# Statuses that count as current.  Audit tools import this rather than
+# listing the statuses themselves.
+OK_STATUSES = ("ok", "equivalent", "equivalent_content")
+
 
 # ---------------------------------------------------------------------------
 # Data classes
@@ -358,6 +382,16 @@ class InputSpec:
             write-only diagnostics (legacy multi InputSpecs are
             classified ``unverifiable`` by :func:`load_validated_json`).
             ``None`` for non-multi kinds.
+        content: For a ``kind == "multi"`` input over corpus instruction
+            JSONs only (built by :func:`current_corpus_files_input`): a
+            content hash of the fields the consumer actually reads, per
+            entity.  The metadata ``fingerprint`` stays the primary
+            signal; when it drifts and these hashes still match,
+            :func:`validate_recorded` reports ``equivalent_content`` (ok)
+            instead of ``drift``.  Shape: ``{"version", "root", "fields",
+            "sha256", "entities": {entity_id: hash or None}}``.  ``None``
+            for every other input, and for corpus inputs recorded before
+            2026-10-10.
     """
     dep_key: str
     path: str
@@ -367,6 +401,7 @@ class InputSpec:
     last_modified_at: Optional[str] = None
     extras: dict = field(default_factory=dict)
     member_paths: Optional[list] = None  # list[str] | None
+    content: Optional[dict] = None
 
 
 @dataclass(frozen=True)
@@ -418,6 +453,12 @@ class InputStatus:
     #                         in script_equivalences.yaml (output-
     #                         preserving edit; downstream caches don't
     #                         need rebuilding).
+    #   "equivalent_content" -- kind="multi" metadata drift on corpus
+    #                         files whose recorded content hashes
+    #                         (``InputSpec.content``) still match: the
+    #                         edits touched fields the consumer does
+    #                         not read (tags, arrangement, generator,
+    #                         questions, ...).
     #   "missing_current"  -- file/manifest vanished since the record
     #                         was made.
     #   "missing_recorded" -- dep_key in current but not recorded.
@@ -432,13 +473,16 @@ class InputStatus:
 class ProvenanceCheck:
     """Per-input drift report built by :func:`validate_inputs`."""
     statuses: list           # list[InputStatus]
-    ok: bool                 # True iff every status is "ok" or "equivalent"
+    ok: bool                 # True iff every status is in OK_STATUSES
 
     def drifted(self) -> list:
         return [s for s in self.statuses if s.status == "drift"]
 
     def equivalent(self) -> list:
-        return [s for s in self.statuses if s.status == "equivalent"]
+        """Drift downgraded to ok, by either route: a declared script
+        equivalence or matching corpus content hashes."""
+        return [s for s in self.statuses
+                if s.status in ("equivalent", "equivalent_content")]
 
     def missing(self) -> list:
         return [s for s in self.statuses
@@ -740,6 +784,156 @@ def current_files_input(
 
 
 # ---------------------------------------------------------------------------
+# Content hashes of corpus fields (AGENT_NOTES housekeeping item 3, 2026-10-10)
+# ---------------------------------------------------------------------------
+#
+# A consumer of the corpus instruction JSONs records them as one
+# ``kind="multi"`` input, fingerprinted by (mtime, size), so *any* edit to
+# any file used to mark every consumer stale, metadata-only edits
+# (``arrangement``, ``tags``, ``generator``, ``questions``) included.  The
+# ``content`` block below records, per entity the consumer actually reads,
+# a hash of just the fields that reach its rubric or prompt.  The metadata
+# fingerprint stays the primary signal, so a record written before this
+# block existed validates exactly as before; when the metadata drifts and
+# the hashes match, the status is ``equivalent_content`` (ok).  This is
+# the per-entity, per-field form of the "content hashes" plan in the
+# deferred block at the top of this module, which remains deferred for
+# dataset subtrees.
+
+CORPUS_CONTENT_VERSION = "corpus_fields_v1"
+_ENTITY_HASH_LEN = 16
+
+
+def _corpus_field_value(doc, field_path: str):
+    """One field of an instruction JSON: ``description`` reads a top-level
+    key; ``instruction[*].pos`` reads the ``pos`` of every item of the
+    ``instruction`` list (``None`` where a key is absent)."""
+    if not isinstance(doc, dict):
+        return None
+    base, sep, sub = field_path.partition("[*].")
+    value = doc.get(base)
+    if not sep:
+        return value
+    if not isinstance(value, list):
+        return None
+    return [item.get(sub) if isinstance(item, dict) else None for item in value]
+
+
+@functools.lru_cache(maxsize=16384)
+def _entity_content_hash_cached(path: str, mtime_ns: int, size: int,
+                                fields: tuple) -> str:
+    try:
+        doc = json.loads(Path(path).read_text(encoding="utf-8"))
+    except ValueError:
+        return "unreadable"
+    blob = json.dumps({f: _corpus_field_value(doc, f) for f in fields},
+                      sort_keys=True, ensure_ascii=False,
+                      separators=(",", ":"))
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:_ENTITY_HASH_LEN]
+
+
+def _entity_content_hash(path: Path, fields: tuple) -> Optional[str]:
+    """Hash of ``fields`` of one instruction JSON; ``None`` when the file
+    does not exist.  Memoised on (path, mtime_ns, size), so an audit that
+    revalidates many records reads each file once."""
+    try:
+        st = os.stat(path)
+    except FileNotFoundError:
+        return None
+    return _entity_content_hash_cached(str(path), st.st_mtime_ns,
+                                       st.st_size, tuple(fields))
+
+
+def _content_digest(entity_hashes: dict) -> str:
+    blob = json.dumps(sorted(entity_hashes.items()), separators=(",", ":"))
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def corpus_content(
+    root: Path,
+    entities: Iterable[tuple],
+    fields: Iterable[str],
+) -> dict:
+    """The ``InputSpec.content`` block for corpus instruction JSONs under
+    ``root`` (``<root>/<kind>/instructions/<stem>.json``).
+
+    ``entities`` are ``(kind, stem)`` pairs, the entities the consumer
+    reads; ``fields`` the JSON fields that plug into its rubric or prompt
+    (``"description"``, ``"positive_label"``, ``"instruction[*].pos"``,
+    ...).  Entities are keyed by their disambiguated id (``"lazy|T"``).
+    """
+    from assistant_axis.entity_id import entity_id, kind_long
+
+    root = Path(root)
+    fields = tuple(fields)
+    hashes: dict = {}
+    for kind, stem in entities:
+        path = root / kind_long(kind) / "instructions" / f"{stem}.json"
+        hashes[entity_id(stem, kind)] = _entity_content_hash(path, fields)
+    hashes = dict(sorted(hashes.items()))
+    return {
+        "version": CORPUS_CONTENT_VERSION,
+        "root": _to_repo_relative(root),
+        "fields": list(fields),
+        "sha256": _content_digest(hashes),
+        "entities": hashes,
+    }
+
+
+def _current_corpus_content(recorded: dict) -> dict:
+    """Recompute a recorded ``content`` block from the files as they are now."""
+    from assistant_axis.entity_id import parse_entity_id
+
+    root = _repo_root() / recorded["root"]
+    entities = []
+    for eid in recorded.get("entities") or {}:
+        parsed = parse_entity_id(eid)
+        entities.append((parsed.kind, parsed.name))
+    return corpus_content(root, entities, recorded.get("fields") or [])
+
+
+def current_corpus_files_input(
+    dep_key: str,
+    paths: Iterable[Path],
+    *,
+    root: Path,
+    entities: Iterable[tuple],
+    fields: Iterable[str],
+    extras: Optional[dict] = None,
+) -> InputSpec:
+    """:func:`current_files_input` over corpus instruction JSONs, plus the
+    ``content`` block (:func:`corpus_content`) for the entities and fields
+    the consumer reads.  ``paths`` keeps its meaning (the files whose
+    metadata is fingerprinted, usually every JSON the script could open);
+    ``entities`` may be a subset (those it does open)."""
+    spec = current_files_input(dep_key, paths, extras=extras)
+    return dataclasses.replace(
+        spec, content=corpus_content(root, entities, fields))
+
+
+def _content_check(recorded: InputSpec) -> tuple:
+    """For a multi input with a ``content`` block whose metadata drifted:
+    ``(same, current_block, detail)``."""
+    rc = recorded.content or {}
+    if rc.get("version") != CORPUS_CONTENT_VERSION:
+        return False, None, (f"content block version {rc.get('version')!r} "
+                             f"is not {CORPUS_CONTENT_VERSION!r}; cannot compare")
+    cur = _current_corpus_content(rc)
+    if cur["sha256"] == rc.get("sha256"):
+        return True, cur, ""
+    before = rc.get("entities") or {}
+    after = cur["entities"]
+    changed = sorted(e for e in before if before[e] != after.get(e))
+    gone = [e for e in changed if after.get(e) is None]
+    shown = ", ".join(changed[:10]) + (", ..." if len(changed) > 10 else "")
+    detail = (f"{len(changed)} of {len(before)} entities changed in "
+              f"{'/'.join(rc.get('fields') or [])}: {shown}")
+    if gone:
+        detail += f" ({len(gone)} no longer have a file)"
+    return False, cur, detail
+
+
+# ---------------------------------------------------------------------------
 # Validation
 # ---------------------------------------------------------------------------
 
@@ -811,9 +1005,12 @@ def inputs_to_jsonable(specs: Iterable[InputSpec]) -> list[dict]:
         d = asdict(s)
         # Drop ``member_paths`` for non-multi inputs to keep records
         # tidy (it's always None for those).  Round-trip is preserved
-        # because ``inputs_from_jsonable`` re-defaults to None.
+        # because ``inputs_from_jsonable`` re-defaults to None.  Same for
+        # ``content``, which only corpus inputs carry.
         if d.get("member_paths") is None:
             d.pop("member_paths", None)
+        if d.get("content") is None:
+            d.pop("content", None)
         out.append(d)
     return out
 
@@ -974,6 +1171,27 @@ def validate_recorded(
                 dep_key=r.dep_key, status="ok",
                 recorded=r, current=c,
             ))
+        elif r.kind == "multi" and r.content:
+            # Corpus files whose metadata drifted: compare the content of
+            # the fields the consumer reads (housekeeping item 3).
+            same, cur_content, why = _content_check(r)
+            c = dataclasses.replace(c, content=cur_content)
+            if same:
+                statuses.append(InputStatus(
+                    dep_key=r.dep_key, status="equivalent_content",
+                    recorded=r, current=c,
+                    detail=(f"fingerprint changed: {r.fingerprint} -> "
+                            f"{c.fingerprint}; the "
+                            f"{len(r.content.get('entities') or {})} entities' "
+                            f"{'/'.join(r.content.get('fields') or [])} "
+                            f"are unchanged"),
+                ))
+            else:
+                statuses.append(InputStatus(
+                    dep_key=r.dep_key, status="drift",
+                    recorded=r, current=c,
+                    detail=f"fingerprint changed: {r.fingerprint} -> {c.fingerprint}; {why}",
+                ))
         else:
             # Drift on a kind="file" input may be a declared-harmless
             # edit; consult the script-equivalence registry before
@@ -1017,7 +1235,7 @@ def validate_recorded(
                     recorded=r, current=c,
                     detail=f"fingerprint changed: {r.fingerprint} -> {c.fingerprint}",
                 ))
-    ok = all(s.status in ("ok", "equivalent") for s in statuses)
+    ok = all(s.status in OK_STATUSES for s in statuses)
     return ProvenanceCheck(statuses=statuses, ok=ok)
 
 
@@ -1384,7 +1602,7 @@ def load_and_register_npz(
 def inputs_from_jsonable(blobs: Iterable[dict]) -> list[InputSpec]:
     """Inverse of :func:`inputs_to_jsonable`.  Tolerates blobs missing
     the optional fields (``dataset_id``, ``last_modified_at``,
-    ``extras``, ``member_paths``) for forward and backward
+    ``extras``, ``member_paths``, ``content``) for forward and backward
     compatibility."""
     out: list[InputSpec] = []
     for b in blobs:
@@ -1400,5 +1618,6 @@ def inputs_from_jsonable(blobs: Iterable[dict]) -> list[InputSpec]:
             last_modified_at=b.get("last_modified_at"),
             extras=dict(b.get("extras") or {}),
             member_paths=mp,
+            content=b.get("content"),
         ))
     return out

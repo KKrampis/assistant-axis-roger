@@ -1,10 +1,12 @@
 """Disambiguated entity identifiers for trait/role mixing contexts.
 
-The project's corpus has 9 names that appear in *both* the trait and
+The project's corpus has 11 names that appear in *both* the trait and
 role lists -- ``ascetic``, ``contrarian``, ``cosmopolitan``,
-``generalist``, ``pacifist``, ``patient``, ``perfectionist``,
-``romantic``, ``stoic``.  Bare names are therefore *not* a unique
-identifier in any context that mixes kinds (dict keys, set members,
+``generalist``, ``pacifist``, ``parent``, ``patient``,
+``perfectionist``, ``romantic``, ``specialist``, ``stoic`` (checked
+against the files by ``tests/test_collision_regression.py``).  Bare
+names are therefore *not* a unique identifier in any context that
+mixes kinds (dict keys, set members,
 JSON cache keys, sorted name lists for rho computation, ...).
 Historically several sites silently dropped one side of every
 collision via the dict-overwrite ``merged[name] = ...`` pattern,
@@ -62,6 +64,12 @@ __all__ = [
     "default_data_dir",
     "resolve_renamed_stem",
     "ROLE_DISPLAY_OVERRIDES",
+    "STANDARD_SUFFIX_FORMS",
+    "JUDGE_LABEL_FORM",
+    "judge_form_of_label",
+    "judge_form_of_negative_label",
+    "judge_label",
+    "judge_negative_label",
 ]
 
 
@@ -378,14 +386,17 @@ def display_form_name(name: str) -> str:
     (``"aligned artificial intelligence"``, ``"systems-thinker"``,
     or any name without underscores) passes through unchanged.
 
-    **Prompt-stable by design.**  This transform is deliberately
-    mechanical (no corpus lookup) because it is spliced into judge
-    rubrics; changing its output for any entity is a rubric change
-    (bump ``RUBRIC_VERSION``, see AGENT_NOTES "Judge prompts").  For
+    **Stable by design.**  This transform is deliberately mechanical
+    (no corpus lookup), and its output must not change: it was the
+    judge-prompt form up to rubric v3, :func:`judge_label` falls back to
+    it for a name the corpus does not know (so such prompts stay
+    byte-identical), and other code keys on it.  Since 2026-10-09 (W19,
+    Roger) judge prompts no longer call it directly: they use
+    :func:`judge_label` / :func:`judge_negative_label`.  For
     human-facing text -- plot labels, legends, console output -- use
     :func:`corpus_display_name`, which consults the trait/role JSONs
     and returns the stored display form (``systems-thinker``,
-    ``devil's advocate``, ``traditional Inglehart-Welzel``).
+    ``devil's advocate``, ``traditional (Inglehart-Welzel)``).
 
     Disambiguated ids (``patient|R``) are passed through untouched
     so callers don't have to special-case them; downstream code
@@ -427,6 +438,10 @@ ROLE_DISPLAY_OVERRIDES: dict[str, str] = {
     # entries drawn from a named external set.
     "instrumentally_aligned_ai": "instrumentally-aligned AI",
     "virtue_aligned_ai": "virtue-aligned AI",
+    # English hyphenates these; the mechanical form read "ex convict" in
+    # prompts (2026-10-10, under the judge display form policy)
+    "ex_convict": "ex-convict",
+    "hunter_gatherer": "hunter-gatherer",
 }
 
 
@@ -479,10 +494,34 @@ def _corpus_display_map(data_dir: str) -> dict[str, dict[str, str]]:
     return out
 
 
+@lru_cache(maxsize=8)
+def _corpus_negative_label_map(data_dir: str) -> dict[str, tuple[str, str]]:
+    """``{trait stem: (negative_label, positive_label)}`` as stored in the
+    trait JSONs under ``data_dir`` (only traits carry labels).  Cached per
+    directory and cleared by :func:`clear_corpus_display_cache`."""
+    out: dict[str, tuple[str, str]] = {}
+    tdir = Path(data_dir) / _KIND_TRAITS / "instructions"
+    if not tdir.is_dir():
+        return out
+    for fp in sorted(tdir.glob("*.json")):
+        try:
+            blob = json.loads(fp.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(blob, dict):
+            continue
+        neg = blob.get("negative_label")
+        if isinstance(neg, str) and neg:
+            pos = blob.get("positive_label")
+            out[fp.stem] = (neg, str(pos) if pos else fp.stem.replace("_", " "))
+    return out
+
+
 def clear_corpus_display_cache() -> None:
     """Drop the cached stem -> display tables (after editing corpus JSONs)."""
     _corpus_display_map.cache_clear()
     _corpus_rename_map.cache_clear()
+    _corpus_negative_label_map.cache_clear()
 
 
 # ---------------------------------------------------------------------------
@@ -522,7 +561,7 @@ def _corpus_rename_map(data_dir: str) -> dict[str, dict[str, str]]:
 
 def resolve_renamed_stem(
     stem: str,
-    kind: str,
+    kind: str | None,
     *,
     data_dir: Path | str | None = None,
 ) -> str:
@@ -534,6 +573,10 @@ def resolve_renamed_stem(
     and so is one the corpus has no record of: the caller's own
     missing-file error is more useful than a guess.  Otherwise the
     result is the file whose ``renamed_from`` records the stem.
+    ``kind=None`` is for a caller that does not know the kind (a
+    steering config's pole names): a stem with a file of either kind is
+    kept, and otherwise the trait renames are consulted before the role
+    renames, the order in which such callers look the files up.
 
     This maps names for **reading the corpus** (descriptions,
     instructions).  Extracted vectors, response files and judge caches
@@ -541,11 +584,15 @@ def resolve_renamed_stem(
     to look those up, because a renamed entity's text may have changed
     with its name.
     """
-    long_kind = kind_long(kind)
     root = Path(data_dir) if data_dir is not None else default_data_dir()
-    if (root / long_kind / "instructions" / f"{stem}.json").exists():
+    kinds = (_KIND_TRAITS, _KIND_ROLES) if kind is None else (kind_long(kind),)
+    if any((root / k / "instructions" / f"{stem}.json").exists() for k in kinds):
         return stem
-    return _corpus_rename_map(str(root))[long_kind].get(stem, stem)
+    renames = _corpus_rename_map(str(root))
+    for k in kinds:
+        if stem in renames[k]:
+            return renames[k][stem]
+    return stem
 
 
 def corpus_display_name(
@@ -564,7 +611,7 @@ def corpus_display_name(
        name and the kind.
     2. With a known kind, the stem is looked up in that kind's table
        (trait ``positive_label`` / role override or ``_`` -> space).
-    3. With no kind, both tables are consulted.  The nine
+    3. With no kind, both tables are consulted.  The eleven
        collision names display identically in both, so they resolve
        cleanly; if a future collision ever displayed differently the
        helper falls back to the mechanical form rather than guess.
@@ -577,8 +624,10 @@ def corpus_display_name(
     exactly the lossy direction the convention allows).
 
     Do **not** use the result as a dict key, cache key, or rho
-    intersection operand, and do not splice it into judge rubrics --
-    those stay on :func:`display_form_name` (see its docstring).
+    intersection operand, and do not splice it into an LLM prompt:
+    prompts take :func:`judge_label`, which differs from this helper
+    only in rewriting a standard's suffix (``careless (HEXACO)`` ->
+    ``careless (from HEXACO)``).
 
     >>> corpus_display_name("systems_thinker")
     'systems-thinker'
@@ -612,3 +661,228 @@ def corpus_display_name(
     if r_hit is not None:
         return r_hit
     return display_form_name(name)
+
+
+# ---------------------------------------------------------------------------
+# Judge display form: what every LLM prompt shows (W19, Roger 2026-10-09)
+# ---------------------------------------------------------------------------
+#
+# Roger's rule (2026-10-09): anything that sends a label or a negative_label
+# to an LLM judge (and, by his scope decision the same day, to the instruction
+# generators and every other prompt) uses the most legible form: the display
+# form (hyphens, spaces, capitals, diacritics, apostrophes kept), and, for a
+# trait from an official instrument, the long form with "from":
+# ``careless (HEXACO)`` -> ``careless (from HEXACO)``.  The stored label
+# (``positive_label`` in the JSON) is unchanged; the rewrite happens only at
+# the prompt.  Policy text: AGENT_NOTES § "Judge prompts show the judge
+# display form".
+
+#: How a standard's name reads after "from" in a judge prompt, keyed by the
+#: suffix exactly as the labels write it (``<pole> (<Standard>)``).  The
+#: default, for a suffix that is not listed, is the suffix itself
+#: (``(from VALS)``); the defaults in use are listed anyway so that the table
+#: is the whole record.  Sets that read better with the article or another
+#: form are spelled out (chosen by the main agent at Roger's request,
+#: 2026-10-09: "from Holland" reads as the country, "from Hall" as a
+#: building, and in response mode the label is all that scopes the pole).
+#: To add a standard: add its suffix here with the form it should take
+#: (or leave it to the default), and extend
+#: ``test_entity_id.py::TestJudgeLabel`` if it needs a pinned example.
+STANDARD_SUFFIX_FORMS: dict[str, str] = {
+    # default form ("from X"), listed explicitly
+    "HEXACO": "HEXACO",
+    "VALS": "VALS",
+    "DISC": "DISC",
+    "VARK": "VARK",
+    "Tönnies": "Tönnies",
+    # with the article
+    "Big Five": "the Big Five",
+    "MBTI": "the MBTI",
+    "Enneagram": "the Enneagram",
+    "BFAS": "the BFAS",
+    "IPIP-NEO": "the IPIP-NEO",
+    "Tarot": "the Tarot",
+    "Dark Tetrad": "the Dark Tetrad",
+    "Light Triad": "the Light Triad",
+    "Inglehart-Welzel": "the Inglehart-Welzel map",
+    # a person's name: name the framework, not the person
+    "Holland": "Holland's RIASEC",
+    "Bartle": "Bartle's player types",
+    "Baumrind": "Baumrind's parenting styles",
+    "Hall": "Edward Hall",
+    "Kohlberg": "Kohlberg's stages",
+    "Allport": "Allport's religious orientation",
+    "Gelfand": "Gelfand's tight and loose cultures",
+}
+
+#: Recorded by callers that persist which label form a prompt used (the
+#: instruction generators' ``generator`` field, the antonym check's result).
+JUDGE_LABEL_FORM = "judge-display-v1"
+
+# ``<head> (<suffix>)`` at the end of a label; the suffix has no parentheses.
+_TRAILING_SUFFIX = None  # compiled lazily (keeps the module's import cheap)
+
+
+def _suffix_match(label: str):
+    global _TRAILING_SUFFIX
+    if _TRAILING_SUFFIX is None:
+        import re
+        _TRAILING_SUFFIX = re.compile(r"^(?P<head>.*?\S)\s*\((?P<suffix>[^()]*)\)\s*$", re.S)
+    return _TRAILING_SUFFIX.match(label)
+
+
+def judge_form_of_label(label: str) -> str:
+    """Apply the standard-suffix rewrite to a label string, and nothing else.
+
+    A label ending in a parenthesised suffix that starts with a capital
+    letter (a named standard, ``careless (HEXACO)``) has the suffix
+    rewritten to ``(from <form>)``, where ``<form>`` is
+    :data:`STANDARD_SUFFIX_FORMS`'s entry for it or, for an unlisted
+    suffix, the suffix itself.  Anything else is returned unchanged: a
+    lower-case suffix (``(tentative, PC10)``), a label with no suffix, the
+    empty string.  The function is idempotent (``(from HEXACO)`` starts
+    with a lower-case letter).
+
+    This is the string-level half of :func:`judge_label`; use it directly
+    for a label that is not (yet) a corpus file, such as a staged copy or a
+    trait-gap candidate.
+
+    >>> judge_form_of_label("careless (HEXACO)")
+    'careless (from HEXACO)'
+    >>> judge_form_of_label("Intellect (BFAS)")
+    'Intellect (from the BFAS)'
+    >>> judge_form_of_label("artistic (Holland)")
+    "artistic (from Holland's RIASEC)"
+    >>> judge_form_of_label("everyday sadism (Bourdieu)")
+    'everyday sadism (from Bourdieu)'
+    >>> judge_form_of_label("humorous/serious (tentative, PC10)")
+    'humorous/serious (tentative, PC10)'
+    >>> judge_form_of_label("systems-thinker")
+    'systems-thinker'
+    """
+    import unicodedata
+    if not label:
+        return label
+    m = _suffix_match(label)
+    if m is None:
+        return label
+    suffix = m.group("suffix").strip()
+    if not suffix or not suffix[0].isupper():
+        return label
+    key = unicodedata.normalize("NFC", suffix)
+    form = STANDARD_SUFFIX_FORMS.get(key, suffix)
+    return f"{m.group('head')} (from {form})"
+
+
+def judge_label(
+    name_or_id: str,
+    kind: str | None = None,
+    *,
+    data_dir: Path | str | None = None,
+) -> str:
+    """The judge display form of an entity: what an LLM prompt shows.
+
+    The name is resolved as :func:`corpus_display_name` resolves it (a
+    trait's stored ``positive_label``; a role's
+    :data:`ROLE_DISPLAY_OVERRIDES` entry, else ``_`` -> space; a
+    disambiguated id supplies the kind; no kind consults both tables), and
+    then :func:`judge_form_of_label` rewrites a standard's suffix.  A role
+    with a known kind takes its override even when ``data_dir`` holds no
+    file for it (roles store no label).  A name the corpus does not know
+    falls back to :func:`display_form_name` (mechanical ``_`` -> space)
+    before the suffix rewrite, so a free-text label such as
+    ``careless (HEXACO)`` is rewritten too, and an unknown stem
+    (``careless_hexaco`` with no file, a renamed pole's old stem) renders
+    exactly as it did under the mechanical form.
+
+    Capitals, hyphens, diacritics and apostrophes come from the stored
+    label; the result never contains an underscore for a corpus entity.
+    Never use it as a key: it is a prompt string.
+
+    >>> judge_label("careless_hexaco")
+    'careless (from HEXACO)'
+    >>> judge_label("systems_thinker", "traits")
+    'systems-thinker'
+    >>> judge_label("devils_advocate|R")
+    "devil's advocate"
+    >>> judge_label("obama_administration_health_team")
+    'obama administration health team'
+    """
+    if is_entity_id(name_or_id):
+        parsed = parse_entity_id(name_or_id)
+        name, kind = parsed.name, parsed.kind
+    else:
+        name = name_or_id
+    if not name:
+        return name
+    if kind is not None and kind_long(kind) == _KIND_ROLES:
+        root = str(Path(data_dir) if data_dir is not None else default_data_dir())
+        hit = _corpus_display_map(root)[_KIND_ROLES].get(name)
+        base = hit if hit is not None else ROLE_DISPLAY_OVERRIDES.get(name, display_form_name(name))
+    else:
+        base = corpus_display_name(name, kind, data_dir=data_dir)
+    return judge_form_of_label(base)
+
+
+def judge_form_of_negative_label(
+    negative_label: str,
+    positive_label: str | None = None,
+    *,
+    data_dir: Path | str | None = None,
+) -> str:
+    """The judge display form of a trait's stored ``negative_label``,
+    given the strings (for a file that may not be in the corpus directory:
+    a staged copy, an old commit's version).
+
+    1. If the label names a corpus trait (by :func:`normalize_to_file_name`),
+       that trait's :func:`judge_label`, so the partner reads exactly as it
+       does when it is the entity itself.
+    2. If it is the ``non-X`` placeholder of this trait
+       (``"non-" + positive_label``, standards included:
+       ``non-careless (HEXACO)``), ``"non-"`` plus the judge form of the
+       trait's own label: ``non-careless (from HEXACO)``.
+    3. Otherwise the stored string, with the suffix rewrite of
+       :func:`judge_form_of_label` (a no-op unless it ends in a capitalised
+       suffix, as a standard partner not yet seeded would).
+
+    >>> judge_form_of_negative_label("non-careless (HEXACO)", "careless (HEXACO)")
+    'non-careless (from HEXACO)'
+    >>> judge_form_of_negative_label("conscientious (HEXACO)", "careless (HEXACO)")
+    'conscientious (from HEXACO)'
+    """
+    if not negative_label:
+        return negative_label
+    root = str(Path(data_dir) if data_dir is not None else default_data_dir())
+    stem = normalize_to_file_name(negative_label)
+    if stem in _corpus_display_map(root)[_KIND_TRAITS]:
+        return judge_label(stem, _KIND_TRAITS, data_dir=root)
+    if positive_label and negative_label == f"non-{positive_label}":
+        return "non-" + judge_form_of_label(positive_label)
+    return judge_form_of_label(negative_label)
+
+
+def judge_negative_label(
+    trait_stem: str,
+    *,
+    data_dir: Path | str | None = None,
+) -> str:
+    """The judge display form of a corpus trait's ``negative_label``: the
+    stored label of ``trait_stem`` resolved by
+    :func:`judge_form_of_negative_label`.  Accepts ``stem`` or
+    ``stem|T``.  Raises :class:`KeyError` for a stem with no trait file
+    or no ``negative_label`` (roles have none).
+
+    >>> judge_negative_label("careless_hexaco")
+    'conscientious (from HEXACO)'
+    """
+    if is_entity_id(trait_stem):
+        parsed = parse_entity_id(trait_stem)
+        if parsed.kind != _KIND_TRAITS:
+            raise KeyError(f"{trait_stem!r}: only traits have a negative_label")
+        trait_stem = parsed.name
+    root = str(Path(data_dir) if data_dir is not None else default_data_dir())
+    stored = _corpus_negative_label_map(root).get(trait_stem)
+    if stored is None:
+        raise KeyError(f"{trait_stem!r}: no trait file with a negative_label under {root}")
+    negative_label, positive_label = stored
+    return judge_form_of_negative_label(negative_label, positive_label, data_dir=root)

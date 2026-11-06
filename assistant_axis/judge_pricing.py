@@ -30,33 +30,21 @@ cmd-line-error 1).
 PRICING
 -------
 USD per 1M tokens, separated into input and output streams.  These
-numbers are documented in README.md "Judging cost model".
+numbers are documented in README.md "Judging cost model" and are
+the same numbers the cost-vs-quality plot uses.  Update both places
+together if rates change.
 
-results_analysis/plot_batch_size_quality_vs_cost.py has its OWN copy of
-the legacy (gpt-4.1-mini / claude-sonnet-4) rates, deliberately NOT kept
-in sync with this module -- that script regenerates a chart from cached
-usage data that was actually billed at those historical rates, so its
-constants are pinned to history rather than updated. This module is the
-one to update when adding a new judge model or refreshing current prices;
-see the 2026-09 update note below.
-
-2026-09 update: Anthropic rates verified live via the claude-api skill's
-current-models table (Haiku 4.5 unchanged; Sonnet 5 and Opus 5 added --
-note Sonnet 5 is CHEAPER than Sonnet 4 was, and Opus 5 is far cheaper than
-this module's original May-2026 placeholder guess of $15/$75). OpenAI
-GPT-5.6 tier rates came from web search cross-confirming two independent
-queries against developers.openai.com model pages -- lower confidence
-than the Anthropic numbers (could not fetch developers.openai.com
-directly; it's a client-rendered app that returns an empty shell to non-
-JS fetchers). Re-verify at https://developers.openai.com/api/docs/pricing
-before trusting for a real budget-tracked run, particularly gpt-5.6-sol,
-whose rate is explicitly promotional through 2026-11-21 per the source.
-
-Note on caching: gpt-4.1-mini / gpt-4-class models support prompt
-caching (~5x cheaper for the cached prefix portion).  We do NOT
-account for cache hits here — running totals will slightly
-overestimate cost for cache-friendly workloads, which is
-conservative-by-default for a budget cap.
+Prompt caching (2026-11-01): a cached prompt token is billed at a multiple
+of the input rate, and the multiples differ by model (``cache_rate_factors``):
+OpenAI's GPT-5.6 and later charge a cache write at 1.25x and a read at 0.1x,
+earlier OpenAI models write free and read at their cached-input rate, and
+Anthropic writes at 1.25x and reads at 0.1x when a request asks for caching.
+Every accumulator here takes the write and read counts beside the prompt
+total (:class:`TokenUsage`, :func:`openai_usage`, :func:`anthropic_usage`),
+so ``usage.json`` prices what the bill prices.  Until then every prompt token
+was priced at the plain rate, which understated a luna Flex run by the write
+premium (about 10%; see judge.DEFAULT_PROMPT_CACHE for why the judges now
+send those models explicit mode with no breakpoints).
 """
 from __future__ import annotations
 
@@ -80,35 +68,10 @@ logger = logging.getLogger(__name__)
 
 GPT_MINI_RATE_IN = 0.40   # USD / 1M input tokens (gpt-4.1-mini)
 GPT_MINI_RATE_OUT = 1.60  # USD / 1M output tokens
-
-# --- Legacy Anthropic rate, kept for pricing pre-existing cached runs ---
-# (e.g. roger/axis_judge_experiments/angel_vs_demon/sonnet/ actually used
-# claude-sonnet-4-20250514 at this rate; do not use for new judging).
-SONNET4_RATE_IN = 3.00    # claude-sonnet-4 / claude-sonnet-4-6 (unchanged through 4.6)
-SONNET4_RATE_OUT = 15.00
-
-# --- Current rates (verified 2026-09; see module docstring) ---
-HAIKU_RATE_IN = 1.00      # claude-haiku-4-5 -- unchanged since May 2026
+HAIKU_RATE_IN = 1.00      # claude-haiku-4-5
 HAIKU_RATE_OUT = 5.00
-SONNET_RATE_IN = 2.00     # claude-sonnet-5 -- price CUT vs sonnet-4's $3.00/$15.00
-SONNET_RATE_OUT = 10.00
-OPUS_RATE_IN = 5.00       # claude-opus-5 (same rate as opus-4-6/4-7/4-8)
-OPUS_RATE_OUT = 25.00     # supersedes the never-verified $15/$75 May-2026 placeholder
-
-# --- OpenAI GPT-5.6 tier ladder (Sol/Terra/Luna), short-context rates ---
-# Lower-confidence sourcing than the Anthropic rates above -- see module
-# docstring. gpt-5.6-sol's rate is promotional, "available at least through
-# November 21, 2026" (developers.openai.com/api/docs/pricing, checked
-# 2026-11-01: Sol $4.00/$20.00 standard, $2.00/$10.00 Batch and Flex; Terra,
-# Luna, gpt-6-luna, gpt-5.4-mini and gpt-4.1-mini as below).  The 2026-11-01
-# Flex charges for Sol on the OpenAI cost dashboard match the recorded token
-# counts at exactly $2.00/$10.00; the earlier $5.00/$30.00 overstated Sol.
-GPT_LUNA_RATE_IN = 0.20   # gpt-5.6-luna -- budget tier (~matches Haiku 4.5's cost profile)
-GPT_LUNA_RATE_OUT = 1.20
-GPT_TERRA_RATE_IN = 2.00  # gpt-5.6-terra -- mid tier (~matches Sonnet 5)
-GPT_TERRA_RATE_OUT = 12.00
-GPT_SOL_RATE_IN = 4.00    # gpt-5.6-sol -- flagship tier; promotional pricing (see above)
-GPT_SOL_RATE_OUT = 20.00
+SONNET_RATE_IN = 3.00     # claude-sonnet-4
+SONNET_RATE_OUT = 15.00
 
 
 # --------------------------------------------------------------------------
@@ -190,58 +153,77 @@ def surgical_rejudge_cost_split(
 
 # (input_rate, output_rate) keyed by canonical model name.  Lookups
 # are case-insensitive and use substring matching (so e.g.
-# "gpt-4.1-mini-2024" still resolves to GPT_MINI rates), checked in
-# order -- entries here are deliberately ordered MOST-specific first,
-# so an exact dated/versioned model id resolves to its own generation's
-# rate rather than falling through to a newer generic fallback that
-# would silently misprice it (e.g. "claude-sonnet-4-20250514" must hit
-# the "sonnet-4" entry, not the generic "sonnet" -> current-rate one).
+# "gpt-4.1-mini-2024" still resolves to GPT_MINI rates).
 _MODEL_RATES: tuple[tuple[str, float, float], ...] = (
-    # OpenAI
+    # Embedding models (trait-gap platform, M2/M3): input-only pricing, so
+    # embedding calls are counted in usage.json like judge calls.  Local
+    # models are free but are still recorded (n_calls, tokens).
+    ("text-embedding-3-large", 0.13, 0.0),
+    ("text-embedding-3-small", 0.02, 0.0),
+    ("qwen3-embedding", 0.0, 0.0),
+    ("bge-large", 0.0, 0.0),
+    ("embeddinggemma", 0.0, 0.0),   # google/embeddinggemma-300m, local (M2 third arm)
+    # Local sampler of the trait-gap base-model generator (Qwen/Qwen3-8B-Base on the Mac): free, but its
+    # tokens are recorded (coding_plan_03_base_model.md, decision "no generator-side paid calls").
+    ("qwen3-8b-base", 0.0, 0.0),
     ("gpt-4.1-mini", GPT_MINI_RATE_IN, GPT_MINI_RATE_OUT),
     ("gpt-4o-mini", GPT_MINI_RATE_IN, GPT_MINI_RATE_OUT),
-    ("gpt-5.6-luna", GPT_LUNA_RATE_IN, GPT_LUNA_RATE_OUT),
-    ("gpt-5.6-terra", GPT_TERRA_RATE_IN, GPT_TERRA_RATE_OUT),
-    ("gpt-5.6-sol", GPT_SOL_RATE_IN, GPT_SOL_RATE_OUT),
-    # Ported from the main checkout's judge_pricing.py (2026-11-01, with the
-    # :batch / :flex suffix handling below).  GPT-6 Luna (developers.openai.com
-    # model page, read there 2026-10-26): $0.10 / $0.50, batch at half.
-    # GPT-5.4 mini (OpenAI pricing page, read there 2026-10-27): $0.75 / $4.50.
-    # Both are reasoning models: judge_tier_transport sends them
-    # reasoning_effort "none", else reasoning is billed as output.
+    # GPT-6 Luna (developers.openai.com model page, read 2026-10-26): $0.10 / $0.50, cached input
+    # $0.01, batch at half (the "gpt-" batch factor below).  A reasoning model: judges send
+    # reasoning_effort "none" (judge.JUDGE_REQUEST_SETTINGS), else reasoning is billed as output.
     ("gpt-6-luna", 0.10, 0.50),
-    # Gemini (ai.google.dev/gemini-api/docs/pricing, read 2026-11-01; batch is half):
-    # 2.5 Flash-Lite is no longer offered to new users (HTTP 404 on 2026-11-02).
+    # GPT-5.4 mini and GPT-5.6 Luna (OpenAI pricing page, read 2026-10-27; cached input $0.075 and
+    # $0.02), candidates to replace gpt-4.1-mini, which shuts on 2027-01-14.  Reasoning models, sent
+    # reasoning_effort "none" as Luna is.
+    ("gpt-5.4-mini", 0.75, 4.50),
+    ("gpt-5.6-luna", 0.20, 1.20),
+    # GPT-5.6 Terra and Sol (OpenAI pricing page, read 2026-11-01), judged for the tier evaluation.
+    ("gpt-5.6-terra", 2.00, 12.00),
+    ("gpt-5.6-sol", 4.00, 20.00),
+    # Gemini (ai.google.dev/gemini-api/docs/pricing, read 2026-11-01; Batch and Flex at half, the
+    # "gemini-" batch factor below, read 2026-11-03).  2.5 Flash-Lite answers HTTP 404 to new users
+    # (2026-11-02).
     ("gemini-3.1-flash-lite", 0.25, 1.50),
+    # TypeSafe AI's Jev (typesafe.ai and the docs' parallel-questions cookbook, read 2026-11-04): $0.042 per
+    # million input tokens, output "currently free of charge"; a request's state is billed once whatever the
+    # number of questions.  No batch or flex tier.
+    ("jev-", 0.042, 0.0),
     ("gemini-3.5-flash-lite", 0.30, 2.50),
     ("gemini-2.5-flash-lite", 0.10, 0.40),
     ("gemini-3-flash", 0.50, 3.00),
     ("gemini-2.5-flash", 0.30, 2.50),
-    ("gpt-5.4-mini", 0.75, 4.50),
-    # Anthropic -- versioned entries before the generic "sonnet"/"opus"
-    # fallbacks (see ordering note above).
-    ("sonnet-4-6", SONNET4_RATE_IN, SONNET4_RATE_OUT),
-    ("sonnet-4", SONNET4_RATE_IN, SONNET4_RATE_OUT),
-    ("sonnet-5", SONNET_RATE_IN, SONNET_RATE_OUT),
-    ("opus-5-5", 4.00, 20.00),   # Opus 5.5 (platform.claude.com pricing, read 2026-09-30); before "opus-5"
-    ("opus-5", OPUS_RATE_IN, OPUS_RATE_OUT),
-    # Haiku 5.5 (claude-haiku-5-5; Anthropic pricing page, read in the main
-    # checkout 2026-10-07): $0.10 / $0.50 for prompts up to 100,000 tokens,
-    # batch at half.  Must come before the bare "haiku" fragment, which would
-    # price it at Haiku 4.5's rates.
+    # Haiku 5.5 (claude-haiku-5-5, released 2026-10-07; pricing page read that day): $0.10 / $0.50 for
+    # prompts up to 100,000 tokens, cache reads at the standard 0.1x ($0.01), batch at half (the "haiku"
+    # batch factor below).  It must come before the bare "haiku" fragment, which would price it at 4.5's
+    # rates.  Same tokenizer as Opus 4.7 and later (about 30% more tokens of the same text).
     ("haiku-5-5", 0.10, 0.50),
     ("haiku", HAIKU_RATE_IN, HAIKU_RATE_OUT),
-    ("sonnet", SONNET_RATE_IN, SONNET_RATE_OUT),  # generic fallback -> current (5) rate
-    ("opus", OPUS_RATE_IN, OPUS_RATE_OUT),        # generic fallback -> current (5) rate; also correct for 4-6/4-7/4-8 (same price)
+    # Claude 5 and 5.5 (platform.claude.com/docs/en/about-claude/pricing,
+    # read 2026-09-30).  These lines must come before the bare "sonnet" and
+    # "opus" fragments, which would otherwise match first.  Models from 4.7 on
+    # use a tokenizer that makes about 30% more tokens of the same text.
+    ("sonnet-5", 2.00, 10.00),   # Sonnet 5 and Sonnet 5.5
+    ("fable", 10.00, 50.00),     # Fable 5 and 5.1 (same page, read 2026-10-04); the M3 overlap test's fourth judge
+    ("opus-5-5", 4.00, 20.00),
+    ("opus-5", 5.00, 25.00),     # Opus 5 (and 4.5 to 4.8 at the same price, below)
+    ("sonnet", SONNET_RATE_IN, SONNET_RATE_OUT),
+    ("opus-4-5", 5.00, 25.00),
+    ("opus-4-6", 5.00, 25.00),
+    ("opus-4-7", 5.00, 25.00),
+    ("opus-4-8", 5.00, 25.00),
+    # Not a judge: the subject model, when it is reached through OpenRouter
+    # instead of the pod (`qwen/qwen3-32b` served by DeepInfra; its price on
+    # 2026-09-29).  Used by data_analysis/opening_form_experiment.py.
+    ("qwen3-32b", 0.08, 0.28),
+    # Retired Opus 4 and 4.1 ($15 / $75) are left out on purpose: a lookup
+    # fails loud rather than pricing them as a current Opus.
 )
 
 
 # Batch requests are billed at a fraction of the real-time price.  A call
 # site that runs in batch mode keeps its usage under "<model>:batch", which is
 # priced with the factor below, so that a usage record says how the tokens
-# were bought and a merged record recomputes to the right total.  (Ported
-# verbatim from the main checkout's judge_pricing.py, 2026-11-01; the
-# qwen3-32b factor has no rate row in this tree and is kept for parity.)
+# were bought and a merged record recomputes to the right total.
 BATCH_SUFFIX = ":batch"
 _BATCH_PRICE_FACTORS: tuple[tuple[str, float], ...] = (
     ("qwen3-32b", 0.8),   # DeepInfra's own batch API, 2026-09-29
@@ -250,13 +232,103 @@ _BATCH_PRICE_FACTORS: tuple[tuple[str, float], ...] = (
     ("sonnet", 0.5),
     ("opus", 0.5),
     ("fable", 0.5),
+    ("gemini-", 0.5),     # Gemini Batch API (aistudio.google.com/docs/pricing, read 2026-11-03: 3.1 and 3.5 Flash-Lite)
 )
 
 
 #: OpenAI Flex processing (``service_tier="flex"``) is billed at Batch API rates
-#: (developers.openai.com Flex guide, read in the main checkout 2026-10-26); its
-#: usage is kept under ``<model>:flex`` and priced with the batch factors.
+#: (developers.openai.com Flex guide, read 2026-10-26); its usage is kept under
+#: ``<model>:flex`` and priced with the batch factors.  Gemini's Flex tier too
+#: (``"serviceTier": "flex"``, 2026-11-05): input, cached input, storage and output
+#: all at half the standard price, as its Batch API (aistudio.google.com/docs/pricing,
+#: read 2026-11-05: 3.1 Flash-Lite $0.125 / $0.0125 cached / $0.75 against $0.25 /
+#: $0.025 / $1.50).
 FLEX_SUFFIX = ":flex"
+#: The providers whose ``<model>:flex`` has a price.
+_FLEX_PREFIXES = ("gpt-", "gemini-")
+
+
+# Explicit-cache storage (Gemini, 2026-11-05): USD per 1M cached tokens per hour, standard tier
+# (aistudio.google.com/docs/pricing, read that day: 3.1 Flash-Lite $1.00 an hour, Flex and Batch $0.50, the
+# "gemini-" batch factor).  A usage record keeps it as token-hours (UsageTotals.cache_storage_token_hours),
+# priced at cache_storage_rate of its key.  Only explicit caches bill storage; the implicit ones and the
+# other providers' caches bill none.
+_CACHE_STORAGE_RATES: tuple[tuple[str, float], ...] = (
+    ("gemini-3.1-flash-lite", 1.00),
+)
+
+
+def cache_storage_rate(model: str) -> float:
+    """USD per 1M token-hours of explicit-cache storage for a usage key (``:batch`` and ``:flex`` at the batch
+    factor).  Raises ``KeyError`` for a model with no rate, so that a run cannot store a cache it prices as
+    free."""
+    m = model.lower()
+    factor = 1.0
+    for suffix in (FLEX_SUFFIX, BATCH_SUFFIX):
+        if m.endswith(suffix):
+            m = m[: -len(suffix)]
+            factor = next((f for fragment, f in _BATCH_PRICE_FACTORS if fragment in m), None)
+            if factor is None:
+                raise KeyError(f"No batch price factor for {model!r} (cache storage)")
+    for fragment, rate in _CACHE_STORAGE_RATES:
+        if fragment in m:
+            return rate * factor
+    raise KeyError(f"No cache storage rate for {model!r}.  Add one to "
+                   f"assistant_axis/judge_pricing.py:_CACHE_STORAGE_RATES before caching with it.")
+
+
+# ---------------------------------------------------------------------------
+# Prompt caching (2026-11-01)
+# ---------------------------------------------------------------------------
+#
+# A cached prompt token is billed at a multiple of the model's input rate.
+# OpenAI's GPT-5.6 and later charge a cache WRITE at 1.25x and a READ at
+# 0.1x (developers.openai.com prompt-caching guide, read 2026-11-01: "not an
+# additive fee", the written tokens are billed at 1.25x instead of 1x); in
+# their default, implicit, mode they write every prompt of 1,024 tokens or
+# more, so a judge prompt, which ends in a unique response and is never read
+# back, pays the premium for nothing (Roger's dashboard, luna Flex 29 Oct to
+# 1 Nov 2026: 1,584M tokens written at $0.125 per 1M = 1.25 x the $0.10 Flex
+# rate, 4.9M read; judge.DEFAULT_PROMPT_CACHE turns the writes off).  Earlier
+# OpenAI models write free and read at their cached-input rate (gpt-4.1-mini
+# $0.10 of $0.40; gpt-5.4-mini $0.075 of $0.75, pricing page 2026-10-27).
+# Anthropic writes at 1.25x (the five-minute cache) and reads at 0.1x, only
+# when a request sends cache_control, which no judge here does.  The factors
+# multiply the rate a usage key resolves to, batch and Flex rates included.
+# A model in no row takes (1.0, 1.0): no discount and no premium.
+_CACHE_RATE_FACTORS: tuple[tuple[str, float, float], ...] = (
+    ("gpt-5.6", 1.25, 0.10),
+    ("gpt-6", 1.25, 0.10),
+    ("gpt-5.4-mini", 1.0, 0.10),
+    ("gpt-4.1-mini", 1.0, 0.25),
+    ("claude", 1.25, 0.10),
+    ("haiku", 1.25, 0.10),
+    ("sonnet", 1.25, 0.10),
+    ("opus", 1.25, 0.10),
+    ("fable", 1.25, 0.10),
+    # Gemini's implicit cache (2026-11-04): no write premium, reads at a tenth (3.1 Flash-Lite $0.025 of $0.25,
+    # batch $0.0125 of $0.125; aistudio.google.com/docs/pricing, read that day); a live probe of Flash-Lite
+    # read 6,125 of 10,145 prompt tokens of a repeated prefix.  Explicit caches (2026-11-05,
+    # judge_tier_cost_eval --gemini_cache explicit) read at the same tenth ($0.0125 on Flex and Batch) and bill
+    # storage by the token-hour (cache_storage_rate); their creation is charged as cache-written tokens at the
+    # factor 1.0, the tier's input rate, an assumption (not verified against a bill).
+    ("gemini", 1.0, 0.10),
+)
+
+
+def cache_rate_factors(model: str) -> tuple[float, float]:
+    """``(write_factor, read_factor)``: what a cache-written and a cache-read
+    prompt token cost as multiples of ``model``'s input rate
+    (:data:`_CACHE_RATE_FACTORS`; a ``:batch`` or ``:flex`` suffix is ignored,
+    the factors apply to that rate).  ``(1.0, 1.0)`` for a model in no row."""
+    m = model.lower()
+    for suffix in (FLEX_SUFFIX, BATCH_SUFFIX):
+        if m.endswith(suffix):
+            m = m[: -len(suffix)]
+    for fragment, write, read in _CACHE_RATE_FACTORS:
+        if fragment in m:
+            return write, read
+    return 1.0, 1.0
 
 
 def price_for_model(model: str) -> tuple[float, float]:
@@ -267,18 +339,14 @@ def price_for_model(model: str) -> tuple[float, float]:
     ``gpt-4.1-mini`` rates, ``"claude-haiku-4-5-20251001"`` to
     ``haiku`` rates, etc.
 
-    A ``<model>:batch`` key is priced at the model's rate times its
-    :data:`_BATCH_PRICE_FACTORS` factor, and an OpenAI ``<model>:flex``
-    key at the same batch rate (:data:`FLEX_SUFFIX`).
-
     Raises ``KeyError`` for unrecognised models — callers MUST
     register new models here before judging with them, otherwise
     cost will silently appear free in budget reports.
     """
     m = model.lower()
     if m.endswith(FLEX_SUFFIX):
-        if not m.startswith("gpt-"):
-            raise KeyError(f"Flex processing is OpenAI's; no flex price for {model!r}")
+        if not m.startswith(_FLEX_PREFIXES):
+            raise KeyError(f"Flex processing is OpenAI's and Gemini's; no flex price for {model!r}")
         return price_for_model(m[: -len(FLEX_SUFFIX)] + BATCH_SUFFIX)
     if m.endswith(BATCH_SUFFIX):
         rate_in, rate_out = price_for_model(m[: -len(BATCH_SUFFIX)])
@@ -294,10 +362,8 @@ def price_for_model(model: str) -> tuple[float, float]:
             return rate_in, rate_out
     raise KeyError(
         f"Unknown judge model {model!r} for pricing.  Add an entry "
-        f"to assistant_axis/judge_pricing.py:_MODEL_RATES -- this is the "
-        f"one module to update (results_analysis/plot_batch_size_quality_vs_cost.py "
-        f"has its own copy deliberately pinned to the historical rates its "
-        f"archived chart data was actually billed at; see that file's comment)."
+        f"to assistant_axis/judge_pricing.py:_MODEL_RATES (and the "
+        f"corresponding constants in plot_batch_size_quality_vs_cost.py)."
     )
 
 
@@ -305,14 +371,25 @@ def cost_for_usage(
     model: str,
     prompt_tokens: int,
     completion_tokens: int,
+    cache_write_tokens: int = 0,
+    cache_read_tokens: int = 0,
+    cache_storage_token_hours: float = 0.0,
 ) -> float:
-    """USD cost of a single (prompt, completion) token pair at the
-    model's rates.  Convenience wrapper around :func:`price_for_model`.
+    """USD cost of one call's tokens at the model's rates.  ``prompt_tokens``
+    is every input token, the cache-written and cache-read ones included;
+    those are priced at :func:`cache_rate_factors` times the input rate, the
+    rest at the input rate.  ``cache_storage_token_hours`` (an explicit Gemini
+    cache's storage, 2026-11-05) is priced at :func:`cache_storage_rate`.
     """
     rate_in, rate_out = price_for_model(model)
+    write_factor, read_factor = cache_rate_factors(model)
+    plain = prompt_tokens - cache_write_tokens - cache_read_tokens
+    storage = cache_storage_token_hours * cache_storage_rate(model) / 1_000_000.0 if cache_storage_token_hours else 0.0
     return (
-        prompt_tokens * rate_in / 1_000_000.0
+        (plain + cache_write_tokens * write_factor + cache_read_tokens * read_factor)
+        * rate_in / 1_000_000.0
         + completion_tokens * rate_out / 1_000_000.0
+        + storage
     )
 
 
@@ -320,51 +397,102 @@ def cost_for_usage(
 # Usage extractors
 # ---------------------------------------------------------------------------
 
-def extract_usage_anthropic(resp: Any) -> tuple[int, int]:
-    """Return ``(prompt_tokens, completion_tokens)`` from an Anthropic
-    Messages response.  Tolerates SDK version drift: the canonical
-    field is ``resp.usage`` with ``input_tokens`` / ``output_tokens``,
-    but legacy SDKs used ``prompt_tokens`` / ``completion_tokens``.
+@dataclass(frozen=True)
+class TokenUsage:
+    """One call's token counts, as the accumulators charge them:
+    ``prompt_tokens`` is every input token, the cache-written and cache-read
+    ones included (OpenAI's ``prompt_tokens`` counts them in; Anthropic's
+    ``input_tokens`` leaves them out, and :func:`anthropic_usage` adds them)."""
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    cache_write_tokens: int = 0
+    cache_read_tokens: int = 0
 
-    Returns ``(0, 0)`` when usage is missing entirely — never raises
-    (keeps the call path resilient to partial response objects from
-    error retries).
-    """
-    usage = getattr(resp, "usage", None)
+
+def _field(obj: Any, *names: str) -> Any:
+    """The first of ``names`` that ``obj`` (an SDK object or a dict) carries
+    with a value that is not None."""
+    for name in names:
+        value = obj.get(name) if isinstance(obj, dict) else getattr(obj, name, None)
+        if value is not None:
+            return value
+    return None
+
+
+def _usage_of(resp: Any) -> Any:
+    """The usage block of a response (an SDK object or a Batch API body)."""
+    return resp.get("usage") if isinstance(resp, dict) else getattr(resp, "usage", None)
+
+
+def openai_usage(resp: Any) -> TokenUsage:
+    """The token counts of an OpenAI chat-completions response: an SDK
+    response object or a Batch API result body (a dict).  The cache counts
+    come from ``prompt_tokens_details`` (``cached_tokens`` for reads,
+    ``cache_write_tokens`` for writes, which the SDK keeps as an extra field),
+    or ``input_tokens_details`` (the Responses API).  Zeros when usage is
+    missing; never raises (a partial response from a retry)."""
+    usage = _usage_of(resp)
     if usage is None:
-        return 0, 0
-    in_tokens = (
-        getattr(usage, "input_tokens", None)
-        or getattr(usage, "prompt_tokens", None)
-        or 0
+        return TokenUsage()
+    details = _field(usage, "prompt_tokens_details", "input_tokens_details")
+    return TokenUsage(
+        prompt_tokens=int(_field(usage, "prompt_tokens", "input_tokens") or 0),
+        completion_tokens=int(_field(usage, "completion_tokens", "output_tokens") or 0),
+        cache_write_tokens=int(_field(details, "cache_write_tokens") or 0) if details is not None else 0,
+        cache_read_tokens=int(_field(details, "cached_tokens") or 0) if details is not None else 0,
     )
-    out_tokens = (
-        getattr(usage, "output_tokens", None)
-        or getattr(usage, "completion_tokens", None)
-        or 0
+
+
+def anthropic_usage(resp: Any) -> TokenUsage:
+    """The token counts of an Anthropic Messages response (an SDK object or a
+    Message Batches result dict).  ``input_tokens`` excludes the cached
+    tokens, so ``prompt_tokens`` is their sum with
+    ``cache_creation_input_tokens`` and ``cache_read_input_tokens``.  Zeros
+    when usage is missing; never raises."""
+    usage = _usage_of(resp)
+    if usage is None:
+        return TokenUsage()
+    plain = int(_field(usage, "input_tokens", "prompt_tokens") or 0)
+    write = int(_field(usage, "cache_creation_input_tokens") or 0)
+    read = int(_field(usage, "cache_read_input_tokens") or 0)
+    return TokenUsage(
+        prompt_tokens=plain + write + read,
+        completion_tokens=int(_field(usage, "output_tokens", "completion_tokens") or 0),
+        cache_write_tokens=write,
+        cache_read_tokens=read,
     )
-    return int(in_tokens), int(out_tokens)
+
+
+def gemini_usage(data: Any) -> TokenUsage:
+    """The token counts of a Gemini generateContent response (a dict, live or a Batch API result):
+    ``promptTokenCount`` counts the cached tokens in, ``cachedContentTokenCount`` is the part read from the
+    implicit cache, and the output includes the thought tokens, which Google bills as output.  Zeros when
+    usage is missing; never raises."""
+    u = (data.get("usageMetadata") if isinstance(data, dict) else None) or {}
+    return TokenUsage(
+        prompt_tokens=int(u.get("promptTokenCount") or 0),
+        completion_tokens=int(u.get("candidatesTokenCount") or 0) + int(u.get("thoughtsTokenCount") or 0),
+        cache_read_tokens=int(u.get("cachedContentTokenCount") or 0),
+    )
+
+
+def extract_usage_anthropic(resp: Any) -> tuple[int, int]:
+    """``(prompt_tokens, completion_tokens)`` of an Anthropic Messages
+    response (:func:`anthropic_usage`; the tuple form of the older callers).
+    Tolerates SDK version drift (``input_tokens`` / ``output_tokens``, or the
+    legacy ``prompt_tokens`` / ``completion_tokens``) and a missing usage block
+    (``(0, 0)``, never raises).
+    """
+    u = anthropic_usage(resp)
+    return u.prompt_tokens, u.completion_tokens
 
 
 def extract_usage_openai(resp: Any) -> tuple[int, int]:
-    """Return ``(prompt_tokens, completion_tokens)`` from an OpenAI
-    chat-completions response.  Same SDK-drift tolerance as the
-    Anthropic helper.
+    """``(prompt_tokens, completion_tokens)`` of an OpenAI chat-completions
+    response (:func:`openai_usage`; the tuple form of the older callers).
     """
-    usage = getattr(resp, "usage", None)
-    if usage is None:
-        return 0, 0
-    in_tokens = (
-        getattr(usage, "prompt_tokens", None)
-        or getattr(usage, "input_tokens", None)
-        or 0
-    )
-    out_tokens = (
-        getattr(usage, "completion_tokens", None)
-        or getattr(usage, "output_tokens", None)
-        or 0
-    )
-    return int(in_tokens), int(out_tokens)
+    u = openai_usage(resp)
+    return u.prompt_tokens, u.completion_tokens
 
 
 # ---------------------------------------------------------------------------
@@ -380,8 +508,15 @@ class UsageTotals:
 
     Attributes:
         model: Canonical model name (used for re-deriving the cost).
-        prompt_tokens: Sum of input/prompt tokens across all calls.
+        prompt_tokens: Sum of input/prompt tokens across all calls, the
+            cache-written and cache-read ones included.
         completion_tokens: Sum of output/completion tokens.
+        cache_write_tokens: Of the prompt tokens, those written to the
+            provider's prompt cache (priced at :func:`cache_rate_factors`
+            times the input rate; 2026-11-01).
+        cache_read_tokens: Of the prompt tokens, those read from it.
+        cache_storage_token_hours: Explicit-cache storage (Gemini, 2026-11-05),
+            in token-hours, priced at :func:`cache_storage_rate`.
         cost_usd: Running total cost in USD, computed at charge time
             using :func:`price_for_model` rates.
         n_calls: Number of API calls accumulated (for log lines).
@@ -391,29 +526,47 @@ class UsageTotals:
     completion_tokens: int = 0
     cost_usd: float = 0.0
     n_calls: int = 0
+    cache_write_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_storage_token_hours: float = 0.0
 
-    def charge(self, prompt_tokens: int, completion_tokens: int) -> float:
-        """Add one API call's tokens; return its USD cost contribution."""
-        rate_in, rate_out = price_for_model(self.model)
-        delta_cost = (
-            prompt_tokens * rate_in / 1_000_000.0
-            + completion_tokens * rate_out / 1_000_000.0
-        )
+    def charge(self, prompt_tokens: int, completion_tokens: int,
+               cache_write_tokens: int = 0, cache_read_tokens: int = 0, *,
+               cache_storage_token_hours: float = 0.0, n_calls: int = 1) -> float:
+        """Add one API call's tokens; return its USD cost contribution.
+        ``prompt_tokens`` includes the cache-written and cache-read tokens.
+        ``n_calls=0`` for a charge that is not a judge call (an explicit cache's
+        creation or storage, 2026-11-05)."""
+        delta_cost = cost_for_usage(self.model, int(prompt_tokens), int(completion_tokens),
+                                    int(cache_write_tokens), int(cache_read_tokens),
+                                    float(cache_storage_token_hours))
         self.prompt_tokens += int(prompt_tokens)
         self.completion_tokens += int(completion_tokens)
+        self.cache_write_tokens += int(cache_write_tokens)
+        self.cache_read_tokens += int(cache_read_tokens)
+        self.cache_storage_token_hours += float(cache_storage_token_hours)
         self.cost_usd += delta_cost
-        self.n_calls += 1
+        self.n_calls += int(n_calls)
         return delta_cost
 
     def as_dict(self) -> dict:
-        """Serialisable form for ``usage.json`` side-car / provenance notes."""
-        return {
+        """Serialisable form for ``usage.json`` side-car / provenance notes.
+        The cache counts are written only when they are not zero, so a record
+        of a run that cached nothing reads as before."""
+        out = {
             "model": self.model,
             "prompt_tokens": self.prompt_tokens,
             "completion_tokens": self.completion_tokens,
             "cost_usd": round(self.cost_usd, 4),
             "n_calls": self.n_calls,
         }
+        if self.cache_write_tokens:
+            out["cache_write_tokens"] = self.cache_write_tokens
+        if self.cache_read_tokens:
+            out["cache_read_tokens"] = self.cache_read_tokens
+        if self.cache_storage_token_hours:
+            out["cache_storage_token_hours"] = round(self.cache_storage_token_hours, 4)
+        return out
 
     @classmethod
     def from_dict(cls, d: dict) -> "UsageTotals":
@@ -426,16 +579,20 @@ class UsageTotals:
         pt = int(d.get("prompt_tokens") or 0)
         ct = int(d.get("completion_tokens") or 0)
         n  = int(d.get("n_calls") or 0)
+        cw = int(d.get("cache_write_tokens") or 0)
+        cr = int(d.get("cache_read_tokens") or 0)
+        sh = float(d.get("cache_storage_token_hours") or 0.0)
         # Recompute cost from tokens (the stored value is rounded; we
         # keep full precision in memory).
         try:
-            cost = cost_for_usage(model, pt, ct)
+            cost = cost_for_usage(model, pt, ct, cw, cr, sh)
         except KeyError:
             # Unknown model: fall back to the persisted cost so we
             # don't silently zero out historic totals.
             cost = float(d.get("cost_usd") or 0.0)
         return cls(model=model, prompt_tokens=pt, completion_tokens=ct,
-                   cost_usd=cost, n_calls=n)
+                   cost_usd=cost, n_calls=n, cache_write_tokens=cw, cache_read_tokens=cr,
+                   cache_storage_token_hours=sh)
 
 
 # ---------------------------------------------------------------------------
@@ -469,16 +626,28 @@ class MultiModelUsage:
 
     def charge(
         self, model: str, prompt_tokens: int, completion_tokens: int,
+        cache_write_tokens: int = 0, cache_read_tokens: int = 0, *,
+        cache_storage_token_hours: float = 0.0, n_calls: int = 1,
     ) -> float:
         """Tick the (model) sub-accumulator.  Returns the USD cost
         contribution of this single call (sum across all token streams).
+        The cache counts are the part of ``prompt_tokens`` written to or
+        read from the provider's prompt cache (:class:`TokenUsage`).
 
         The model entry is auto-created on first use; subsequent calls
         with the same name accumulate.  Never raises (no budget cap).
         """
         if model not in self.per_model:
             self.per_model[model] = UsageTotals(model=model)
-        return self.per_model[model].charge(prompt_tokens, completion_tokens)
+        return self.per_model[model].charge(prompt_tokens, completion_tokens,
+                                            cache_write_tokens, cache_read_tokens,
+                                            cache_storage_token_hours=cache_storage_token_hours,
+                                            n_calls=n_calls)
+
+    def charge_usage(self, model: str, usage: TokenUsage) -> float:
+        """:meth:`charge` from a :class:`TokenUsage`."""
+        return self.charge(model, usage.prompt_tokens, usage.completion_tokens,
+                           usage.cache_write_tokens, usage.cache_read_tokens)
 
     @property
     def total_cost_usd(self) -> float:
@@ -535,24 +704,29 @@ class MultiModelUsage:
             tgt = self.per_model[model]
             tgt.prompt_tokens += sub.prompt_tokens
             tgt.completion_tokens += sub.completion_tokens
+            tgt.cache_write_tokens += sub.cache_write_tokens
+            tgt.cache_read_tokens += sub.cache_read_tokens
+            tgt.cache_storage_token_hours += sub.cache_storage_token_hours
             tgt.n_calls += sub.n_calls
             # Recompute cost from totals at current rates.
             try:
-                rate_in, rate_out = price_for_model(model)
-                tgt.cost_usd = (
-                    tgt.prompt_tokens * rate_in / 1_000_000.0
-                    + tgt.completion_tokens * rate_out / 1_000_000.0
-                )
+                tgt.cost_usd = cost_for_usage(model, tgt.prompt_tokens, tgt.completion_tokens,
+                                              tgt.cache_write_tokens, tgt.cache_read_tokens,
+                                              tgt.cache_storage_token_hours)
             except KeyError:
                 # Unknown model: keep sum-of-stored-cost as best-effort.
                 tgt.cost_usd += sub.cost_usd
 
     def log_line(self, prefix: str = "[usage]") -> str:
-        """One-line human-readable summary suitable for end-of-run logs."""
+        """One-line human-readable summary suitable for end-of-run logs
+        (the cache counts shown when they are not zero)."""
         if not self.per_model:
             return f"{prefix} (no API calls)"
         per = "; ".join(
             f"{m}: ${t.cost_usd:.3f} in={t.prompt_tokens:,} out={t.completion_tokens:,} n={t.n_calls:,}"
+            + (f" cache_write={t.cache_write_tokens:,}" if t.cache_write_tokens else "")
+            + (f" cache_read={t.cache_read_tokens:,}" if t.cache_read_tokens else "")
+            + (f" cache_storage={t.cache_storage_token_hours:,.0f} token-h" if t.cache_storage_token_hours else "")
             for m, t in sorted(self.per_model.items())
         )
         return (
@@ -577,18 +751,29 @@ class MultiModelUsage:
             return cls()
         try:
             obj = json.loads(p.read_text())
-        except Exception:
+        except Exception as e:  # noqa: BLE001
+            # Callers merge this into the record they write back, so an
+            # empty tracker here resets the cumulative history: say so
+            # (before 2026-10-12 this was silent).
+            logger.warning(f"usage record {p} is unreadable ({type(e).__name__}: {e}); "
+                           f"starting from zero -- the file will be overwritten")
             return cls()
-        # Envelope-wrapped form (json_metadata) keeps the payload under
-        # the same top-level keys; we just look for "per_model" first.
+        if not isinstance(obj, dict):
+            logger.warning(f"usage record {p} is not a JSON object; starting from zero")
+            return cls()
+        # Top-level per_model: the bare as_dict() form, or as_dict() with a
+        # _provenance key beside it.
         if "per_model" in obj:
             return cls.from_dict(obj)
-        # If wrapped, the payload may be under "_payload" or similar;
-        # try common shapes before giving up.
-        for k in ("payload", "_payload", "usage", "data"):
+        # Wrapped forms: "result" is json_metadata's envelope (the shape the
+        # docstring promises; missing before 2026-10-12), the others are
+        # older ad-hoc wrappers.
+        for k in ("result", "payload", "_payload", "usage", "data"):
             sub = obj.get(k)
             if isinstance(sub, dict) and "per_model" in sub:
                 return cls.from_dict(sub)
+        if obj:
+            logger.warning(f"usage record {p} has no per_model block; starting from zero")
         return cls()
 
     def write_json(self, path) -> None:
@@ -647,12 +832,13 @@ class BudgetTracker:
     # Internal: log-line throttling.
     _last_logged_cost: float = field(default=0.0, repr=False)
 
-    def charge(self, prompt_tokens: int, completion_tokens: int) -> float:
+    def charge(self, prompt_tokens: int, completion_tokens: int,
+               cache_write_tokens: int = 0, cache_read_tokens: int = 0) -> float:
         """Tick the underlying totals; raise if the cap is crossed.
 
         Returns the USD cost contribution for this single call.
         """
-        delta = self.totals.charge(prompt_tokens, completion_tokens)
+        delta = self.totals.charge(prompt_tokens, completion_tokens, cache_write_tokens, cache_read_tokens)
         if self.budget_usd is not None and self.totals.cost_usd > self.budget_usd:
             raise BudgetExceededError(self.totals, self.budget_usd)
         return delta
@@ -719,11 +905,14 @@ __all__ = [
     "SONNET_RATE_IN",
     "SONNET_RATE_OUT",
     "ROLES_RESPONSE_LENGTH_FACTOR",
-    "BATCH_SUFFIX",
-    "FLEX_SUFFIX",
     "price_for_model",
+    "cache_rate_factors",
+    "cache_storage_rate",
     "cost_for_usage",
     "surgical_rejudge_cost_split",
+    "TokenUsage",
+    "openai_usage",
+    "anthropic_usage",
     "extract_usage_anthropic",
     "extract_usage_openai",
     "UsageTotals",

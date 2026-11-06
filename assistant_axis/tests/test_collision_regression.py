@@ -11,16 +11,22 @@ If a future refactor accidentally re-introduces the bug — typically
 by iterating ``for et in ("traits", "roles"):`` and merging into a
 single bare-name dict — these tests fail loudly.
 
-The collision set is the 9 names that appear in BOTH the project's
-trait corpus and its role corpus (May 2026 dataset).  Future dataset
-edits may shrink or grow this set; if so, update :data:`COLLISIONS`
-to match :data:`assistant_axis.tests.test_entity_id.COLLISION_NAMES`.
+The collision set is the 11 names that appear in BOTH the project's
+trait corpus and its role corpus (nine in the May 2026 dataset;
+``specialist`` and ``parent`` joined in September 2026).  Future
+dataset edits may shrink or grow this set; if so, update
+:data:`assistant_axis.tests.test_entity_id.COLLISION_NAMES` and
+:data:`EXPECTED_N_COLLISIONS` here.
+:func:`test_collision_names_match_the_corpus_on_disk` compares the list
+with the stems in ``data/{traits,roles}/instructions/``, so it cannot
+go stale silently.
 """
 from __future__ import annotations
 
 import pytest
 
 from assistant_axis.entity_id import (
+    default_data_dir,
     entity_id,
     is_entity_id,
     parse_entity_id,
@@ -29,16 +35,32 @@ from assistant_axis.tests.test_entity_id import COLLISION_NAMES
 
 
 # Project-wide expected collision count — anchors the test suite to
-# the May 2026 dataset.  Increase / decrease alongside corpus edits.
-EXPECTED_N_COLLISIONS = 9
+# the corpus.  Increase / decrease alongside corpus edits.
+EXPECTED_N_COLLISIONS = 11
 
 
 def test_collision_count_matches_project_baseline():
-    """Anchor test: the project ships 9 known trait/role name
-    collisions (May 2026).  Any drift here is a meaningful change to
+    """Anchor test: the project ships 11 known trait/role name
+    collisions (October 2026).  Any drift here is a meaningful change to
     the corpus that the operator should notice consciously, not a
     silent shift."""
     assert len(COLLISION_NAMES) == EXPECTED_N_COLLISIONS
+
+
+def test_collision_names_match_the_corpus_on_disk():
+    """The hard-coded list is the actual intersection of the trait and
+    role stems on disk.  A trait or role seeded (or renamed) onto a name
+    the other kind already has fails here, so the list, the count and
+    the documentation are updated on purpose (W17, 2026-10-09: parent
+    and specialist had joined unnoticed)."""
+    data = default_data_dir()
+    stems = {kind: {p.stem for p in (data / kind / "instructions").glob("*.json")}
+             for kind in ("traits", "roles")}
+    assert all(len(s) > 100 for s in stems.values()), f"corpus not found under {data}"
+    on_disk = sorted(stems["traits"] & stems["roles"])
+    assert sorted(COLLISION_NAMES) == on_disk, (
+        f"collision names on disk {on_disk} differ from COLLISION_NAMES; update "
+        "test_entity_id.COLLISION_NAMES, EXPECTED_N_COLLISIONS and the docs that list them")
 
 
 # ---------------------------------------------------------------------------
@@ -69,7 +91,7 @@ def test_dual_iteration_bare_name_loses_data():
     for et in ("traits", "roles"):
         for name, vec in src[et].items():
             bad[name] = vec  # noqa: kind-collision  -- Bug A reproducer
-    # All 9 names are present, but only with the SECOND iteration's
+    # All 11 names are present, but only with the SECOND iteration's
     # values (roles, since it iterated last).  Trait data is gone.
     assert len(bad) == EXPECTED_N_COLLISIONS
     for name in COLLISION_NAMES:
@@ -85,7 +107,7 @@ def test_dual_iteration_entity_id_keeps_both():
     for et in ("traits", "roles"):
         for name, vec in src[et].items():
             good[entity_id(name, et)] = vec
-    # Both kinds preserved: 2 × 9 = 18 entries.
+    # Both kinds preserved: 2 × 11 = 22 entries.
     assert len(good) == 2 * EXPECTED_N_COLLISIONS
     for name in COLLISION_NAMES:
         assert good[entity_id(name, "traits")] == f"trait_vec_{name}"
@@ -176,7 +198,7 @@ def test_entity_id_round_trip_for_all_collisions():
 
 
 def test_bare_collision_name_is_not_entity_id():
-    """The 9 collision names, on their own, are NOT entity_ids — only
+    """The 11 collision names, on their own, are NOT entity_ids — only
     the suffixed forms are.  Critical for guard clauses in code that
     needs to detect 'is this already disambiguated?'"""
     for name in COLLISION_NAMES:
@@ -227,11 +249,12 @@ def test_eid_then_bare_lookup_flow():
 def test_documented_collisions_complete():
     """If a developer adds or removes collision names from the
     project's canonical list, this test fails and forces them to
-    update the count + also any documentation referencing 'the 9
+    update the count + also any documentation referencing 'the 11
     collision names' (AGENT_NOTES.md, plan documents, etc.)."""
     expected = {
         "ascetic", "contrarian", "cosmopolitan", "generalist",
-        "pacifist", "patient", "perfectionist", "romantic", "stoic",
+        "pacifist", "parent", "patient", "perfectionist", "romantic",
+        "specialist", "stoic",
     }
     assert set(COLLISION_NAMES) == expected
 

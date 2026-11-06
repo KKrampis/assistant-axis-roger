@@ -103,7 +103,21 @@ at slot 3 it's slightly behind K=0 (because soft-shear alone wins there)
 but better than K=3.  Picking 2 over 3 for a small but consistent
 improvement (~0.005 ρ on the 45-axis evaluation, monotonic across slots).
 Was 3 historically (peak from the older K-sweep parabola fit done
-without shear in the toolbox).
+without shear in the toolbox).  One script keeps 3 on purpose:
+:data:`OPTIMAL_AXIS_SOFT_K`.
+"""
+
+OPTIMAL_AXIS_SOFT_K: int = 3
+"""Default soft-K for ``results_analysis/optimal_axis_for_judge.py``
+(its ``DEFAULT_WHITENING`` is ``f"soft_K={OPTIMAL_AXIS_SOFT_K}"``).
+
+Deliberately not :data:`DEFAULT_SOFT_K`: every recorded run of that script
+(the five ``roger/optimal_axis/truthful_vs_deceitful_*_softK3_*`` outputs of
+2026-05-08 to 05-11) used soft_K=3, its default since 2026-05-01, and the
+script's defaults are kept able to reproduce them (walk-through D6, Roger,
+2026-10-12: align the script to what its recorded runs used).  Unifying the
+project on 2 is a separate decision; a run at 2 writes a ``softK2`` output
+directory, so it would not overwrite the records.
 """
 
 DEFAULT_WHITENING_SPEC: str = "soft_shear=3"

@@ -101,7 +101,7 @@ GPT-5.6, and temperature little to Haiku 4.5.
 - **Prices are per item for this task**: prompts of about 315 tokens, of which
   the 244-token rubric is shared across an axis, and replies of about 60.
   That is below every judge's minimum for prompt caching, so caching cannot
-  lower these costs.  A different task (judging responses, with long prompts)
+  lower these costs (on a longer prompt it can raise them: see update 3).  A different task (judging responses, with long prompts)
   has a different input/output mix and needs its own prices.
 - Only gpt-4.1-mini and claude-haiku-4-5 ran at T=0.  The other judges
   refuse T=0 or take no temperature setting, and ran at their default with
@@ -306,6 +306,212 @@ uv run python results_analysis/judge_tier_cost_plot_pooled.py --experiments_dir 
 ```
 
 ---
+
+## Update 3, 2026-11-02: tuning the batched method
+
+Update 2 settled on batched percentile judging with two passes at ten entities a
+call. This update tunes it: how many passes, how many entities per call (N), and
+how much reasoning, on the three cheap judges Roger shortlisted (GPT-5.6 Luna,
+GPT-6 Luna, Haiku 5.5). A *pass* judges every entity once in one random batch
+order; passes are averaged per entity. All numbers are description judging, slot 6,
+layer 25, raw projection, cost at real-time list price (Flex and Batch are half that).
+
+**Answer: N=20, two passes, no reasoning; Luna if you can afford one judge, Luna +
+Haiku if you can afford two.**
+
+| arm | GPT-5.6 Luna | GPT-6 Luna | Haiku 5.5 |
+|---|---|---|---|
+| 1 pass, N=10 | 0.675, $0.024 | 0.649, $0.011 | 0.663, $0.024 |
+| **2 passes, N=10 (the shared baseline)** | 0.697, $0.047 | 0.675, $0.021 | 0.684, $0.048 |
+| 3 passes, N=10 | 0.707, $0.071 | 0.685, $0.032 | 0.693, $0.072 |
+| 4 passes, N=10 | 0.711, $0.095 | 0.689, $0.043 | 0.695, $0.096 |
+| N=5, 2 passes | 0.693, $0.056 | 0.669, $0.026 | 0.676, $0.059 |
+| N=7, 2 passes | 0.697, $0.051 | 0.674, $0.023 | 0.681, $0.053 |
+| N=15, 2 passes | 0.703, $0.044 | 0.677, $0.020 | 0.685, $0.045 |
+| N=20, 2 passes | 0.703, $0.042 | 0.680, $0.019 | 0.684, $0.042 |
+| low reasoning, 2 passes, N=10 | 0.701, $0.066 | 0.673, $0.030 | 0.689, $0.064 |
+| medium reasoning, 2 passes, N=10 | 0.700, $0.079 | 0.672, $0.036 | 0.689, $0.076 |
+
+The 30 development axes
+([`tier_eval_axes_dev30.tsv`](../../scripts/tier_eval_axes_dev30.tsv)). Figure:
+[`judge_tier_grid_dev30.png`](./judge_tier_grid_dev30/judge_tier_grid_dev30.png); numbers:
+[`judge_tier_grid_dev30.json`](./judge_tier_grid_dev30/judge_tier_grid_dev30.json).
+
+What the grid says, with 95% bootstrap intervals over axes on the paired differences:
+
+- **Passes help, with diminishing returns.** The third adds 0.008 to 0.010 and the
+  fourth 0.003 to 0.005; every interval excludes zero. Costs are linear in passes.
+- **Bigger batches are cheaper and no worse.** N=20 costs about 11% less than N=10 with
+  prompt caching off (see **Cost** below).
+  N=5 costs about 20% more and scores 0.004 to 0.008 lower. N=20 is the top of the
+  range tried and the Lunas' best, so N=30 is untested and may do better still.
+- **Reasoning does not pay.** It costs a third to 70% more and no interval excludes zero
+  (Luna +0.004, GPT-6 Luna -0.003, Haiku +0.005 for low). A third pass costs 50% more
+  for a clearer gain.
+- **Shuffle noise is small.** Two disjoint pairs of shuffles at N=10 agree within
+  0.0005 to 0.0025 on the 30-axis mean.
+- **A second opinion from another judge beats more passes of the same one.** Luna +
+  Haiku at N=20, four passes in all, scores 0.717 at $0.084, against 0.711 at $0.095
+  for four Luna passes at N=10. GPT-6 Luna is no use as the second opinion to Luna
+  (+0.002); it seems to err as Luna does.
+
+**Held-out check.** These were chosen after seeing the 30 axes, so the winners were run
+on the 31 axes left out of the tuning
+([`tier_eval_axes_holdout31.tsv`](../../scripts/tier_eval_axes_holdout31.tsv)):
+
+| arm | N=10, 2 passes | **N=20, 2 passes** | N=20 minus N=10, held-out 31 | all 61 axes, N=20 |
+|---|---|---|---|---|
+| GPT-5.6 Luna | 0.751 | **0.759** | +0.0080 [+0.0040, +0.0121] | 0.732, $0.042 |
+| GPT-6 Luna | 0.739 | **0.742** | +0.0031 [-0.0016, +0.0079] | 0.712, $0.019 |
+| Haiku 5.5 | 0.746 | **0.746** | +0.0003 [-0.0035, +0.0040] | 0.716, $0.042 |
+| Luna + Haiku | | **0.771** | | 0.744, $0.084 |
+
+The blend beats Luna alone by +0.0115 [+0.0040, +0.0187] on the held-out axes and
++0.0119 [+0.0047, +0.0177] on all 61; Luna + GPT-6 Luna adds only +0.0021 [-0.0016,
++0.0063]. Luna at N=20 beats GPT-6 Luna at N=20 by +0.0203 [+0.0130, +0.0281] on all 61,
+for 2.2 times the price.
+
+**Frontier, 61 axes.** GPT-6 Luna at N=20 ($0.019), Luna at N=20 ($0.042), Luna + Haiku at
+N=20 ($0.084). Haiku at N=20 is on the plotted frontier only because it costs $0.0007 less
+than Luna at N=20; Luna scores 0.016 higher. All three frontier points hold in
+12 of 12 projection variants (Haiku at N=20 in 11). GPT-5.6 Terra ($0.44, 0.731) is now
+dominated. Plots:
+[`pareto_pooled_61axes_grid.png`](./pareto_pooled_61axes_grid.png) and
+[`judge_tier_robustness_61axes_grid.png`](./judge_tier_robustness_61axes_grid.png)
+(data: [`judge_tier_robustness_61axes_grid.json`](./judge_tier_robustness_61axes_grid.json)).
+
+**Caps.** `--max_tokens` was 1200 at N=20 for the Lunas and 3000 for Haiku 5.5, which
+needs about 60 tokens per entity at most. Unparseable replies, which count as missing,
+stayed at or below 1.4% in every cell (Luna with low reasoning was the worst) and under
+0.3% in the N=20 cells.
+No reply in any grid cell was cut at its cap.
+
+**The grid under all 12 projection variants.** One figure per dimension, in the layout of
+the robustness tool (a heatmap of mean ρ above 12 Pareto panels), and one of the whole grid:
+[`batch size`](./judge_tier_grid_dev30/judge_tier_grid_12way_batch_size.png),
+[`passes`](./judge_tier_grid_dev30/judge_tier_grid_12way_passes.png),
+[`reasoning`](./judge_tier_grid_dev30/judge_tier_grid_12way_reasoning.png),
+[`whole grid`](./judge_tier_grid_dev30/judge_tier_grid_12way_all.png). Counts per setting:
+[`judge_tier_grid_12way.json`](./judge_tier_grid_dev30/judge_tier_grid_12way.json); ρ per axis
+and variant: [`judge_tier_grid_12way_rho.json`](./judge_tier_grid_dev30/judge_tier_grid_12way_rho.json).
+Each figure's frontier is taken among its own cells, and each panel has its own y limits, so
+compare within a panel rather than across panels. These are the 30 development axes only, the
+only axes with the whole grid. A count of variants is not a significance test: N=15 and N=20,
+for instance, differ by less than the shuffle noise.
+
+| whole grid: on the frontier in | settings |
+|---|---|
+| 12 of 12 | GPT-6 Luna, 1 pass at N=10 ($0.011); GPT-6 Luna, N=20 ($0.019); Luna, N=20 ($0.042); Luna + Haiku, N=20 ($0.084) |
+| 9 of 12 | Luna, 3 passes at N=10 ($0.071) |
+| 8 of 12 | GPT-6 Luna, 3 passes at N=10 ($0.032); Luna, N=15 ($0.044) |
+| 6 of 12 | Haiku, N=20 ($0.042), by its $0.0007 price edge over Luna |
+| 2 to 4 of 12 | GPT-6 Luna, N=15 (4); Luna, 1 pass at N=10 (2); Luna + Gemini 3.1, N=20 (2) |
+| never | any reasoning; 4 passes; N=5, 7 or 10 at 2 passes; Gemini alone |
+
+- **Batch size.** Among the batch sizes alone, N=20 holds in 12 of 12 for Luna and GPT-6
+  Luna, N=15 in 8 and 4, and N of 10 or less in none.
+- **Passes.** Luna's and GPT-6 Luna's extra passes stay on that figure's frontier in 9 to 12
+  variants, Haiku's in none, because Luna gives more for the same price. Three passes at N=20
+  are untested; they should cost less than the three passes at N=10 that make this list.
+- **Reasoning.** Luna at low effort is on that figure's frontier in 12 of 12, but N=20 beats
+  it for less money, so no reasoning arm survives in the whole grid. Medium never beats low
+  for Luna.
+
+**Gemini: not on the frontier.** Both Flash-Lite models at N=20 and two passes on the 30
+development axes, set beside the others from the same 12-way table (which can differ from the
+first table above by 0.001, because it drops the nine names that are both a trait and a role
+on bare-keyed axes). Everything is at real-time list price, and Gemini ran with temperature 0
+and thinking at its minimal level.
+
+| judge, N=20, 2 passes | ρ | $/axis | against |
+|---|---|---|---|
+| GPT-5.6 Luna | 0.704 | $0.042 | |
+| Haiku 5.5 | 0.684 | $0.042 | |
+| `gemini-3.1-flash-lite` | 0.687 | $0.068 | Luna -0.0163 [-0.0347, +0.0013] |
+| `gemini-3.5-flash-lite` | 0.653 | $0.108 | Luna -0.0504 [-0.0791, -0.0253] |
+| Luna + Haiku | 0.716 | $0.084 | |
+| Luna + Gemini 3.1 | 0.714 | $0.110 | Luna + Haiku -0.0021 [-0.0111, +0.0082] |
+| Luna + Haiku + Gemini 3.1 | 0.721 | $0.152 | Luna + Haiku +0.0041 [-0.0012, +0.0093] |
+
+Gemini 3.1 is indistinguishable from Haiku alone but costs 60% more, and as a second opinion
+it does no better than Haiku at a higher price; 3.5 is clearly worse at more than twice Luna's
+price. Luna + Gemini 3.1 tops the frontier in 2 of 12 variants (s6_l25_softK2, s6_l25_shear3),
+by less than the noise. Neither model was run on the held-out axes, since neither survived
+the development axes. The free tier allowed about 500 requests a day per model, so the runs
+were finished on the paid tier, where they took about three minutes at 5 requests a second.
+
+**3.5 Flash-Lite is out of the running** (Roger, 2026-11-02): no further runs, and its cells
+stay as the record. 3.1 Flash-Lite has an earliest shutdown date of 2027-05-07 on
+[Google's deprecations page](https://ai.google.dev/gemini-api/docs/deprecations), which names
+3.5 as its replacement, so a Gemini second opinion is good until about then unless Google
+extends it.
+
+**Cost.** $18.77 as billed for the grid and the held-out check (Flex and Batch prices).
+Gemini: $4.14 at list price on the paid tier ($1.83 for 3.1, $2.31 for 3.5), after the free
+tier had answered the start of each first pass.
+
+**The N=20 cells ran with OpenAI's prompt caching on, the default**, and 93% of their prompts
+pass its 1,024-token minimum. Calculated from the logged tokens, the write premium takes Luna
+from $0.0423 to $0.0452 an axis at list and GPT-6 Luna from $0.0189 to $0.0204, about $0.13 in
+all at Flex prices, which neither `usage.json` nor these tables show. With caching on, N=15
+($0.0441 and $0.0197) is slightly cheaper than N=20. Every OpenAI send on this branch has turned
+it off since 2026-11-02: in a live check of both Lunas, a 1,355-token prompt wrote about 1,350
+tokens by default and none with the field.
+
+**Not in the commit.** The averaged cells of the grid carry no `correlations.json` (about
+100 MB); [`judge_tier_average_cells.py`](../../scripts/judge_tier_average_cells.py) re-derives
+them and [`judge_tier_grid_analysis.py`](../../scripts/judge_tier_grid_analysis.py) needs them.
+The cells behind the 61-axis plot (`@b10n20x2` and the blend) keep theirs.
+
+**Reproduce** (from the repository root; the corpus checked out at 1448a84c):
+
+```bash
+# one pass of one judge at N=20 (Luna shown; Haiku: --transport batch --max_tokens 3000)
+uv run python results_analysis/judge_tier_cost_eval.py --rubric b10 --entities_per_call 20 --shuffle_seed 1 \
+    --axes_file scripts/tier_eval_axes.tsv --instructions_dir /tmp/corpus_2026-05-24/data \
+    --judge_model gpt-5.6-luna --cell_label @none@b10n20s1 --max_tokens 1200 --transport flex \
+    --request_setting 'gpt-5.6:reasoning_effort="none"'
+# average passes; a blend is the same tool with both judges' cells as sources
+uv run python scripts/judge_tier_average_cells.py gpt-5.6-luna@none@b10n20x2 gpt-5.6-luna@none@b10n20s1 \
+    gpt-5.6-luna@none@b10n20s2 --axes_file scripts/tier_eval_axes.tsv --instructions_dir /tmp/corpus_2026-05-24/data
+# the grid table and figure
+uv run python scripts/judge_tier_grid_analysis.py --axes_file scripts/tier_eval_axes_dev30.tsv
+# the 12-way figures: the rho table, then one figure per dimension and the whole grid (no API calls)
+uv run python results_analysis/judge_tier_robustness.py --axes_file scripts/tier_eval_axes_dev30.tsv --output_dir OUT \
+    --include_models $(uv run python scripts/judge_tier_grid_12way.py --print_cells)
+uv run python scripts/judge_tier_grid_12way.py --robustness_json OUT/judge_tier_robustness.json \
+    --output_dir roger/axis_judge_experiments/judge_tier_grid_dev30
+# any comparison of arms, with intervals
+uv run python scripts/judge_tier_compare_arms.py --axes_file scripts/tier_eval_axes_holdout31.tsv \
+    --arm "Luna=gpt-5.6-luna@none@b10n20s1,gpt-5.6-luna@none@b10n20s2" \
+    --arm "Luna+Haiku=gpt-5.6-luna@none@b10n20s1,gpt-5.6-luna@none@b10n20s2,claude-haiku-5-5@b10n20s1,claude-haiku-5-5@b10n20s2" \
+    --compare "Luna+Haiku:Luna"
+```
+
+## Update 4, 2026-11-02 (evening): Gemini's grid, the decision, and production
+
+**The decision (Roger):** batched percentile judging at N=20, two passes, no reasoning.  The default judges are
+GPT-5.6 Luna + Haiku 5.5, blended (0.716 at $0.084 on the 30 development axes).  Gemini 3.1 Flash-Lite is a supported
+third judge (0.720 at $0.152, +0.004 [-0.001, +0.010], ahead in 9 of 12 variants); 3.5 is out of the running.  A third
+pass of Luna and Haiku at N=10 gains as much (+0.005 [+0.001, +0.009], at $0.143).
+
+**Gemini 3.1 on the full grid** ($21.09 at list): batch size and passes act as on the other judges (N=5 -0.008 and N=20
++0.005 from N=10; one pass -0.028, three +0.009); reasoning hurts it (low -0.010 [-0.015, -0.005]) and medium costs 3.4
+times as much.  N=20 and 1 and 3 passes are on its own frontier in 12 of 12 variants, N=5 and N=7 never:
+[`judge_tier_grid_shapes.png`](./judge_tier_grid_dev30/judge_tier_grid_shapes.png),
+[`judge_tier_grid_own_frontier.png`](./judge_tier_grid_dev30/judge_tier_grid_own_frontier.png).
+
+**Two faults, fixed.**  A call that got no answer used to finish its cell: a Mac asleep for three hours left eight empty
+cells marked done, which the averaging took in.  Now such a call stays open, is asked again, and a run left with gaps
+exits 4; the averaging refuses a source under 90% of its axis.  And GPT-5.6 Luna sometimes writes `SCORE: thirty-five`,
+about 0.2% of its ratings and often a whole batch: the parsers now read that, and 978 ratings of 1.4 million were filled
+in from the answer logs, with no recorded score changed.  The tables of update 3 can differ from the figures here in the
+third decimal for that reason (Luna N=20: 0.7035 to the value in
+[`judge_tier_grid_dev30.json`](./judge_tier_grid_dev30/judge_tier_grid_dev30.json)).
+
+**Production.**  The method now runs from the main repository's `results_analysis/judge_descriptions.py`, on its one
+request layer `assistant_axis/judge.py`.  There `--name_format judge_label` is the default; this branch's prompts are
+what it calls `mechanical`.  Replaying this branch's cells through that code: 141,719 of 141,719 prompts byte-identical.
 
 ## Original analysis, 2026-10-26
 

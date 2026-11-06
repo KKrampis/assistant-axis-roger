@@ -1,0 +1,826 @@
+[setup] rho_by_layer from /Users/roger/Documents/GitHub/assistant-axis/results_analysis/rho_by_layer.py
+[setup] 61 axes, 12 variants: s0_l25_raw, s0_l25_softK2, s0_l25_shear3, s0_l49_raw, s0_l49_softK2, s0_l49_shear3, s6_l25_raw, s6_l25_softK2, s6_l25_shear3, s6_l49_raw, s6_l49_softK2, s6_l49_shear3
+[cells] 549 cells; compared (>= 61 axes): claude-haiku-4-5@t0 (61), claude-haiku-5-5 (61), claude-opus-5 (61), claude-sonnet-5 (61), gpt-4.1-mini (61), gpt-5.4-mini (61), gpt-5.6-luna@none (61), gpt-5.6-terra@none (61), gpt-6-luna (61)
+[slices] loaded from /Users/roger/Documents/GitHub/assistant-axis/roger/axis_judge_experiments/_tier_eval_scratch/robustness_cache
+[time] cells 12.7s, slices 0.0s, projections 38.8s, rho 8.1s, total 62.4s
+
+Mean rho by variant (61 axes); rows by s6_l25_raw; * = on the frontier
+                                   s0_l25_raw   s0_l25_softK2   s0_l25_shear3      s0_l49_raw   s0_l49_softK2   s0_l49_shear3      s6_l25_raw   s6_l25_softK2   s6_l25_shear3      s6_l49_raw   s6_l49_softK2   s6_l49_shear3
+claude-opus-5       $   3.217         0.4675          0.5756*         0.5492*         0.5425*         0.5919*         0.5517*         0.6220*         0.6244*         0.6225*         0.5601*         0.5888*         0.5839*
+gpt-4.1-mini        $   0.130         0.4708*         0.5601*         0.5299*         0.5389*         0.5794*         0.5250*         0.6054*         0.6064*         0.6173*         0.5469*         0.5663*         0.5678*
+claude-haiku-4-5@t0 $   0.521         0.4335          0.5204          0.4994          0.4933          0.5344          0.4908          0.5607          0.5598          0.5644          0.5108          0.5255          0.5289 
+claude-sonnet-5     $   1.187         0.4147          0.5139          0.4929          0.4826          0.5242          0.4971          0.5506          0.5533          0.5542          0.4940          0.5235          0.5223 
+gpt-5.6-terra@none  $   0.719         0.4173          0.5060          0.4915          0.4808          0.5167          0.4941          0.5501          0.5431          0.5540          0.4931          0.5096          0.5228 
+gpt-5.6-luna@none   $   0.073         0.4162*         0.5049          0.4866*         0.4779          0.5149          0.4869          0.5469*         0.5443*         0.5498*         0.4938          0.5111*         0.5177 
+claude-haiku-5-5    $   0.070         0.4159*         0.5070*         0.4853*         0.4780*         0.5176*         0.4877*         0.5438*         0.5395*         0.5467*         0.4942*         0.5096*         0.5185*
+gpt-5.4-mini        $   0.291         0.4021          0.4749          0.4533          0.4571          0.4849          0.4521          0.5137          0.5072          0.5198          0.4681          0.4775          0.4911 
+gpt-6-luna          $   0.033         0.3651*         0.4457*         0.4272*         0.4216*         0.4534*         0.4298*         0.4777*         0.4754*         0.4798*         0.4324*         0.4486*         0.4574*
+
+Kendall tau vs s6_l25_raw: s0_l25_raw +0.778, s0_l25_softK2 +0.889, s0_l25_shear3 +1.000, s0_l49_raw +0.944, s0_l49_softK2 +0.889, s0_l49_shear3 +0.833, s6_l25_raw +1.000, s6_l25_softK2 +0.944, s6_l25_shear3 +1.000, s6_l49_raw +0.778, s6_l49_softK2 +0.889, s6_l49_shear3 +0.889
+Frontier per variant:
+      s0_l25_raw: gpt-6-luna, claude-haiku-5-5, gpt-5.6-luna@none, gpt-4.1-mini
+   s0_l25_softK2: gpt-6-luna, claude-haiku-5-5, gpt-4.1-mini, claude-opus-5
+   s0_l25_shear3: gpt-6-luna, claude-haiku-5-5, gpt-5.6-luna@none, gpt-4.1-mini, claude-opus-5
+      s0_l49_raw: gpt-6-luna, claude-haiku-5-5, gpt-4.1-mini, claude-opus-5
+   s0_l49_softK2: gpt-6-luna, claude-haiku-5-5, gpt-4.1-mini, claude-opus-5
+   s0_l49_shear3: gpt-6-luna, claude-haiku-5-5, gpt-4.1-mini, claude-opus-5
+      s6_l25_raw: gpt-6-luna, claude-haiku-5-5, gpt-5.6-luna@none, gpt-4.1-mini, claude-opus-5
+   s6_l25_softK2: gpt-6-luna, claude-haiku-5-5, gpt-5.6-luna@none, gpt-4.1-mini, claude-opus-5
+   s6_l25_shear3: gpt-6-luna, claude-haiku-5-5, gpt-5.6-luna@none, gpt-4.1-mini, claude-opus-5
+      s6_l49_raw: gpt-6-luna, claude-haiku-5-5, gpt-4.1-mini, claude-opus-5
+   s6_l49_softK2: gpt-6-luna, claude-haiku-5-5, gpt-5.6-luna@none, gpt-4.1-mini, claude-opus-5
+   s6_l49_shear3: gpt-6-luna, claude-haiku-5-5, gpt-4.1-mini, claude-opus-5
+On the frontier (of 12): claude-opus-5 11, gpt-4.1-mini 12, claude-haiku-4-5@t0 0, claude-sonnet-5 0, gpt-5.6-terra@none 0, gpt-5.6-luna@none 6, claude-haiku-5-5 12, gpt-5.4-mini 0, gpt-6-luna 12
+Price bands (cheapest frontier | best under $0.25/axis | best overall):
+      s0_l25_raw: gpt-6-luna | gpt-4.1-mini | gpt-4.1-mini
+   s0_l25_softK2: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+   s0_l25_shear3: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+      s0_l49_raw: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+   s0_l49_softK2: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+   s0_l49_shear3: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+      s6_l25_raw: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+   s6_l25_softK2: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+   s6_l25_shear3: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+      s6_l49_raw: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+   s6_l49_softK2: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+   s6_l49_shear3: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+Bootstrap (2000 draws, seed 20261101, 61 axes): P(claude-opus-5 ahead of gpt-4.1-mini):
+  s0_l25_raw 0.365, s0_l25_softK2 0.989, s0_l25_shear3 0.989, s0_l49_raw 0.683, s0_l49_softK2 0.977, s0_l49_shear3 1.000, s6_l25_raw 0.993, s6_l25_softK2 0.997, s6_l25_shear3 0.798, s6_l49_raw 0.953, s6_l49_softK2 1.000, s6_l49_shear3 0.978
+Check vs cached correlations.json (s6_l25_raw): max |diff| 0.0 over 342 cells with the same n; 207 cells with another n (max |diff| 0.012455566235908933); 0 without a cached rho
+
+Wrote /Users/roger/Documents/GitHub/assistant-axis/roger/axis_judge_experiments/judge_tier_robustness_61axes.json
+Wrote /Users/roger/Documents/GitHub/assistant-axis/roger/axis_judge_experiments/judge_tier_robustness_61axes.png
+[setup] rho_by_layer from /Users/roger/Documents/GitHub/assistant-axis/results_analysis/rho_by_layer.py
+[setup] 61 axes, 12 variants: s0_l25_raw, s0_l25_softK2, s0_l25_shear3, s0_l49_raw, s0_l49_softK2, s0_l49_shear3, s6_l25_raw, s6_l25_softK2, s6_l25_shear3, s6_l49_raw, s6_l49_softK2, s6_l49_shear3
+[cells] 732 cells; compared (>= 61 axes): claude-haiku-4-5 (61), claude-haiku-4-5@t0 (61), claude-haiku-5-5 (61), claude-opus-5 (61), claude-sonnet-5 (61), gpt-4.1-mini (61), gpt-5.4-mini (61), gpt-5.6-luna (61), gpt-5.6-luna@none (61), gpt-5.6-terra (61), gpt-5.6-terra@none (61), gpt-6-luna (61)
+[slices] loaded from /Users/roger/Documents/GitHub/assistant-axis/roger/axis_judge_experiments/_tier_eval_scratch/robustness_cache
+[time] cells 6.6s, slices 0.0s, projections 38.8s, rho 10.8s, total 59.2s
+
+Mean rho by variant (61 axes); rows by s6_l25_raw; * = on the frontier
+                                   s0_l25_raw   s0_l25_softK2   s0_l25_shear3      s0_l49_raw   s0_l49_softK2   s0_l49_shear3      s6_l25_raw   s6_l25_softK2   s6_l25_shear3      s6_l49_raw   s6_l49_softK2   s6_l49_shear3
+claude-opus-5       $   3.217         0.4675          0.5756*         0.5492*         0.5425*         0.5919*         0.5517*         0.6220*         0.6244*         0.6225*         0.5601*         0.5888*         0.5839*
+gpt-4.1-mini        $   0.130         0.4708*         0.5601*         0.5299*         0.5389*         0.5794*         0.5250*         0.6054*         0.6064*         0.6173*         0.5469*         0.5663*         0.5678*
+claude-haiku-4-5@t0 $   0.521         0.4335          0.5204          0.4994          0.4933          0.5344          0.4908          0.5607          0.5598          0.5644          0.5108          0.5255          0.5289 
+claude-haiku-4-5    $   0.523         0.4327          0.5163          0.4970          0.4923          0.5311          0.4888          0.5567          0.5557          0.5590          0.5083          0.5218          0.5247 
+gpt-5.6-terra       $   0.882         0.4245          0.5116          0.4984          0.4863          0.5211          0.5003          0.5534          0.5472          0.5546          0.4984          0.5148          0.5266 
+claude-sonnet-5     $   1.187         0.4147          0.5139          0.4929          0.4826          0.5242          0.4971          0.5506          0.5533          0.5542          0.4940          0.5235          0.5223 
+gpt-5.6-terra@none  $   0.719         0.4173          0.5060          0.4915          0.4808          0.5167          0.4941          0.5501          0.5431          0.5540          0.4931          0.5096          0.5228 
+gpt-5.6-luna@none   $   0.073         0.4162*         0.5049          0.4866*         0.4779          0.5149          0.4869          0.5469*         0.5443*         0.5498*         0.4938          0.5111*         0.5177 
+claude-haiku-5-5    $   0.070         0.4159*         0.5070*         0.4853*         0.4780*         0.5176*         0.4877*         0.5438*         0.5395*         0.5467*         0.4942*         0.5096*         0.5185*
+gpt-5.6-luna        $   0.101         0.4046          0.4986          0.4801          0.4678          0.5075          0.4810          0.5351          0.5359          0.5390          0.4801          0.5040          0.5075 
+gpt-5.4-mini        $   0.291         0.4021          0.4749          0.4533          0.4571          0.4849          0.4521          0.5137          0.5072          0.5198          0.4681          0.4775          0.4911 
+gpt-6-luna          $   0.033         0.3651*         0.4457*         0.4272*         0.4216*         0.4534*         0.4298*         0.4777*         0.4754*         0.4798*         0.4324*         0.4486*         0.4574*
+
+Kendall tau vs s6_l25_raw: s0_l25_raw +0.879, s0_l25_softK2 +0.909, s0_l25_shear3 +0.970, s0_l49_raw +0.970, s0_l49_softK2 +0.909, s0_l49_shear3 +0.788, s6_l25_raw +1.000, s6_l25_softK2 +0.939, s6_l25_shear3 +1.000, s6_l49_raw +0.879, s6_l49_softK2 +0.879, s6_l49_shear3 +0.909
+Frontier per variant:
+      s0_l25_raw: gpt-6-luna, claude-haiku-5-5, gpt-5.6-luna@none, gpt-4.1-mini
+   s0_l25_softK2: gpt-6-luna, claude-haiku-5-5, gpt-4.1-mini, claude-opus-5
+   s0_l25_shear3: gpt-6-luna, claude-haiku-5-5, gpt-5.6-luna@none, gpt-4.1-mini, claude-opus-5
+      s0_l49_raw: gpt-6-luna, claude-haiku-5-5, gpt-4.1-mini, claude-opus-5
+   s0_l49_softK2: gpt-6-luna, claude-haiku-5-5, gpt-4.1-mini, claude-opus-5
+   s0_l49_shear3: gpt-6-luna, claude-haiku-5-5, gpt-4.1-mini, claude-opus-5
+      s6_l25_raw: gpt-6-luna, claude-haiku-5-5, gpt-5.6-luna@none, gpt-4.1-mini, claude-opus-5
+   s6_l25_softK2: gpt-6-luna, claude-haiku-5-5, gpt-5.6-luna@none, gpt-4.1-mini, claude-opus-5
+   s6_l25_shear3: gpt-6-luna, claude-haiku-5-5, gpt-5.6-luna@none, gpt-4.1-mini, claude-opus-5
+      s6_l49_raw: gpt-6-luna, claude-haiku-5-5, gpt-4.1-mini, claude-opus-5
+   s6_l49_softK2: gpt-6-luna, claude-haiku-5-5, gpt-5.6-luna@none, gpt-4.1-mini, claude-opus-5
+   s6_l49_shear3: gpt-6-luna, claude-haiku-5-5, gpt-4.1-mini, claude-opus-5
+On the frontier (of 12): claude-opus-5 11, gpt-4.1-mini 12, claude-haiku-4-5@t0 0, claude-haiku-4-5 0, gpt-5.6-terra 0, claude-sonnet-5 0, gpt-5.6-terra@none 0, gpt-5.6-luna@none 6, claude-haiku-5-5 12, gpt-5.6-luna 0, gpt-5.4-mini 0, gpt-6-luna 12
+Price bands (cheapest frontier | best under $0.25/axis | best overall):
+      s0_l25_raw: gpt-6-luna | gpt-4.1-mini | gpt-4.1-mini
+   s0_l25_softK2: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+   s0_l25_shear3: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+      s0_l49_raw: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+   s0_l49_softK2: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+   s0_l49_shear3: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+      s6_l25_raw: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+   s6_l25_softK2: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+   s6_l25_shear3: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+      s6_l49_raw: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+   s6_l49_softK2: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+   s6_l49_shear3: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+Bootstrap (2000 draws, seed 20261101, 61 axes): P(claude-opus-5 ahead of gpt-4.1-mini):
+  s0_l25_raw 0.365, s0_l25_softK2 0.989, s0_l25_shear3 0.989, s0_l49_raw 0.683, s0_l49_softK2 0.977, s0_l49_shear3 1.000, s6_l25_raw 0.993, s6_l25_softK2 0.997, s6_l25_shear3 0.798, s6_l49_raw 0.953, s6_l49_softK2 1.000, s6_l49_shear3 0.978
+Check vs cached correlations.json (s6_l25_raw): max |diff| 0.0 over 456 cells with the same n; 276 cells with another n (max |diff| 0.012471340829078081); 0 without a cached rho
+
+Wrote /Users/roger/Documents/GitHub/assistant-axis/roger/axis_judge_experiments/judge_tier_robustness_61axes_all.json
+Wrote /Users/roger/Documents/GitHub/assistant-axis/roger/axis_judge_experiments/judge_tier_robustness_61axes_all.png
+[setup] rho_by_layer from /Users/roger/Documents/GitHub/assistant-axis/results_analysis/rho_by_layer.py
+[setup] 20 axes, 12 variants: s0_l25_raw, s0_l25_softK2, s0_l25_shear3, s0_l49_raw, s0_l49_softK2, s0_l49_shear3, s6_l25_raw, s6_l25_softK2, s6_l25_shear3, s6_l49_raw, s6_l49_softK2, s6_l49_shear3
+[cells] 220 cells; compared (>= 20 axes): claude-haiku-4-5@t0 (20), claude-haiku-5-5 (20), claude-opus-5 (20), claude-opus-5@nothink (20), claude-sonnet-5 (20), gpt-4.1-mini (20), gpt-5.4-mini (20), gpt-5.6-luna@none (20), gpt-5.6-sol@none (20), gpt-5.6-terra@none (20), gpt-6-luna (20)
+[slices] loaded from /Users/roger/Documents/GitHub/assistant-axis/roger/axis_judge_experiments/_tier_eval_scratch/robustness_cache
+[time] cells 2.1s, slices 0.0s, projections 12.7s, rho 3.3s, total 19.8s
+
+Mean rho by variant (20 axes); rows by s6_l25_raw; * = on the frontier
+                                     s0_l25_raw   s0_l25_softK2   s0_l25_shear3      s0_l49_raw   s0_l49_softK2   s0_l49_shear3      s6_l25_raw   s6_l25_softK2   s6_l25_shear3      s6_l49_raw   s6_l49_softK2   s6_l49_shear3
+claude-opus-5         $   3.181         0.5347*         0.6217*         0.5931*         0.6148*         0.6547*         0.5956*         0.7041*         0.6984*         0.6977*         0.6377*         0.6563*         0.6519*
+claude-opus-5@nothink $   3.198         0.5250          0.6159          0.5820          0.6057          0.6472          0.5840          0.6934          0.6880          0.6888          0.6279          0.6474          0.6459 
+gpt-4.1-mini          $   0.130         0.5273*         0.6028*         0.5725*         0.5980*         0.6334*         0.5638*         0.6878*         0.6796*         0.6906*         0.6277*         0.6321*         0.6253*
+claude-haiku-4-5@t0   $   0.518         0.5094          0.5773          0.5522          0.5706          0.6020          0.5394          0.6545          0.6453          0.6513          0.6057          0.6050          0.6064 
+claude-sonnet-5       $   1.182         0.5048          0.5784          0.5557          0.5780          0.6033          0.5570          0.6477          0.6381          0.6414          0.5920          0.6056          0.6069 
+gpt-5.6-sol@none      $   1.301         0.4933          0.5610          0.5417          0.5656          0.5894          0.5454          0.6439          0.6305          0.6396          0.5920          0.5994          0.6157 
+claude-haiku-5-5      $   0.069         0.4827*         0.5614*         0.5324*         0.5532*         0.5871*         0.5365*         0.6326*         0.6180*         0.6287*         0.5814*         0.5883*         0.6032*
+gpt-5.6-luna@none     $   0.072         0.4752          0.5551          0.5334*         0.5478          0.5817          0.5356          0.6316          0.6254*         0.6301*         0.5765          0.5916*         0.5966 
+gpt-5.6-terra@none    $   0.718         0.4804          0.5491          0.5294          0.5549          0.5797          0.5332          0.6311          0.6161          0.6304          0.5710          0.5773          0.5999 
+gpt-5.4-mini          $   0.291         0.4724          0.5337          0.5134          0.5379          0.5600          0.5109          0.6109          0.5960          0.6136          0.5633          0.5635          0.5818 
+gpt-6-luna            $   0.033         0.4270*         0.5077*         0.4772*         0.4992*         0.5306*         0.4819*         0.5717*         0.5663*         0.5683*         0.5242*         0.5377*         0.5493*
+
+Kendall tau vs s6_l25_raw: s0_l25_raw +0.927, s0_l25_softK2 +0.927, s0_l25_shear3 +0.927, s0_l49_raw +0.891, s0_l49_softK2 +0.964, s0_l49_shear3 +0.927, s6_l25_raw +1.000, s6_l25_softK2 +0.964, s6_l25_shear3 +0.855, s6_l49_raw +0.964, s6_l49_softK2 +0.927, s6_l49_shear3 +0.855
+Frontier per variant:
+      s0_l25_raw: gpt-6-luna, claude-haiku-5-5, gpt-4.1-mini, claude-opus-5
+   s0_l25_softK2: gpt-6-luna, claude-haiku-5-5, gpt-4.1-mini, claude-opus-5
+   s0_l25_shear3: gpt-6-luna, claude-haiku-5-5, gpt-5.6-luna@none, gpt-4.1-mini, claude-opus-5
+      s0_l49_raw: gpt-6-luna, claude-haiku-5-5, gpt-4.1-mini, claude-opus-5
+   s0_l49_softK2: gpt-6-luna, claude-haiku-5-5, gpt-4.1-mini, claude-opus-5
+   s0_l49_shear3: gpt-6-luna, claude-haiku-5-5, gpt-4.1-mini, claude-opus-5
+      s6_l25_raw: gpt-6-luna, claude-haiku-5-5, gpt-4.1-mini, claude-opus-5
+   s6_l25_softK2: gpt-6-luna, claude-haiku-5-5, gpt-5.6-luna@none, gpt-4.1-mini, claude-opus-5
+   s6_l25_shear3: gpt-6-luna, claude-haiku-5-5, gpt-5.6-luna@none, gpt-4.1-mini, claude-opus-5
+      s6_l49_raw: gpt-6-luna, claude-haiku-5-5, gpt-4.1-mini, claude-opus-5
+   s6_l49_softK2: gpt-6-luna, claude-haiku-5-5, gpt-5.6-luna@none, gpt-4.1-mini, claude-opus-5
+   s6_l49_shear3: gpt-6-luna, claude-haiku-5-5, gpt-4.1-mini, claude-opus-5
+On the frontier (of 12): claude-opus-5 12, claude-opus-5@nothink 0, gpt-4.1-mini 12, claude-haiku-4-5@t0 0, claude-sonnet-5 0, gpt-5.6-sol@none 0, claude-haiku-5-5 12, gpt-5.6-luna@none 4, gpt-5.6-terra@none 0, gpt-5.4-mini 0, gpt-6-luna 12
+Price bands (cheapest frontier | best under $0.25/axis | best overall):
+      s0_l25_raw: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+   s0_l25_softK2: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+   s0_l25_shear3: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+      s0_l49_raw: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+   s0_l49_softK2: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+   s0_l49_shear3: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+      s6_l25_raw: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+   s6_l25_softK2: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+   s6_l25_shear3: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+      s6_l49_raw: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+   s6_l49_softK2: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+   s6_l49_shear3: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+Bootstrap (2000 draws, seed 20261101, 20 axes): P(claude-opus-5 ahead of claude-opus-5@nothink):
+  s0_l25_raw 0.998, s0_l25_softK2 0.990, s0_l25_shear3 1.000, s0_l49_raw 0.998, s0_l49_softK2 0.998, s0_l49_shear3 1.000, s6_l25_raw 1.000, s6_l25_softK2 1.000, s6_l25_shear3 1.000, s6_l49_raw 1.000, s6_l49_softK2 1.000, s6_l49_shear3 0.988
+Check vs cached correlations.json (s6_l25_raw): max |diff| 0.0 over 44 cells with the same n; 176 cells with another n (max |diff| 0.01312268742900935); 0 without a cached rho
+
+Wrote /Users/roger/Documents/GitHub/assistant-axis/roger/axis_judge_experiments/judge_tier_robustness_20axes.json
+Wrote /Users/roger/Documents/GitHub/assistant-axis/roger/axis_judge_experiments/judge_tier_robustness_20axes.png
+[setup] rho_by_layer from /Users/roger/Documents/GitHub/assistant-axis/results_analysis/rho_by_layer.py
+[setup] 61 axes, 12 variants: s0_l25_raw, s0_l25_softK2, s0_l25_shear3, s0_l49_raw, s0_l49_softK2, s0_l49_shear3, s6_l25_raw, s6_l25_softK2, s6_l25_shear3, s6_l49_raw, s6_l49_softK2, s6_l49_shear3
+[cells] 976 cells; compared (>= 61 axes): claude-haiku-4-5@t0 (61), claude-haiku-4-5@t0@b10x2 (61), claude-haiku-5-5 (61), claude-haiku-5-5@b10x2 (61), claude-sonnet-5 (61), claude-sonnet-5@b10x2 (61), gpt-4.1-mini (61), gpt-4.1-mini@b10x2 (61), gpt-5.4-mini (61), gpt-5.4-mini@b10x2 (61), gpt-5.6-luna@none (61), gpt-5.6-luna@none@b10x2 (61), gpt-5.6-terra@none (61), gpt-5.6-terra@none@b10x2 (61), gpt-6-luna (61), gpt-6-luna@b10x2 (61)
+[slices] loaded from /Users/roger/Documents/GitHub/assistant-axis/roger/axis_judge_experiments/_tier_eval_scratch/robustness_cache
+[time] cells 6.5s, slices 0.0s, projections 38.7s, rho 14.6s, total 64.1s
+
+Mean rho by variant (61 axes); rows by s6_l25_raw; * = on the frontier
+                                         s0_l25_raw   s0_l25_softK2   s0_l25_shear3      s0_l49_raw   s0_l49_softK2   s0_l49_shear3      s6_l25_raw   s6_l25_softK2   s6_l25_shear3      s6_l49_raw   s6_l49_softK2   s6_l49_shear3
+gpt-5.6-terra@none@b10x2  $   0.436         0.5670*         0.6782*         0.6368*         0.6507*         0.6959*         0.6314*         0.7310*         0.7331*         0.7391*         0.6680          0.6972*         0.6926*
+gpt-5.6-luna@none@b10x2   $   0.047         0.5613*         0.6659*         0.6295*         0.6438*         0.6842*         0.6249*         0.7248*         0.7253*         0.7265*         0.6723*         0.6943*         0.6851*
+gpt-4.1-mini@b10x2        $   0.084         0.5482          0.6606          0.6102          0.6320          0.6796          0.6014          0.7203          0.7258*         0.7206          0.6664          0.6895          0.6694 
+claude-haiku-5-5@b10x2    $   0.048         0.5414          0.6608          0.6183          0.6314          0.6809          0.6155          0.7157          0.7187          0.7159          0.6628          0.6924          0.6843 
+claude-sonnet-5@b10x2     $   0.674         0.5428          0.6603          0.6204          0.6293          0.6791          0.6168          0.7133          0.7205          0.7193          0.6555          0.6921          0.6811 
+gpt-6-luna@b10x2          $   0.021         0.5372*         0.6495*         0.6176*         0.6198*         0.6669*         0.6139*         0.7079*         0.7133*         0.7117*         0.6521*         0.6809*         0.6686*
+gpt-5.4-mini@b10x2        $   0.195         0.5439          0.6356          0.6078          0.6201          0.6543          0.5979          0.6987          0.6953          0.7010          0.6502          0.6639          0.6616 
+claude-haiku-4-5@t0@b10x2 $   0.308         0.5361          0.6322          0.5954          0.6120          0.6498          0.5883          0.6960          0.6968          0.6990          0.6429          0.6610          0.6545 
+gpt-4.1-mini              $   0.130         0.4708          0.5601          0.5299          0.5389          0.5794          0.5250          0.6054          0.6064          0.6173          0.5469          0.5663          0.5678 
+claude-haiku-4-5@t0       $   0.521         0.4335          0.5204          0.4994          0.4933          0.5344          0.4908          0.5607          0.5598          0.5644          0.5108          0.5255          0.5289 
+claude-sonnet-5           $   1.187         0.4147          0.5139          0.4929          0.4826          0.5242          0.4971          0.5506          0.5533          0.5542          0.4940          0.5235          0.5223 
+gpt-5.6-terra@none        $   0.719         0.4173          0.5060          0.4915          0.4808          0.5167          0.4941          0.5501          0.5431          0.5540          0.4931          0.5096          0.5228 
+gpt-5.6-luna@none         $   0.073         0.4162          0.5049          0.4866          0.4779          0.5149          0.4869          0.5469          0.5443          0.5498          0.4938          0.5111          0.5177 
+claude-haiku-5-5          $   0.070         0.4159          0.5070          0.4853          0.4780          0.5176          0.4877          0.5438          0.5395          0.5467          0.4942          0.5096          0.5185 
+gpt-5.4-mini              $   0.291         0.4021          0.4749          0.4533          0.4571          0.4849          0.4521          0.5137          0.5072          0.5198          0.4681          0.4775          0.4911 
+gpt-6-luna                $   0.033         0.3651          0.4457          0.4272          0.4216          0.4534          0.4298          0.4777          0.4754          0.4798          0.4324          0.4486          0.4574 
+
+Kendall tau vs s6_l25_raw: s0_l25_raw +0.883, s0_l25_softK2 +0.950, s0_l25_shear3 +0.933, s0_l49_raw +0.967, s0_l49_softK2 +0.950, s0_l49_shear3 +0.883, s6_l25_raw +1.000, s6_l25_softK2 +0.933, s6_l25_shear3 +0.983, s6_l49_raw +0.917, s6_l49_softK2 +0.933, s6_l49_shear3 +0.933
+Frontier per variant:
+      s0_l25_raw: gpt-6-luna@b10x2, gpt-5.6-luna@none@b10x2, gpt-5.6-terra@none@b10x2
+   s0_l25_softK2: gpt-6-luna@b10x2, gpt-5.6-luna@none@b10x2, gpt-5.6-terra@none@b10x2
+   s0_l25_shear3: gpt-6-luna@b10x2, gpt-5.6-luna@none@b10x2, gpt-5.6-terra@none@b10x2
+      s0_l49_raw: gpt-6-luna@b10x2, gpt-5.6-luna@none@b10x2, gpt-5.6-terra@none@b10x2
+   s0_l49_softK2: gpt-6-luna@b10x2, gpt-5.6-luna@none@b10x2, gpt-5.6-terra@none@b10x2
+   s0_l49_shear3: gpt-6-luna@b10x2, gpt-5.6-luna@none@b10x2, gpt-5.6-terra@none@b10x2
+      s6_l25_raw: gpt-6-luna@b10x2, gpt-5.6-luna@none@b10x2, gpt-5.6-terra@none@b10x2
+   s6_l25_softK2: gpt-6-luna@b10x2, gpt-5.6-luna@none@b10x2, gpt-4.1-mini@b10x2, gpt-5.6-terra@none@b10x2
+   s6_l25_shear3: gpt-6-luna@b10x2, gpt-5.6-luna@none@b10x2, gpt-5.6-terra@none@b10x2
+      s6_l49_raw: gpt-6-luna@b10x2, gpt-5.6-luna@none@b10x2
+   s6_l49_softK2: gpt-6-luna@b10x2, gpt-5.6-luna@none@b10x2, gpt-5.6-terra@none@b10x2
+   s6_l49_shear3: gpt-6-luna@b10x2, gpt-5.6-luna@none@b10x2, gpt-5.6-terra@none@b10x2
+On the frontier (of 12): gpt-5.6-terra@none@b10x2 11, gpt-5.6-luna@none@b10x2 12, gpt-4.1-mini@b10x2 1, claude-haiku-5-5@b10x2 0, claude-sonnet-5@b10x2 0, gpt-6-luna@b10x2 12, gpt-5.4-mini@b10x2 0, claude-haiku-4-5@t0@b10x2 0, gpt-4.1-mini 0, claude-haiku-4-5@t0 0, claude-sonnet-5 0, gpt-5.6-terra@none 0, gpt-5.6-luna@none 0, claude-haiku-5-5 0, gpt-5.4-mini 0, gpt-6-luna 0
+Price bands (cheapest frontier | best under $0.25/axis | best overall):
+      s0_l25_raw: gpt-6-luna@b10x2 | gpt-5.6-luna@none@b10x2 | gpt-5.6-terra@none@b10x2
+   s0_l25_softK2: gpt-6-luna@b10x2 | gpt-5.6-luna@none@b10x2 | gpt-5.6-terra@none@b10x2
+   s0_l25_shear3: gpt-6-luna@b10x2 | gpt-5.6-luna@none@b10x2 | gpt-5.6-terra@none@b10x2
+      s0_l49_raw: gpt-6-luna@b10x2 | gpt-5.6-luna@none@b10x2 | gpt-5.6-terra@none@b10x2
+   s0_l49_softK2: gpt-6-luna@b10x2 | gpt-5.6-luna@none@b10x2 | gpt-5.6-terra@none@b10x2
+   s0_l49_shear3: gpt-6-luna@b10x2 | gpt-5.6-luna@none@b10x2 | gpt-5.6-terra@none@b10x2
+      s6_l25_raw: gpt-6-luna@b10x2 | gpt-5.6-luna@none@b10x2 | gpt-5.6-terra@none@b10x2
+   s6_l25_softK2: gpt-6-luna@b10x2 | gpt-4.1-mini@b10x2 | gpt-5.6-terra@none@b10x2
+   s6_l25_shear3: gpt-6-luna@b10x2 | gpt-5.6-luna@none@b10x2 | gpt-5.6-terra@none@b10x2
+      s6_l49_raw: gpt-6-luna@b10x2 | gpt-5.6-luna@none@b10x2 | gpt-5.6-luna@none@b10x2
+   s6_l49_softK2: gpt-6-luna@b10x2 | gpt-5.6-luna@none@b10x2 | gpt-5.6-terra@none@b10x2
+   s6_l49_shear3: gpt-6-luna@b10x2 | gpt-5.6-luna@none@b10x2 | gpt-5.6-terra@none@b10x2
+Bootstrap (2000 draws, seed 20261101, 61 axes): P(gpt-5.6-terra@none@b10x2 ahead of gpt-5.6-luna@none@b10x2):
+  s0_l25_raw 0.879, s0_l25_softK2 1.000, s0_l25_shear3 0.971, s0_l49_raw 0.957, s0_l49_softK2 1.000, s0_l49_shear3 0.958, s6_l25_raw 0.964, s6_l25_softK2 0.998, s6_l25_shear3 1.000, s6_l49_raw 0.132, s6_l49_softK2 0.817, s6_l49_shear3 0.977
+Check vs cached correlations.json (s6_l25_raw): max |diff| 0.0 over 608 cells with the same n; 368 cells with another n (max |diff| 0.012455566235908933); 0 without a cached rho
+
+Wrote /Users/roger/Documents/GitHub/assistant-axis/roger/axis_judge_experiments/judge_tier_robustness_61axes_rubrics.json
+Wrote /Users/roger/Documents/GitHub/assistant-axis/roger/axis_judge_experiments/judge_tier_robustness_61axes_rubrics.png
+[setup] rho_by_layer from /Users/roger/Documents/GitHub/assistant-axis/results_analysis/rho_by_layer.py
+[setup] 20 axes, 12 variants: s0_l25_raw, s0_l25_softK2, s0_l25_shear3, s0_l49_raw, s0_l49_softK2, s0_l49_shear3, s6_l25_raw, s6_l25_softK2, s6_l25_shear3, s6_l49_raw, s6_l49_softK2, s6_l49_shear3
+[cells] 400 cells; compared (>= 20 axes): claude-haiku-4-5@t0 (20), claude-haiku-4-5@t0@b10x2 (20), claude-haiku-5-5 (20), claude-haiku-5-5@b10x2 (20), claude-opus-5@nothink (20), claude-opus-5@nothink@b10x2 (20), claude-sonnet-5 (20), claude-sonnet-5@b10x2 (20), gpt-4.1-mini (20), gpt-4.1-mini@b10x2 (20), gpt-5.4-mini (20), gpt-5.4-mini@b10x2 (20), gpt-5.6-luna@none (20), gpt-5.6-luna@none@b10x2 (20), gpt-5.6-sol@none (20), gpt-5.6-sol@none@b10x2 (20), gpt-5.6-terra@none (20), gpt-5.6-terra@none@b10x2 (20), gpt-6-luna (20), gpt-6-luna@b10x2 (20)
+[slices] loaded from /Users/roger/Documents/GitHub/assistant-axis/roger/axis_judge_experiments/_tier_eval_scratch/robustness_cache
+
+Mean rho by variant (20 axes); rows by s6_l25_raw; * = on the frontier
+                                           s0_l25_raw   s0_l25_softK2   s0_l25_shear3      s0_l49_raw   s0_l49_softK2   s0_l49_shear3      s6_l25_raw   s6_l25_softK2   s6_l25_shear3      s6_l49_raw   s6_l49_softK2   s6_l49_shear3
+claude-haiku-5-5@b10x2      $   0.047         0.5978          0.7021*         0.6550          0.6902          0.7316*         0.6515          0.7864*         0.7808*         0.7769*         0.7397*         0.7550*         0.7375*
+gpt-5.6-terra@none@b10x2    $   0.434         0.6277*         0.6994          0.6658*         0.7068*         0.7316*         0.6592*         0.7848          0.7733          0.7810*         0.7336          0.7383          0.7283 
+claude-opus-5@nothink@b10x2 $   1.861         0.6071          0.7116*         0.6641          0.6989          0.7451*         0.6633*         0.7836          0.7898*         0.7822*         0.7270          0.7552*         0.7266 
+gpt-5.6-sol@none@b10x2      $   0.869         0.6164          0.6984          0.6642          0.6967          0.7306          0.6613*         0.7788          0.7749          0.7768          0.7304          0.7419          0.7232 
+claude-sonnet-5@b10x2       $   0.660         0.6073          0.6954          0.6611          0.6906          0.7242          0.6540          0.7780          0.7739          0.7706          0.7322          0.7457          0.7269 
+gpt-5.6-luna@none@b10x2     $   0.047         0.6095*         0.6864*         0.6573*         0.6906*         0.7192*         0.6530*         0.7770*         0.7694*         0.7675*         0.7350*         0.7404*         0.7152*
+gpt-4.1-mini@b10x2          $   0.084         0.5916          0.6855          0.6332          0.6741          0.7162          0.6231          0.7753          0.7769          0.7659          0.7295          0.7385          0.7024 
+gpt-6-luna@b10x2            $   0.021         0.5865*         0.6757*         0.6452*         0.6697*         0.7069*         0.6396*         0.7641*         0.7608*         0.7593*         0.7187*         0.7283*         0.7087*
+claude-haiku-4-5@t0@b10x2   $   0.306         0.5872          0.6591          0.6250          0.6592          0.6897          0.6136          0.7509          0.7434          0.7482          0.7014          0.7008          0.6842 
+gpt-5.4-mini@b10x2          $   0.193         0.5826          0.6553          0.6315          0.6582          0.6866          0.6203          0.7452          0.7357          0.7412          0.7005          0.7004          0.6867 
+claude-opus-5@nothink       $   3.198         0.5250          0.6159          0.5820          0.6057          0.6472          0.5840          0.6934          0.6880          0.6888          0.6279          0.6474          0.6459 
+gpt-4.1-mini                $   0.130         0.5273          0.6028          0.5725          0.5980          0.6334          0.5638          0.6878          0.6796          0.6906          0.6277          0.6321          0.6253 
+claude-haiku-4-5@t0         $   0.518         0.5094          0.5773          0.5522          0.5706          0.6020          0.5394          0.6545          0.6453          0.6513          0.6057          0.6050          0.6064 
+claude-sonnet-5             $   1.182         0.5048          0.5784          0.5557          0.5780          0.6033          0.5570          0.6477          0.6381          0.6414          0.5920          0.6056          0.6069 
+gpt-5.6-sol@none            $   1.301         0.4933          0.5610          0.5417          0.5656          0.5894          0.5454          0.6439          0.6305          0.6396          0.5920          0.5994          0.6157 
+claude-haiku-5-5            $   0.069         0.4827          0.5614          0.5324          0.5532          0.5871          0.5365          0.6326          0.6180          0.6287          0.5814          0.5883          0.6032 
+gpt-5.6-luna@none           $   0.072         0.4752          0.5551          0.5334          0.5478          0.5817          0.5356          0.6316          0.6254          0.6301          0.5765          0.5916          0.5966 
+gpt-5.6-terra@none          $   0.718         0.4804          0.5491          0.5294          0.5549          0.5797          0.5332          0.6311          0.6161          0.6304          0.5710          0.5773          0.5999 
+gpt-5.4-mini                $   0.291         0.4724          0.5337          0.5134          0.5379          0.5600          0.5109          0.6109          0.5960          0.6136          0.5633          0.5635          0.5818 
+gpt-6-luna                  $   0.033         0.4270          0.5077          0.4772          0.4992          0.5306          0.4819          0.5717          0.5663          0.5683          0.5242          0.5377          0.5493 
+
+Kendall tau vs s6_l25_raw: s0_l25_raw +0.874, s0_l25_softK2 +0.958, s0_l25_shear3 +0.895, s0_l49_raw +0.916, s0_l49_softK2 +0.958, s0_l49_shear3 +0.884, s6_l25_raw +1.000, s6_l25_softK2 +0.905, s6_l25_shear3 +0.926, s6_l49_raw +0.905, s6_l49_softK2 +0.905, s6_l49_shear3 +0.916
+Frontier per variant:
+      s0_l25_raw: gpt-6-luna@b10x2, gpt-5.6-luna@none@b10x2, gpt-5.6-terra@none@b10x2
+   s0_l25_softK2: gpt-6-luna@b10x2, gpt-5.6-luna@none@b10x2, claude-haiku-5-5@b10x2, claude-opus-5@nothink@b10x2
+   s0_l25_shear3: gpt-6-luna@b10x2, gpt-5.6-luna@none@b10x2, gpt-5.6-terra@none@b10x2
+      s0_l49_raw: gpt-6-luna@b10x2, gpt-5.6-luna@none@b10x2, gpt-5.6-terra@none@b10x2
+   s0_l49_softK2: gpt-6-luna@b10x2, gpt-5.6-luna@none@b10x2, claude-haiku-5-5@b10x2, gpt-5.6-terra@none@b10x2, claude-opus-5@nothink@b10x2
+   s0_l49_shear3: gpt-6-luna@b10x2, gpt-5.6-luna@none@b10x2, gpt-5.6-terra@none@b10x2, gpt-5.6-sol@none@b10x2, claude-opus-5@nothink@b10x2
+      s6_l25_raw: gpt-6-luna@b10x2, gpt-5.6-luna@none@b10x2, claude-haiku-5-5@b10x2
+   s6_l25_softK2: gpt-6-luna@b10x2, gpt-5.6-luna@none@b10x2, claude-haiku-5-5@b10x2, claude-opus-5@nothink@b10x2
+   s6_l25_shear3: gpt-6-luna@b10x2, gpt-5.6-luna@none@b10x2, claude-haiku-5-5@b10x2, gpt-5.6-terra@none@b10x2, claude-opus-5@nothink@b10x2
+      s6_l49_raw: gpt-6-luna@b10x2, gpt-5.6-luna@none@b10x2, claude-haiku-5-5@b10x2
+   s6_l49_softK2: gpt-6-luna@b10x2, gpt-5.6-luna@none@b10x2, claude-haiku-5-5@b10x2, claude-opus-5@nothink@b10x2
+   s6_l49_shear3: gpt-6-luna@b10x2, gpt-5.6-luna@none@b10x2, claude-haiku-5-5@b10x2
+On the frontier (of 12): claude-haiku-5-5@b10x2 8, gpt-5.6-terra@none@b10x2 6, claude-opus-5@nothink@b10x2 6, gpt-5.6-sol@none@b10x2 1, claude-sonnet-5@b10x2 0, gpt-5.6-luna@none@b10x2 12, gpt-4.1-mini@b10x2 0, gpt-6-luna@b10x2 12, claude-haiku-4-5@t0@b10x2 0, gpt-5.4-mini@b10x2 0, claude-opus-5@nothink 0, gpt-4.1-mini 0, claude-haiku-4-5@t0 0, claude-sonnet-5 0, gpt-5.6-sol@none 0, claude-haiku-5-5 0, gpt-5.6-luna@none 0, gpt-5.6-terra@none 0, gpt-5.4-mini 0, gpt-6-luna 0
+Price bands (cheapest frontier | best under $0.25/axis | best overall):
+      s0_l25_raw: gpt-6-luna@b10x2 | gpt-5.6-luna@none@b10x2 | gpt-5.6-terra@none@b10x2
+   s0_l25_softK2: gpt-6-luna@b10x2 | claude-haiku-5-5@b10x2 | claude-opus-5@nothink@b10x2
+   s0_l25_shear3: gpt-6-luna@b10x2 | gpt-5.6-luna@none@b10x2 | gpt-5.6-terra@none@b10x2
+      s0_l49_raw: gpt-6-luna@b10x2 | gpt-5.6-luna@none@b10x2 | gpt-5.6-terra@none@b10x2
+   s0_l49_softK2: gpt-6-luna@b10x2 | claude-haiku-5-5@b10x2 | claude-opus-5@nothink@b10x2
+   s0_l49_shear3: gpt-6-luna@b10x2 | gpt-5.6-luna@none@b10x2 | claude-opus-5@nothink@b10x2
+      s6_l25_raw: gpt-6-luna@b10x2 | claude-haiku-5-5@b10x2 | claude-haiku-5-5@b10x2
+   s6_l25_softK2: gpt-6-luna@b10x2 | claude-haiku-5-5@b10x2 | claude-opus-5@nothink@b10x2
+   s6_l25_shear3: gpt-6-luna@b10x2 | claude-haiku-5-5@b10x2 | claude-opus-5@nothink@b10x2
+      s6_l49_raw: gpt-6-luna@b10x2 | claude-haiku-5-5@b10x2 | claude-haiku-5-5@b10x2
+   s6_l49_softK2: gpt-6-luna@b10x2 | claude-haiku-5-5@b10x2 | claude-opus-5@nothink@b10x2
+   s6_l49_shear3: gpt-6-luna@b10x2 | claude-haiku-5-5@b10x2 | claude-haiku-5-5@b10x2
+Bootstrap (2000 draws, seed 20261101, 20 axes): P(claude-haiku-5-5@b10x2 ahead of gpt-5.6-terra@none@b10x2):
+  s0_l25_raw 0.000, s0_l25_softK2 0.625, s0_l25_shear3 0.087, s0_l49_raw 0.007, s0_l49_softK2 0.496, s0_l49_shear3 0.120, s6_l25_raw 0.635, s6_l25_softK2 0.890, s6_l25_shear3 0.247, s6_l49_raw 0.818, s6_l49_softK2 0.996, s6_l49_shear3 0.916[time] cells 2.1s, slices 0.0s, projections 12.7s, rho 6.0s, total 23.5s
+
+Check vs cached correlations.json (s6_l25_raw): max |diff| 0.0 over 80 cells with the same n; 320 cells with another n (max |diff| 0.01312268742900935); 0 without a cached rho
+
+Wrote /Users/roger/Documents/GitHub/assistant-axis/roger/axis_judge_experiments/judge_tier_robustness_20axes_rubrics.json
+Wrote /Users/roger/Documents/GitHub/assistant-axis/roger/axis_judge_experiments/judge_tier_robustness_20axes_rubrics.png
+[setup] rho_by_layer from /Users/roger/Documents/GitHub/assistant-axis/results_analysis/rho_by_layer.py
+[setup] 61 axes, 12 variants: s0_l25_raw, s0_l25_softK2, s0_l25_shear3, s0_l49_raw, s0_l49_softK2, s0_l49_shear3, s6_l25_raw, s6_l25_softK2, s6_l25_shear3, s6_l49_raw, s6_l49_softK2, s6_l49_shear3
+[cells] 732 cells; compared (>= 61 axes): claude-haiku-4-5@t0@b10x2 (61), claude-haiku-5-5@b10n20x2 (61), claude-haiku-5-5@b10x2 (61), claude-sonnet-5@b10x2 (61), gpt-4.1-mini@b10x2 (61), gpt-5.4-mini@b10x2 (61), gpt-5.6-luna+claude-haiku-5-5@b10n20x2 (61), gpt-5.6-luna@none@b10n20x2 (61), gpt-5.6-luna@none@b10x2 (61), gpt-5.6-terra@none@b10x2 (61), gpt-6-luna@b10n20x2 (61), gpt-6-luna@b10x2 (61)
+[slices] loaded from /Users/roger/Documents/GitHub/assistant-axis/roger/axis_judge_experiments/_tier_eval_scratch/robustness_cache
+[time] cells 6.4s, slices 0.0s, projections 38.7s, rho 11.1s, total 59.6s
+
+Mean rho by variant (61 axes); rows by s6_l25_raw; * = on the frontier
+                                                      s0_l25_raw   s0_l25_softK2   s0_l25_shear3      s0_l49_raw   s0_l49_softK2   s0_l49_shear3      s6_l25_raw   s6_l25_softK2   s6_l25_shear3      s6_l49_raw   s6_l49_softK2   s6_l49_shear3
+gpt-5.6-luna+claude-haiku-5-5@b10n20x2 $   0.084         0.5715*         0.6832*         0.6457*         0.6582*         0.7024*         0.6400*         0.7438*         0.7436*         0.7429*         0.6916*         0.7156*         0.7074*
+gpt-5.6-luna@none@b10n20x2             $   0.042         0.5680*         0.6695*         0.6354*         0.6494*         0.6876*         0.6286*         0.7319*         0.7288*         0.7312*         0.6830*         0.7002*         0.6924*
+gpt-5.6-terra@none@b10x2               $   0.436         0.5670          0.6782          0.6368          0.6507          0.6959          0.6314          0.7310          0.7331          0.7391          0.6680          0.6972          0.6926 
+gpt-5.6-luna@none@b10x2                $   0.047         0.5613          0.6659          0.6295          0.6438          0.6842          0.6249          0.7248          0.7253          0.7265          0.6723          0.6943          0.6851 
+gpt-4.1-mini@b10x2                     $   0.084         0.5482          0.6606          0.6102          0.6320          0.6796          0.6014          0.7203          0.7258          0.7206          0.6664          0.6895          0.6694 
+claude-haiku-5-5@b10x2                 $   0.048         0.5414          0.6608          0.6183          0.6314          0.6809          0.6155          0.7157          0.7187          0.7159          0.6628          0.6924          0.6843 
+claude-haiku-5-5@b10n20x2              $   0.042         0.5459*         0.6604*         0.6222*         0.6330*         0.6798*         0.6182*         0.7155*         0.7179*         0.7147          0.6624*         0.6915*         0.6846*
+claude-sonnet-5@b10x2                  $   0.674         0.5428          0.6603          0.6204          0.6293          0.6791          0.6168          0.7133          0.7205          0.7193          0.6555          0.6921          0.6811 
+gpt-6-luna@b10n20x2                    $   0.019         0.5412*         0.6534*         0.6211*         0.6233*         0.6702*         0.6151*         0.7116*         0.7164*         0.7150*         0.6582*         0.6844*         0.6734*
+gpt-6-luna@b10x2                       $   0.021         0.5372          0.6495          0.6176          0.6198          0.6669          0.6139          0.7079          0.7133          0.7117          0.6521          0.6809          0.6686 
+gpt-5.4-mini@b10x2                     $   0.195         0.5439          0.6356          0.6078          0.6201          0.6543          0.5979          0.6987          0.6953          0.7010          0.6502          0.6639          0.6616 
+claude-haiku-4-5@t0@b10x2              $   0.308         0.5361          0.6322          0.5954          0.6120          0.6498          0.5883          0.6960          0.6968          0.6990          0.6429          0.6610          0.6545 
+
+Kendall tau vs s6_l25_raw: s0_l25_raw +0.818, s0_l25_softK2 +0.939, s0_l25_shear3 +0.697, s0_l49_raw +0.879, s0_l49_softK2 +0.909, s0_l49_shear3 +0.758, s6_l25_raw +1.000, s6_l25_softK2 +0.848, s6_l25_shear3 +0.879, s6_l49_raw +0.939, s6_l49_softK2 +0.879, s6_l49_shear3 +0.818
+Frontier per variant:
+      s0_l25_raw: gpt-6-luna@b10n20x2, claude-haiku-5-5@b10n20x2, gpt-5.6-luna@none@b10n20x2, gpt-5.6-luna+claude-haiku-5-5@b10n20x2
+   s0_l25_softK2: gpt-6-luna@b10n20x2, claude-haiku-5-5@b10n20x2, gpt-5.6-luna@none@b10n20x2, gpt-5.6-luna+claude-haiku-5-5@b10n20x2
+   s0_l25_shear3: gpt-6-luna@b10n20x2, claude-haiku-5-5@b10n20x2, gpt-5.6-luna@none@b10n20x2, gpt-5.6-luna+claude-haiku-5-5@b10n20x2
+      s0_l49_raw: gpt-6-luna@b10n20x2, claude-haiku-5-5@b10n20x2, gpt-5.6-luna@none@b10n20x2, gpt-5.6-luna+claude-haiku-5-5@b10n20x2
+   s0_l49_softK2: gpt-6-luna@b10n20x2, claude-haiku-5-5@b10n20x2, gpt-5.6-luna@none@b10n20x2, gpt-5.6-luna+claude-haiku-5-5@b10n20x2
+   s0_l49_shear3: gpt-6-luna@b10n20x2, claude-haiku-5-5@b10n20x2, gpt-5.6-luna@none@b10n20x2, gpt-5.6-luna+claude-haiku-5-5@b10n20x2
+      s6_l25_raw: gpt-6-luna@b10n20x2, claude-haiku-5-5@b10n20x2, gpt-5.6-luna@none@b10n20x2, gpt-5.6-luna+claude-haiku-5-5@b10n20x2
+   s6_l25_softK2: gpt-6-luna@b10n20x2, claude-haiku-5-5@b10n20x2, gpt-5.6-luna@none@b10n20x2, gpt-5.6-luna+claude-haiku-5-5@b10n20x2
+   s6_l25_shear3: gpt-6-luna@b10n20x2, gpt-5.6-luna@none@b10n20x2, gpt-5.6-luna+claude-haiku-5-5@b10n20x2
+      s6_l49_raw: gpt-6-luna@b10n20x2, claude-haiku-5-5@b10n20x2, gpt-5.6-luna@none@b10n20x2, gpt-5.6-luna+claude-haiku-5-5@b10n20x2
+   s6_l49_softK2: gpt-6-luna@b10n20x2, claude-haiku-5-5@b10n20x2, gpt-5.6-luna@none@b10n20x2, gpt-5.6-luna+claude-haiku-5-5@b10n20x2
+   s6_l49_shear3: gpt-6-luna@b10n20x2, claude-haiku-5-5@b10n20x2, gpt-5.6-luna@none@b10n20x2, gpt-5.6-luna+claude-haiku-5-5@b10n20x2
+On the frontier (of 12): gpt-5.6-luna+claude-haiku-5-5@b10n20x2 12, gpt-5.6-luna@none@b10n20x2 12, gpt-5.6-terra@none@b10x2 0, gpt-5.6-luna@none@b10x2 0, gpt-4.1-mini@b10x2 0, claude-haiku-5-5@b10x2 0, claude-haiku-5-5@b10n20x2 11, claude-sonnet-5@b10x2 0, gpt-6-luna@b10n20x2 12, gpt-6-luna@b10x2 0, gpt-5.4-mini@b10x2 0, claude-haiku-4-5@t0@b10x2 0
+Price bands (cheapest frontier | best under $0.25/axis | best overall):
+      s0_l25_raw: gpt-6-luna@b10n20x2 | gpt-5.6-luna+claude-haiku-5-5@b10n20x2 | gpt-5.6-luna+claude-haiku-5-5@b10n20x2
+   s0_l25_softK2: gpt-6-luna@b10n20x2 | gpt-5.6-luna+claude-haiku-5-5@b10n20x2 | gpt-5.6-luna+claude-haiku-5-5@b10n20x2
+   s0_l25_shear3: gpt-6-luna@b10n20x2 | gpt-5.6-luna+claude-haiku-5-5@b10n20x2 | gpt-5.6-luna+claude-haiku-5-5@b10n20x2
+      s0_l49_raw: gpt-6-luna@b10n20x2 | gpt-5.6-luna+claude-haiku-5-5@b10n20x2 | gpt-5.6-luna+claude-haiku-5-5@b10n20x2
+   s0_l49_softK2: gpt-6-luna@b10n20x2 | gpt-5.6-luna+claude-haiku-5-5@b10n20x2 | gpt-5.6-luna+claude-haiku-5-5@b10n20x2
+   s0_l49_shear3: gpt-6-luna@b10n20x2 | gpt-5.6-luna+claude-haiku-5-5@b10n20x2 | gpt-5.6-luna+claude-haiku-5-5@b10n20x2
+      s6_l25_raw: gpt-6-luna@b10n20x2 | gpt-5.6-luna+claude-haiku-5-5@b10n20x2 | gpt-5.6-luna+claude-haiku-5-5@b10n20x2
+   s6_l25_softK2: gpt-6-luna@b10n20x2 | gpt-5.6-luna+claude-haiku-5-5@b10n20x2 | gpt-5.6-luna+claude-haiku-5-5@b10n20x2
+   s6_l25_shear3: gpt-6-luna@b10n20x2 | gpt-5.6-luna+claude-haiku-5-5@b10n20x2 | gpt-5.6-luna+claude-haiku-5-5@b10n20x2
+      s6_l49_raw: gpt-6-luna@b10n20x2 | gpt-5.6-luna+claude-haiku-5-5@b10n20x2 | gpt-5.6-luna+claude-haiku-5-5@b10n20x2
+   s6_l49_softK2: gpt-6-luna@b10n20x2 | gpt-5.6-luna+claude-haiku-5-5@b10n20x2 | gpt-5.6-luna+claude-haiku-5-5@b10n20x2
+   s6_l49_shear3: gpt-6-luna@b10n20x2 | gpt-5.6-luna+claude-haiku-5-5@b10n20x2 | gpt-5.6-luna+claude-haiku-5-5@b10n20x2
+Bootstrap (2000 draws, seed 20261101, 61 axes): P(gpt-5.6-luna+claude-haiku-5-5@b10n20x2 ahead of gpt-5.6-luna@none@b10n20x2):
+  s0_l25_raw 0.792, s0_l25_softK2 1.000, s0_l25_shear3 1.000, s0_l49_raw 0.980, s0_l49_softK2 1.000, s0_l49_shear3 1.000, s6_l25_raw 1.000, s6_l25_softK2 1.000, s6_l25_shear3 1.000, s6_l49_raw 0.985, s6_l49_softK2 1.000, s6_l49_shear3 1.000
+Check vs cached correlations.json (s6_l25_raw): max |diff| 0.0 over 456 cells with the same n; 276 cells with another n (max |diff| 0.0088397409846116); 0 without a cached rho
+
+Wrote /Users/roger/Documents/GitHub/assistant-axis/roger/axis_judge_experiments/judge_tier_robustness_61axes_grid.json
+Wrote /Users/roger/Documents/GitHub/assistant-axis/roger/axis_judge_experiments/judge_tier_robustness_61axes_grid.png
+[setup] rho_by_layer from /Users/roger/Documents/GitHub/assistant-axis/results_analysis/rho_by_layer.py
+[setup] 61 axes, 12 variants: s0_l25_raw, s0_l25_softK2, s0_l25_shear3, s0_l49_raw, s0_l49_softK2, s0_l49_shear3, s6_l25_raw, s6_l25_softK2, s6_l25_shear3, s6_l49_raw, s6_l49_softK2, s6_l49_shear3
+[cells] 549 cells; compared (>= 61 axes): claude-haiku-4-5@t0 (61), claude-haiku-5-5 (61), claude-opus-5 (61), claude-sonnet-5 (61), gpt-4.1-mini (61), gpt-5.4-mini (61), gpt-5.6-luna@none (61), gpt-5.6-terra@none (61), gpt-6-luna (61)
+[slices] loaded from /Users/roger/Documents/GitHub/assistant-axis/roger/axis_judge_experiments/_tier_eval_scratch/robustness_cache_unfiltered
+[time] cells 6.7s, slices 0.1s, projections 39.0s, rho 8.3s, total 56.5s
+
+Mean rho by variant (61 axes); rows by s6_l25_raw; * = on the frontier
+                                   s0_l25_raw   s0_l25_softK2   s0_l25_shear3      s0_l49_raw   s0_l49_softK2   s0_l49_shear3      s6_l25_raw   s6_l25_softK2   s6_l25_shear3      s6_l49_raw   s6_l49_softK2   s6_l49_shear3
+claude-opus-5       $   3.217         0.4725          0.5764*         0.5449*         0.5438*         0.5912*         0.5479*         0.6229*         0.6247*         0.6204*         0.5578*         0.5844*         0.5787*
+gpt-4.1-mini        $   0.130         0.4757*         0.5630*         0.5273*         0.5413*         0.5807*         0.5235*         0.6059*         0.6061*         0.6146*         0.5440*         0.5612*         0.5614*
+claude-haiku-4-5@t0 $   0.521         0.4363          0.5214          0.4954          0.4935          0.5337          0.4886          0.5612          0.5596          0.5620          0.5083          0.5210          0.5233 
+claude-sonnet-5     $   1.187         0.4210          0.5143          0.4889          0.4850          0.5231          0.4931          0.5518          0.5534          0.5528          0.4928          0.5195          0.5183 
+gpt-5.6-terra@none  $   0.719         0.4212          0.5068          0.4862          0.4812          0.5159          0.4893          0.5507          0.5437          0.5523          0.4904          0.5058          0.5179 
+gpt-5.6-luna@none   $   0.073         0.4200          0.5053          0.4818*         0.4785          0.5141          0.4824          0.5476*         0.5451*         0.5486*         0.4911          0.5077*         0.5131 
+claude-haiku-5-5    $   0.070         0.4201*         0.5083*         0.4818*         0.4797*         0.5177*         0.4842*         0.5451*         0.5406*         0.5459*         0.4925*         0.5067*         0.5145*
+gpt-5.4-mini        $   0.291         0.4060          0.4767          0.4503          0.4583          0.4853          0.4502          0.5146          0.5082          0.5186          0.4656          0.4739          0.4860 
+gpt-6-luna          $   0.033         0.3674*         0.4453*         0.4225*         0.4212*         0.4521*         0.4253*         0.4783*         0.4761*         0.4792*         0.4304*         0.4461*         0.4542*
+
+Kendall tau vs s6_l25_raw: s0_l25_raw +0.833, s0_l25_softK2 +0.889, s0_l25_shear3 +1.000, s0_l49_raw +0.944, s0_l49_softK2 +0.889, s0_l49_shear3 +0.833, s6_l25_raw +1.000, s6_l25_softK2 +0.944, s6_l25_shear3 +1.000, s6_l49_raw +0.833, s6_l49_softK2 +0.889, s6_l49_shear3 +0.944
+Frontier per variant:
+      s0_l25_raw: gpt-6-luna, claude-haiku-5-5, gpt-4.1-mini
+   s0_l25_softK2: gpt-6-luna, claude-haiku-5-5, gpt-4.1-mini, claude-opus-5
+   s0_l25_shear3: gpt-6-luna, claude-haiku-5-5, gpt-5.6-luna@none, gpt-4.1-mini, claude-opus-5
+      s0_l49_raw: gpt-6-luna, claude-haiku-5-5, gpt-4.1-mini, claude-opus-5
+   s0_l49_softK2: gpt-6-luna, claude-haiku-5-5, gpt-4.1-mini, claude-opus-5
+   s0_l49_shear3: gpt-6-luna, claude-haiku-5-5, gpt-4.1-mini, claude-opus-5
+      s6_l25_raw: gpt-6-luna, claude-haiku-5-5, gpt-5.6-luna@none, gpt-4.1-mini, claude-opus-5
+   s6_l25_softK2: gpt-6-luna, claude-haiku-5-5, gpt-5.6-luna@none, gpt-4.1-mini, claude-opus-5
+   s6_l25_shear3: gpt-6-luna, claude-haiku-5-5, gpt-5.6-luna@none, gpt-4.1-mini, claude-opus-5
+      s6_l49_raw: gpt-6-luna, claude-haiku-5-5, gpt-4.1-mini, claude-opus-5
+   s6_l49_softK2: gpt-6-luna, claude-haiku-5-5, gpt-5.6-luna@none, gpt-4.1-mini, claude-opus-5
+   s6_l49_shear3: gpt-6-luna, claude-haiku-5-5, gpt-4.1-mini, claude-opus-5
+On the frontier (of 12): claude-opus-5 11, gpt-4.1-mini 12, claude-haiku-4-5@t0 0, claude-sonnet-5 0, gpt-5.6-terra@none 0, gpt-5.6-luna@none 5, claude-haiku-5-5 12, gpt-5.4-mini 0, gpt-6-luna 12
+Price bands (cheapest frontier | best under $0.25/axis | best overall):
+      s0_l25_raw: gpt-6-luna | gpt-4.1-mini | gpt-4.1-mini
+   s0_l25_softK2: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+   s0_l25_shear3: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+      s0_l49_raw: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+   s0_l49_softK2: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+   s0_l49_shear3: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+      s6_l25_raw: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+   s6_l25_softK2: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+   s6_l25_shear3: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+      s6_l49_raw: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+   s6_l49_softK2: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+   s6_l49_shear3: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+Bootstrap (2000 draws, seed 20261101, 61 axes): P(claude-opus-5 ahead of gpt-4.1-mini):
+  s0_l25_raw 0.360, s0_l25_softK2 0.979, s0_l25_shear3 0.986, s0_l49_raw 0.632, s0_l49_softK2 0.948, s0_l49_shear3 1.000, s6_l25_raw 0.994, s6_l25_softK2 0.998, s6_l25_shear3 0.821, s6_l49_raw 0.957, s6_l49_softK2 1.000, s6_l49_shear3 0.987
+Check vs cached correlations.json (s6_l25_raw): max |diff| 0.05485381881722129 over 342 cells with the same n; 207 cells with another n (max |diff| 0.026849757337500668); 0 without a cached rho
+
+Wrote /Users/roger/Documents/GitHub/assistant-axis/roger/axis_judge_experiments/judge_tier_robustness_61axes_unfiltered.json
+Wrote /Users/roger/Documents/GitHub/assistant-axis/roger/axis_judge_experiments/judge_tier_robustness_61axes_unfiltered.png
+Found 61 tier_eval dirs
+
+Aggregated results (args.slot=6):
+  claude-opus-5                   mean_rho=0.6220  mean_cost=$3.22  n_axes=61  cost=measured
+  gpt-4.1-mini                    mean_rho=0.6054  mean_cost=$0.13  n_axes=61  cost=measured
+  claude-haiku-4-5@t0             mean_rho=0.5607  mean_cost=$0.52  n_axes=61  cost=measured
+  claude-sonnet-5                 mean_rho=0.5506  mean_cost=$1.19  n_axes=61  cost=measured
+  gpt-5.6-terra@none              mean_rho=0.5501  mean_cost=$0.72  n_axes=61  cost=measured
+  gpt-5.6-luna@none               mean_rho=0.5469  mean_cost=$0.07  n_axes=61  cost=measured
+  claude-haiku-5-5                mean_rho=0.5438  mean_cost=$0.07  n_axes=61  cost=measured
+  gpt-5.4-mini                    mean_rho=0.5137  mean_cost=$0.29  n_axes=61  cost=measured
+  gpt-6-luna                      mean_rho=0.4777  mean_cost=$0.03  n_axes=61  cost=measured
+2026-11-02 21:38:18.732 python3[54714:1227032] +[NSXPCSharedListener endpointForReply:withListenerName:replyErrorCode:]: an error occurred while attempting to obtain endpoint for listener 'ClientCallsAuxiliary': Connection invalid
+Wrote roger/axis_judge_experiments/pareto_pooled_61axes.png
+Found 20 tier_eval dirs
+
+Aggregated results (args.slot=6):
+  claude-opus-5                   mean_rho=0.7041  mean_cost=$3.18  n_axes=20  cost=measured
+  claude-opus-5@nothink           mean_rho=0.6934  mean_cost=$3.20  n_axes=20  cost=measured
+  gpt-4.1-mini                    mean_rho=0.6878  mean_cost=$0.13  n_axes=20  cost=measured
+  claude-haiku-4-5@t0             mean_rho=0.6545  mean_cost=$0.52  n_axes=20  cost=measured
+  claude-sonnet-5                 mean_rho=0.6477  mean_cost=$1.18  n_axes=20  cost=measured
+  gpt-5.6-sol@none                mean_rho=0.6439  mean_cost=$1.30  n_axes=20  cost=measured
+  claude-haiku-5-5                mean_rho=0.6326  mean_cost=$0.07  n_axes=20  cost=measured
+  gpt-5.6-luna@none               mean_rho=0.6316  mean_cost=$0.07  n_axes=20  cost=measured
+  gpt-5.6-terra@none              mean_rho=0.6311  mean_cost=$0.72  n_axes=20  cost=measured
+  gpt-5.4-mini                    mean_rho=0.6109  mean_cost=$0.29  n_axes=20  cost=measured
+  gpt-6-luna                      mean_rho=0.5717  mean_cost=$0.03  n_axes=20  cost=measured
+2026-11-02 21:38:25.237 python3[54730:1227501] +[NSXPCSharedListener endpointForReply:withListenerName:replyErrorCode:]: an error occurred while attempting to obtain endpoint for listener 'ClientCallsAuxiliary': Connection invalid
+Wrote roger/axis_judge_experiments/pareto_pooled_20axes.png
+Found 61 tier_eval dirs
+
+Aggregated results (args.slot=6):
+  gpt-5.6-terra@none@b10x2        mean_rho=0.7310  mean_cost=$0.44  n_axes=61  cost=measured
+  gpt-5.6-luna@none@b10x2         mean_rho=0.7248  mean_cost=$0.05  n_axes=61  cost=measured
+  gpt-4.1-mini@b10x2              mean_rho=0.7203  mean_cost=$0.08  n_axes=61  cost=measured
+  claude-haiku-5-5@b10x2          mean_rho=0.7157  mean_cost=$0.05  n_axes=61  cost=measured
+  claude-sonnet-5@b10x2           mean_rho=0.7133  mean_cost=$0.67  n_axes=61  cost=measured
+  gpt-6-luna@b10x2                mean_rho=0.7079  mean_cost=$0.02  n_axes=61  cost=measured
+  gpt-5.4-mini@b10x2              mean_rho=0.6987  mean_cost=$0.20  n_axes=61  cost=measured
+  claude-haiku-4-5@t0@b10x2       mean_rho=0.6960  mean_cost=$0.31  n_axes=61  cost=measured
+  gpt-4.1-mini                    mean_rho=0.6054  mean_cost=$0.13  n_axes=61  cost=measured
+  claude-haiku-4-5@t0             mean_rho=0.5607  mean_cost=$0.52  n_axes=61  cost=measured
+  claude-sonnet-5                 mean_rho=0.5506  mean_cost=$1.19  n_axes=61  cost=measured
+  gpt-5.6-terra@none              mean_rho=0.5501  mean_cost=$0.72  n_axes=61  cost=measured
+  gpt-5.6-luna@none               mean_rho=0.5469  mean_cost=$0.07  n_axes=61  cost=measured
+  claude-haiku-5-5                mean_rho=0.5438  mean_cost=$0.07  n_axes=61  cost=measured
+  gpt-5.4-mini                    mean_rho=0.5137  mean_cost=$0.29  n_axes=61  cost=measured
+  gpt-6-luna                      mean_rho=0.4777  mean_cost=$0.03  n_axes=61  cost=measured
+2026-11-02 21:38:46.407 python3[54737:1227668] +[NSXPCSharedListener endpointForReply:withListenerName:replyErrorCode:]: an error occurred while attempting to obtain endpoint for listener 'ClientCallsAuxiliary': Connection invalid
+Wrote roger/axis_judge_experiments/pareto_pooled_61axes_rubrics.png
+Found 20 tier_eval dirs
+
+Aggregated results (args.slot=6):
+  claude-haiku-5-5@b10x2          mean_rho=0.7864  mean_cost=$0.05  n_axes=20  cost=measured
+  gpt-5.6-terra@none@b10x2        mean_rho=0.7848  mean_cost=$0.43  n_axes=20  cost=measured
+  claude-opus-5@nothink@b10x2     mean_rho=0.7836  mean_cost=$1.86  n_axes=20  cost=measured
+  gpt-5.6-sol@none@b10x2          mean_rho=0.7788  mean_cost=$0.87  n_axes=20  cost=measured
+  claude-sonnet-5@b10x2           mean_rho=0.7780  mean_cost=$0.66  n_axes=20  cost=measured
+  gpt-5.6-luna@none@b10x2         mean_rho=0.7770  mean_cost=$0.05  n_axes=20  cost=measured
+  gpt-4.1-mini@b10x2              mean_rho=0.7753  mean_cost=$0.08  n_axes=20  cost=measured
+  gpt-6-luna@b10x2                mean_rho=0.7641  mean_cost=$0.02  n_axes=20  cost=measured
+  claude-haiku-4-5@t0@b10x2       mean_rho=0.7509  mean_cost=$0.31  n_axes=20  cost=measured
+  gpt-5.4-mini@b10x2              mean_rho=0.7452  mean_cost=$0.19  n_axes=20  cost=measured
+  claude-opus-5@nothink           mean_rho=0.6934  mean_cost=$3.20  n_axes=20  cost=measured
+  gpt-4.1-mini                    mean_rho=0.6878  mean_cost=$0.13  n_axes=20  cost=measured
+  claude-haiku-4-5@t0             mean_rho=0.6545  mean_cost=$0.52  n_axes=20  cost=measured
+  claude-sonnet-5                 mean_rho=0.6477  mean_cost=$1.18  n_axes=20  cost=measured
+  gpt-5.6-sol@none                mean_rho=0.6439  mean_cost=$1.30  n_axes=20  cost=measured
+  claude-haiku-5-5                mean_rho=0.6326  mean_cost=$0.07  n_axes=20  cost=measured
+  gpt-5.6-luna@none               mean_rho=0.6316  mean_cost=$0.07  n_axes=20  cost=measured
+  gpt-5.6-terra@none              mean_rho=0.6311  mean_cost=$0.72  n_axes=20  cost=measured
+  gpt-5.4-mini                    mean_rho=0.6109  mean_cost=$0.29  n_axes=20  cost=measured
+  gpt-6-luna                      mean_rho=0.5717  mean_cost=$0.03  n_axes=20  cost=measured
+2026-11-02 21:38:52.962 python3[54753:1228096] +[NSXPCSharedListener endpointForReply:withListenerName:replyErrorCode:]: an error occurred while attempting to obtain endpoint for listener 'ClientCallsAuxiliary': Connection invalid
+Wrote roger/axis_judge_experiments/pareto_pooled_20axes_rubrics.png
+Found 61 tier_eval dirs
+
+Aggregated results (args.slot=6):
+  gpt-5.6-luna+claude-haiku-5-5@b10n20x2  mean_rho=0.7438  mean_cost=$0.08  n_axes=61  cost=measured
+  gpt-5.6-luna@none@b10n20x2      mean_rho=0.7319  mean_cost=$0.04  n_axes=61  cost=measured
+  gpt-5.6-terra@none@b10x2        mean_rho=0.7310  mean_cost=$0.44  n_axes=61  cost=measured
+  gpt-5.6-luna@none@b10x2         mean_rho=0.7248  mean_cost=$0.05  n_axes=61  cost=measured
+  gpt-4.1-mini@b10x2              mean_rho=0.7203  mean_cost=$0.08  n_axes=61  cost=measured
+  claude-haiku-5-5@b10x2          mean_rho=0.7157  mean_cost=$0.05  n_axes=61  cost=measured
+  claude-haiku-5-5@b10n20x2       mean_rho=0.7155  mean_cost=$0.04  n_axes=61  cost=measured
+  claude-sonnet-5@b10x2           mean_rho=0.7133  mean_cost=$0.67  n_axes=61  cost=measured
+  gpt-6-luna@b10n20x2             mean_rho=0.7116  mean_cost=$0.02  n_axes=61  cost=measured
+  gpt-6-luna@b10x2                mean_rho=0.7079  mean_cost=$0.02  n_axes=61  cost=measured
+  gpt-5.4-mini@b10x2              mean_rho=0.6987  mean_cost=$0.20  n_axes=61  cost=measured
+  claude-haiku-4-5@t0@b10x2       mean_rho=0.6960  mean_cost=$0.31  n_axes=61  cost=measured
+2026-11-02 21:39:14.260 python3[54762:1228304] +[NSXPCSharedListener endpointForReply:withListenerName:replyErrorCode:]: an error occurred while attempting to obtain endpoint for listener 'ClientCallsAuxiliary': Connection invalid
+Wrote roger/axis_judge_experiments/pareto_pooled_61axes_grid.png
+[setup] rho_by_layer from /Users/roger/Documents/GitHub/assistant-axis/results_analysis/rho_by_layer.py
+[setup] 30 axes, 12 variants: s0_l25_raw, s0_l25_softK2, s0_l25_shear3, s0_l49_raw, s0_l49_softK2, s0_l49_shear3, s6_l25_raw, s6_l25_softK2, s6_l25_shear3, s6_l49_raw, s6_l49_softK2, s6_l49_shear3
+[cells] 1230 cells; compared (>= 30 axes): claude-haiku-5-5 (30), claude-haiku-5-5@b10x2 (30), claude-haiku-5-5@c1 (30), claude-haiku-5-5@c10 (30), claude-haiku-5-5@c2 (30), claude-haiku-5-5@c3 (30), claude-haiku-5-5@c4 (30), claude-haiku-5-5@c5 (30), claude-haiku-5-5@c6 (30), claude-haiku-5-5@c7 (30), claude-haiku-5-5@c8 (30), claude-haiku-5-5@c9 (30), gpt-4.1-mini (30), gpt-4.1-mini@b10x2 (30), gpt-4.1-mini@c8 (30), gpt-4.1-mini@rep2 (30), gpt-4.1-mini@v3fix (30), gpt-5.6-luna@none (30), gpt-5.6-luna@none@b10x2 (30), gpt-5.6-luna@none@c1 (30), gpt-5.6-luna@none@c10 (30), gpt-5.6-luna@none@c2 (30), gpt-5.6-luna@none@c3 (30), gpt-5.6-luna@none@c4 (30), gpt-5.6-luna@none@c5 (30), gpt-5.6-luna@none@c6 (30), gpt-5.6-luna@none@c7 (30), gpt-5.6-luna@none@c8 (30), gpt-5.6-luna@none@c9 (30), gpt-6-luna (30), gpt-6-luna@b10x2 (30), gpt-6-luna@c1 (30), gpt-6-luna@c10 (30), gpt-6-luna@c2 (30), gpt-6-luna@c3 (30), gpt-6-luna@c4 (30), gpt-6-luna@c5 (30), gpt-6-luna@c6 (30), gpt-6-luna@c7 (30), gpt-6-luna@c8 (30), gpt-6-luna@c9 (30)
+[slices] loaded from /Users/roger/Documents/GitHub/assistant-axis/roger/axis_judge_experiments/_tier_eval_scratch/robustness_cache
+
+Mean rho by variant (30 axes); rows by s6_l25_raw; * = on the frontier
+                                       s0_l25_raw   s0_l25_softK2   s0_l25_shear3      s0_l49_raw   s0_l49_softK2   s0_l49_shear3      s6_l25_raw   s6_l25_softK2   s6_l25_shear3      s6_l49_raw   s6_l49_softK2   s6_l49_shear3
+gpt-4.1-mini@b10x2      $   0.084         0.5126          0.6544*         0.5978          0.6050          0.6668*         0.5821          0.6982*         0.7186*         0.7145          0.6453          0.6864          0.6575 
+gpt-5.6-luna@none@b10x2 $   0.047         0.5162*         0.6544*         0.6161*         0.6089*         0.6654*         0.6057*         0.6974*         0.7109*         0.7175*         0.6474*         0.6875*         0.6725*
+claude-haiku-5-5@b10x2  $   0.048         0.5034          0.6505          0.6044          0.6021          0.6649          0.5922          0.6844          0.6992          0.7004          0.6330          0.6786          0.6657 
+gpt-6-luna@b10x2        $   0.021         0.4885*         0.6340*         0.6017*         0.5812*         0.6446*         0.5925*         0.6755*         0.6966*         0.6977*         0.6198*         0.6697*         0.6493*
+gpt-5.6-luna@none@c8    $   0.060         0.4800          0.6212          0.5898          0.5716          0.6362          0.5801          0.6624          0.6798          0.6892          0.6077          0.6462          0.6265 
+gpt-5.6-luna@none@c10   $   0.062         0.4751          0.6152          0.5902          0.5647          0.6293          0.5810          0.6557          0.6750          0.6869          0.6013          0.6412          0.6226 
+gpt-4.1-mini@c8         $   0.106         0.4805          0.6283          0.5692          0.5786          0.6468          0.5646          0.6534          0.6883          0.6897          0.5952          0.6520          0.6211 
+gpt-6-luna@c10          $   0.029         0.4596          0.6064          0.5863          0.5525          0.6175          0.5802          0.6463          0.6689          0.6720          0.5879          0.6381          0.6180 
+gpt-6-luna@c8           $   0.028         0.4607          0.6079          0.5844          0.5542          0.6199          0.5792          0.6436          0.6657          0.6682          0.5843          0.6347          0.6147 
+gpt-5.6-luna@none@c9    $   0.066         0.4645          0.5898          0.5570          0.5504          0.6028          0.5482          0.6361          0.6490          0.6573          0.5789          0.6093          0.6015 
+gpt-5.6-luna@none@c5    $   0.064         0.4640          0.5940          0.5612          0.5515          0.6076          0.5532          0.6330          0.6466          0.6537          0.5756          0.6119          0.5993 
+gpt-5.6-luna@none@c4    $   0.064         0.4601          0.5914          0.5548          0.5474          0.6048          0.5454          0.6326          0.6467          0.6563          0.5722          0.6071          0.5970 
+gpt-6-luna@c5           $   0.030         0.4535          0.5874          0.5588          0.5441          0.6009          0.5535          0.6278          0.6446          0.6488          0.5678          0.6077          0.5958 
+claude-haiku-5-5@c7     $   0.051         0.4336          0.5911          0.5569          0.5305          0.6062          0.5494          0.6234          0.6438          0.6432          0.5595          0.6082          0.5941 
+gpt-5.6-luna@none@c2    $   0.077         0.4555          0.5798          0.5476          0.5397          0.5940          0.5401          0.6223          0.6354          0.6433          0.5616          0.5973          0.5899 
+gpt-5.6-luna@none@c6    $   0.069         0.4585          0.5842          0.5533          0.5442          0.5986          0.5468          0.6221          0.6367          0.6462          0.5640          0.6014          0.5925 
+gpt-6-luna@c6           $   0.033         0.4522          0.5848          0.5509          0.5413          0.5966          0.5467          0.6210          0.6355          0.6392          0.5640          0.6027          0.5887 
+gpt-6-luna@c2           $   0.036         0.4545          0.5801          0.5454          0.5426          0.5933          0.5416          0.6194          0.6329          0.6378          0.5602          0.5982          0.5869 
+claude-haiku-5-5@c5     $   0.059         0.4485          0.5931          0.5535          0.5412          0.6085          0.5435          0.6187          0.6393          0.6387          0.5578          0.6053          0.5932 
+gpt-5.6-luna@none@c7    $   0.053         0.4500          0.5890          0.5499          0.5400          0.6025          0.5487          0.6181          0.6437          0.6473          0.5511          0.6039          0.5877 
+gpt-6-luna@c9           $   0.031         0.4480          0.5790          0.5458          0.5360          0.5913          0.5393          0.6180          0.6315          0.6391          0.5603          0.5983          0.5868 
+gpt-6-luna@c4           $   0.030         0.4485          0.5810          0.5525          0.5385          0.5952          0.5492          0.6177          0.6337          0.6386          0.5588          0.6007          0.5872 
+claude-haiku-5-5@c4     $   0.059         0.4519          0.5932          0.5538          0.5456          0.6098          0.5469          0.6174          0.6361          0.6376          0.5571          0.6055          0.5966 
+claude-haiku-5-5@c3     $   0.057         0.4529          0.5928          0.5542          0.5438          0.6072          0.5461          0.6157          0.6343          0.6335          0.5585          0.6072          0.5946 
+gpt-5.6-luna@none@c3    $   0.061         0.4645          0.5765          0.5501          0.5445          0.5913          0.5420          0.6141          0.6250          0.6338          0.5607          0.5920          0.5823 
+claude-haiku-5-5@c9     $   0.062         0.4435          0.5816          0.5462          0.5364          0.5993          0.5402          0.6118          0.6299          0.6291          0.5514          0.5980          0.5881 
+claude-haiku-5-5@c2     $   0.069         0.4407          0.5835          0.5451          0.5338          0.6000          0.5381          0.6116          0.6318          0.6321          0.5495          0.5987          0.5894 
+claude-haiku-5-5@c6     $   0.074         0.4463          0.5854          0.5468          0.5385          0.6031          0.5407          0.6102          0.6288          0.6309          0.5520          0.5989          0.5903 
+gpt-5.6-luna@none@c1    $   0.074         0.4596          0.5635          0.5379          0.5365          0.5791          0.5293          0.6069          0.6187          0.6272          0.5509          0.5828          0.5725 
+claude-haiku-5-5@c1     $   0.067         0.4461          0.5806          0.5436          0.5342          0.5962          0.5332          0.6059          0.6232          0.6194          0.5471          0.5938          0.5787 
+gpt-6-luna@c1           $   0.034         0.4463          0.5645          0.5345          0.5294          0.5763          0.5310          0.6033          0.6163          0.6161          0.5453          0.5851          0.5704 
+gpt-6-luna@c7           $   0.025         0.4406          0.5706          0.5452          0.5250          0.5838          0.5401          0.5982          0.6187          0.6226          0.5391          0.5813          0.5675 
+claude-haiku-5-5@c10    $   0.060         0.4333          0.5769          0.5389          0.5258          0.5931          0.5331          0.5957          0.6174          0.6193          0.5370          0.5863          0.5763 
+gpt-6-luna@c3           $   0.029         0.4365          0.5652          0.5296          0.5218          0.5767          0.5251          0.5955          0.6114          0.6120          0.5408          0.5837          0.5682 
+claude-haiku-5-5@c8     $   0.059         0.4300          0.5757          0.5359          0.5255          0.5926          0.5302          0.5944          0.6154          0.6151          0.5341          0.5866          0.5772 [time] cells 5.1s, slices 0.0s, projections 19.2s, rho 18.4s, total 48.3s
+
+gpt-4.1-mini@rep2       $   0.129         0.4331          0.5418          0.5042          0.5108          0.5593          0.4961          0.5750          0.5918          0.6056          0.5147          0.5563          0.5568 
+gpt-4.1-mini@v3fix      $   0.130         0.4356          0.5442          0.5065          0.5122          0.5609          0.4964          0.5742          0.5897          0.6038          0.5173          0.5572          0.5579 
+gpt-4.1-mini            $   0.130         0.4331          0.5414          0.5035          0.5106          0.5592          0.4956          0.5742          0.5903          0.6048          0.5156          0.5565          0.5576 
+gpt-5.6-luna@none       $   0.072         0.3744          0.4851          0.4629          0.4483          0.4956          0.4609          0.5167          0.5268          0.5353          0.4632          0.4955          0.4988 
+claude-haiku-5-5        $   0.070         0.3680          0.4760          0.4467          0.4412          0.4881          0.4458          0.5040          0.5118          0.5216          0.4474          0.4803          0.4855 
+gpt-6-luna              $   0.032         0.3173          0.4187          0.3990          0.3849          0.4267          0.3998          0.4429          0.4520          0.4598          0.3957          0.4287          0.4327 
+
+Kendall tau vs s6_l25_raw: s0_l25_raw +0.780, s0_l25_softK2 +0.783, s0_l25_shear3 +0.851, s0_l49_raw +0.834, s0_l49_softK2 +0.754, s0_l49_shear3 +0.827, s6_l25_raw +1.000, s6_l25_softK2 +0.917, s6_l25_shear3 +0.939, s6_l49_raw +0.917, s6_l49_softK2 +0.829, s6_l49_shear3 +0.849
+Frontier per variant:
+      s0_l25_raw: gpt-6-luna@b10x2, gpt-5.6-luna@none@b10x2
+   s0_l25_softK2: gpt-6-luna@b10x2, gpt-5.6-luna@none@b10x2, gpt-4.1-mini@b10x2
+   s0_l25_shear3: gpt-6-luna@b10x2, gpt-5.6-luna@none@b10x2
+      s0_l49_raw: gpt-6-luna@b10x2, gpt-5.6-luna@none@b10x2
+   s0_l49_softK2: gpt-6-luna@b10x2, gpt-5.6-luna@none@b10x2, gpt-4.1-mini@b10x2
+   s0_l49_shear3: gpt-6-luna@b10x2, gpt-5.6-luna@none@b10x2
+      s6_l25_raw: gpt-6-luna@b10x2, gpt-5.6-luna@none@b10x2, gpt-4.1-mini@b10x2
+   s6_l25_softK2: gpt-6-luna@b10x2, gpt-5.6-luna@none@b10x2, gpt-4.1-mini@b10x2
+   s6_l25_shear3: gpt-6-luna@b10x2, gpt-5.6-luna@none@b10x2
+      s6_l49_raw: gpt-6-luna@b10x2, gpt-5.6-luna@none@b10x2
+   s6_l49_softK2: gpt-6-luna@b10x2, gpt-5.6-luna@none@b10x2
+   s6_l49_shear3: gpt-6-luna@b10x2, gpt-5.6-luna@none@b10x2
+On the frontier (of 12): gpt-4.1-mini@b10x2 4, gpt-5.6-luna@none@b10x2 12, claude-haiku-5-5@b10x2 0, gpt-6-luna@b10x2 12, gpt-5.6-luna@none@c8 0, gpt-5.6-luna@none@c10 0, gpt-4.1-mini@c8 0, gpt-6-luna@c10 0, gpt-6-luna@c8 0, gpt-5.6-luna@none@c9 0, gpt-5.6-luna@none@c5 0, gpt-5.6-luna@none@c4 0, gpt-6-luna@c5 0, claude-haiku-5-5@c7 0, gpt-5.6-luna@none@c2 0, gpt-5.6-luna@none@c6 0, gpt-6-luna@c6 0, gpt-6-luna@c2 0, claude-haiku-5-5@c5 0, gpt-5.6-luna@none@c7 0, gpt-6-luna@c9 0, gpt-6-luna@c4 0, claude-haiku-5-5@c4 0, claude-haiku-5-5@c3 0, gpt-5.6-luna@none@c3 0, claude-haiku-5-5@c9 0, claude-haiku-5-5@c2 0, claude-haiku-5-5@c6 0, gpt-5.6-luna@none@c1 0, claude-haiku-5-5@c1 0, gpt-6-luna@c1 0, gpt-6-luna@c7 0, claude-haiku-5-5@c10 0, gpt-6-luna@c3 0, claude-haiku-5-5@c8 0, gpt-4.1-mini@rep2 0, gpt-4.1-mini@v3fix 0, gpt-4.1-mini 0, gpt-5.6-luna@none 0, claude-haiku-5-5 0, gpt-6-luna 0
+Price bands (cheapest frontier | best under $0.25/axis | best overall):
+      s0_l25_raw: gpt-6-luna@b10x2 | gpt-5.6-luna@none@b10x2 | gpt-5.6-luna@none@b10x2
+   s0_l25_softK2: gpt-6-luna@b10x2 | gpt-4.1-mini@b10x2 | gpt-4.1-mini@b10x2
+   s0_l25_shear3: gpt-6-luna@b10x2 | gpt-5.6-luna@none@b10x2 | gpt-5.6-luna@none@b10x2
+      s0_l49_raw: gpt-6-luna@b10x2 | gpt-5.6-luna@none@b10x2 | gpt-5.6-luna@none@b10x2
+   s0_l49_softK2: gpt-6-luna@b10x2 | gpt-4.1-mini@b10x2 | gpt-4.1-mini@b10x2
+   s0_l49_shear3: gpt-6-luna@b10x2 | gpt-5.6-luna@none@b10x2 | gpt-5.6-luna@none@b10x2
+      s6_l25_raw: gpt-6-luna@b10x2 | gpt-4.1-mini@b10x2 | gpt-4.1-mini@b10x2
+   s6_l25_softK2: gpt-6-luna@b10x2 | gpt-4.1-mini@b10x2 | gpt-4.1-mini@b10x2
+   s6_l25_shear3: gpt-6-luna@b10x2 | gpt-5.6-luna@none@b10x2 | gpt-5.6-luna@none@b10x2
+      s6_l49_raw: gpt-6-luna@b10x2 | gpt-5.6-luna@none@b10x2 | gpt-5.6-luna@none@b10x2
+   s6_l49_softK2: gpt-6-luna@b10x2 | gpt-5.6-luna@none@b10x2 | gpt-5.6-luna@none@b10x2
+   s6_l49_shear3: gpt-6-luna@b10x2 | gpt-5.6-luna@none@b10x2 | gpt-5.6-luna@none@b10x2
+Bootstrap (2000 draws, seed 20261101, 30 axes): P(gpt-4.1-mini@b10x2 ahead of gpt-5.6-luna@none@b10x2):
+  s0_l25_raw 0.340, s0_l25_softK2 0.504, s0_l25_shear3 0.004, s0_l49_raw 0.323, s0_l49_softK2 0.595, s0_l49_shear3 0.000, s6_l25_raw 0.545, s6_l25_softK2 0.893, s6_l25_shear3 0.298, s6_l49_raw 0.401, s6_l49_softK2 0.422, s6_l49_shear3 0.003
+Check vs cached correlations.json (s6_l25_raw): max |diff| 0.0 over 779 cells with the same n; 451 cells with another n (max |diff| 0.012455566235908933); 0 without a cached rho
+
+Wrote /Users/roger/Documents/GitHub/assistant-axis/roger/axis_judge_experiments/judge_tier_robustness_dev30_rubric_tuning.json
+Wrote /Users/roger/Documents/GitHub/assistant-axis/roger/axis_judge_experiments/judge_tier_robustness_dev30_rubric_tuning.png
+Wrote roger/axis_judge_experiments/pareto_pooled_dev30_rubric_tuning.png
+[setup] rho_by_layer from /Users/roger/Documents/GitHub/assistant-axis/results_analysis/rho_by_layer.py
+[setup] 30 axes, 12 variants: s0_l25_raw, s0_l25_softK2, s0_l25_shear3, s0_l49_raw, s0_l49_softK2, s0_l49_shear3, s6_l25_raw, s6_l25_softK2, s6_l25_shear3, s6_l49_raw, s6_l49_softK2, s6_l49_shear3
+[cells] 1260 cells; compared (>= 30 axes): claude-haiku-5-5@b10n15x2 (30), claude-haiku-5-5@b10n20x2 (30), claude-haiku-5-5@b10n5x2 (30), claude-haiku-5-5@b10n7x2 (30), claude-haiku-5-5@b10s3 (30), claude-haiku-5-5@b10x2 (30), claude-haiku-5-5@b10x3 (30), claude-haiku-5-5@b10x4 (30), claude-haiku-5-5@low@b10x2 (30), claude-haiku-5-5@med@b10x2 (30), gemini-3.1-flash-lite@b10n15x2 (30), gemini-3.1-flash-lite@b10n20x2 (30), gemini-3.1-flash-lite@b10n5x2 (30), gemini-3.1-flash-lite@b10n7x2 (30), gemini-3.1-flash-lite@b10s1 (30), gemini-3.1-flash-lite@b10x2 (30), gemini-3.1-flash-lite@b10x3 (30), gemini-3.1-flash-lite@low@b10x2 (30), gemini-3.1-flash-lite@med@b10x2 (30), gpt-5.6-luna+claude-haiku-5-5+gemini-3.1-flash-lite@b10n20x2 (30), gpt-5.6-luna+claude-haiku-5-5@b10n20x2 (30), gpt-5.6-luna+gemini-3.1-flash-lite@b10n20x2 (30), gpt-5.6-luna@low@b10x2 (30), gpt-5.6-luna@med@b10x2 (30), gpt-5.6-luna@none@b10n15x2 (30), gpt-5.6-luna@none@b10n20x2 (30), gpt-5.6-luna@none@b10n5x2 (30), gpt-5.6-luna@none@b10n7x2 (30), gpt-5.6-luna@none@b10s1 (30), gpt-5.6-luna@none@b10x2 (30), gpt-5.6-luna@none@b10x3 (30), gpt-5.6-luna@none@b10x4 (30), gpt-6-luna@b10n15x2 (30), gpt-6-luna@b10n20x2 (30), gpt-6-luna@b10n5x2 (30), gpt-6-luna@b10n7x2 (30), gpt-6-luna@b10s1 (30), gpt-6-luna@b10x2 (30), gpt-6-luna@b10x3 (30), gpt-6-luna@b10x4 (30), gpt-6-luna@low@b10x2 (30), gpt-6-luna@med@b10x2 (30)
+[slices] loaded from /Users/roger/Documents/GitHub/assistant-axis/roger/axis_judge_experiments/_tier_eval_scratch/robustness_cache
+
+Mean rho by variant (30 axes); rows by s6_l25_raw; * = on the frontier
+                                                                            s0_l25_raw   s0_l25_softK2   s0_l25_shear3      s0_l49_raw   s0_l49_softK2   s0_l49_shear3      s6_l25_raw   s6_l25_softK2   s6_l25_shear3      s6_l49_raw   s6_l49_softK2   s6_l49_shear3
+gpt-5.6-luna+claude-haiku-5-5+gemini-3.1-flash-lite@b10n20x2 $   0.152         0.5322*         0.6781*         0.6296          0.6312*         0.6924*         0.6180          0.7201*         0.7352*         0.7416*         0.6647          0.7101*         0.6967*
+gpt-5.6-luna+claude-haiku-5-5@b10n20x2                       $   0.084         0.5308*         0.6730*         0.6326*         0.6270*         0.6864*         0.6187*         0.7160*         0.7281*         0.7336*         0.6665*         0.7065*         0.6937*
+gpt-5.6-luna+gemini-3.1-flash-lite@b10n20x2                  $   0.110         0.5273          0.6714          0.6217          0.6249          0.6851          0.6116          0.7139          0.7295*         0.7375*         0.6587          0.7042          0.6900 
+gpt-5.6-luna@none@b10x4                                      $   0.095         0.5255          0.6663          0.6268          0.6196          0.6780          0.6163          0.7105          0.7239          0.7313          0.6609          0.7019          0.6873 
+gpt-5.6-luna@none@b10x3                                      $   0.071         0.5222          0.6630*         0.6226          0.6161*         0.6743*         0.6121*         0.7072*         0.7208*         0.7275*         0.6564          0.6977*         0.6833*
+gpt-5.6-luna@none@b10n20x2                                   $   0.042         0.5222*         0.6581*         0.6217*         0.6138*         0.6696*         0.6087*         0.7036*         0.7138*         0.7228*         0.6589*         0.6942*         0.6808*
+gpt-5.6-luna@none@b10n15x2                                   $   0.044         0.5227*         0.6590*         0.6243*         0.6142*         0.6708*         0.6113*         0.7029          0.7131          0.7213          0.6583          0.6947*         0.6816*
+gpt-5.6-luna@low@b10x2                                       $   0.066         0.5178          0.6584          0.6205          0.6116          0.6694          0.6066          0.7017          0.7135          0.7205          0.6506          0.6918          0.6757 
+gpt-5.6-luna@med@b10x2                                       $   0.079         0.5155          0.6553          0.6164          0.6079          0.6662          0.6032          0.6999          0.7120          0.7183          0.6478          0.6885          0.6738 
+gpt-5.6-luna@none@b10x2                                      $   0.047         0.5162          0.6544          0.6161          0.6089          0.6654          0.6057          0.6974          0.7109          0.7175          0.6474          0.6875          0.6725 
+gpt-5.6-luna@none@b10n7x2                                    $   0.051         0.5118          0.6537          0.6169          0.6050          0.6648          0.6059          0.6972          0.7114          0.7174          0.6457          0.6876          0.6741 
+claude-haiku-5-5@b10x4                                       $   0.096         0.5106          0.6603          0.6141          0.6105          0.6751          0.6019          0.6958          0.7115          0.7122          0.6432          0.6888          0.6750 
+claude-haiku-5-5@b10x3                                       $   0.072         0.5088          0.6575          0.6113          0.6082          0.6719          0.5991          0.6929          0.7084          0.7092          0.6405          0.6862          0.6726 
+gpt-5.6-luna@none@b10n5x2                                    $   0.056         0.5075          0.6482          0.6108          0.6005          0.6593          0.6018          0.6927          0.7081          0.7129          0.6396          0.6838          0.6691 
+gemini-3.1-flash-lite@b10x3                                  $   0.111         0.5082          0.6568          0.5986          0.6087          0.6725          0.5935          0.6919          0.7142          0.7182          0.6258          0.6843          0.6662 
+claude-haiku-5-5@med@b10x2                                   $   0.076         0.4984          0.6546          0.6088          0.6006          0.6685          0.5967          0.6898          0.7088          0.7070          0.6314          0.6845          0.6659 
+claude-haiku-5-5@low@b10x2                                   $   0.064         0.4988          0.6528          0.6091          0.5995          0.6666          0.5972          0.6897          0.7084          0.7077          0.6337          0.6848          0.6678 
+gpt-6-luna@b10x4                                             $   0.043         0.4968          0.6458          0.6125          0.5917          0.6572          0.6032          0.6894          0.7110          0.7120          0.6343          0.6851          0.6635 
+gemini-3.1-flash-lite@b10n20x2                               $   0.068         0.5054          0.6510          0.5917          0.6044          0.6662          0.5855          0.6875          0.7077          0.7135          0.6251          0.6782          0.6638 
+claude-haiku-5-5@b10n15x2                                    $   0.045         0.5030          0.6496          0.6080          0.6002          0.6634          0.5950          0.6851          0.6997          0.7022          0.6331          0.6766          0.6655 
+gpt-6-luna@b10x3                                             $   0.032         0.4933          0.6407*         0.6081*         0.5875          0.6522*         0.5993*         0.6847*         0.7061*         0.7069*         0.6281          0.6788*         0.6579 
+claude-haiku-5-5@b10x2                                       $   0.048         0.5034          0.6505          0.6044          0.6021          0.6649          0.5922          0.6844          0.6992          0.7004          0.6330          0.6786          0.6657 
+claude-haiku-5-5@b10n20x2                                    $   0.042         0.5068*         0.6472*         0.6051          0.6028*         0.6621*         0.5914          0.6838          0.6977          0.6990          0.6318*         0.6746          0.6631*
+gemini-3.1-flash-lite@b10n15x2                               $   0.071         0.5021          0.6487          0.5912          0.6020          0.6641          0.5860          0.6832          0.7052          0.7112          0.6197          0.6761          0.6612 
+gemini-3.1-flash-lite@b10x2                                  $   0.074         0.5027          0.6500          0.5937          0.6020          0.6654          0.5891          0.6829          0.7058          0.7096          0.6171          0.6762          0.6587 
+claude-haiku-5-5@b10n7x2                                     $   0.053         0.4987          0.6482          0.6045          0.5970          0.6629          0.5919          0.6811          0.6980          0.6986          0.6270          0.6743          0.6617 
+gemini-3.1-flash-lite@b10n7x2                                $   0.080         0.4998          0.6468          0.5886          0.5982          0.6615          0.5838          0.6802          0.7030          0.7088          0.6130          0.6717          0.6559 
+gpt-6-luna@b10n20x2                                          $   0.019         0.4922*         0.6393*         0.6074*         0.5847*         0.6493*         0.5953*         0.6799*         0.7005*         0.7035*         0.6287*         0.6768*         0.6588*
+gpt-6-luna@b10n15x2                                          $   0.020         0.4925*         0.6373          0.6038          0.5855*         0.6486          0.5932          0.6775          0.6976          0.7008          0.6287          0.6774*         0.6572 
+gemini-3.1-flash-lite@med@b10x2                              $   0.249         0.5043          0.6436          0.5902          0.6009          0.6585          0.5805          0.6769          0.6976          0.7037          0.6134          0.6677          0.6527 
+claude-haiku-5-5@b10n5x2                                     $   0.059         0.4925          0.6421          0.5999          0.5919          0.6575          0.5883          0.6767          0.6945          0.6934          0.6208          0.6676          0.6545 
+gpt-6-luna@b10x2                                             $   0.021         0.4885          0.6340          0.6017          0.5812          0.6446          0.5925          0.6755          0.6966          0.6977          0.6198          0.6697          0.6493 
+gemini-3.1-flash-lite@b10n5x2                                $   0.086         0.4971          0.6440          0.5875          0.5957          0.6590          0.5829          0.6751          0.6994          0.7047          0.6082          0.6680          0.6488 
+gpt-5.6-luna@none@b10s1                                      $   0.024         0.4996*         0.6332          0.5949          0.5897*         0.6437          0.5860          0.6747          0.6869          0.6926          0.6288*         0.6662          0.6522 
+gpt-6-luna@b10n7x2                                           $   0.023         0.4864          0.6304          0.6008          0.5796          0.6412          0.5919          0.6740          0.6939          0.6951          0.6199          0.6681          0.6464 
+gpt-6-luna@low@b10x2                                         $   0.030         0.4837          0.6348          0.5986          0.5796          0.6459          0.5885          0.6731          0.6957          0.6966          0.6154          0.6700          0.6489 
+gemini-3.1-flash-lite@low@b10x2                              $   0.108         0.4980          0.6464          0.5879          0.5963          0.6611          0.5814          0.6730          0.6964          0.7019          0.6090          0.6674          0.6520 
+gpt-6-luna@med@b10x2                                         $   0.036         0.4844          0.6377          0.5981          0.5796          0.6476          0.5894          0.6728          0.6956          0.6983          0.6135          0.6693          0.6486 
+gpt-6-luna@b10n5x2                                           $   0.026         0.4808          0.6286          0.5956          0.5740          0.6383          0.5871          0.6694          0.6913          0.6945          0.6122          0.6633          0.6435 
+claude-haiku-5-5@b10s3                                       $   0.024         0.4872          0.6282          0.5823          0.5829          0.6430          0.5706          0.6627          0.6761          0.6770          0.6142          0.6556          0.6431 
+gemini-3.1-flash-lite@b10s1                                  $   0.037         0.4814          0.6245          0.5716          0.5772          0.6395          0.5680          0.6552          0.6789          0.6822          0.5927          0.6493          0.6333 
+gpt-6-luna@b10s1                                             $   0.011         0.4706*         0.6110*         0.5784*         0.5595*         0.6209*         0.5702*         0.6490*         0.6687*         0.6684*         0.5963*         0.6446*         0.6266*
+
+Kendall tau vs s6_l25_raw: s0_l25_raw +0.803, s0_l25_softK2 +0.823, s0_l25_shear3 +0.763, s0_l49_raw +0.786, s0_l49_softK2 +0.763, s0_l49_shear3 +0.756, s6_l25_raw +1.000, s6_l25_softK2 +0.861, s6_l25_shear3 +0.803, s6_l49_raw +0.798, s6_l49_softK2 +0.870, s6_l49_shear3 +0.916
+Frontier per variant:
+      s0_l25_raw: gpt-6-luna@b10s1, gpt-6-luna@b10n20x2, gpt-6-luna@b10n15x2, gpt-5.6-luna@none@b10s1, claude-haiku-5-5@b10n20x2, gpt-5.6-luna@none@b10n20x2, gpt-5.6-luna@none@b10n15x2, gpt-5.6-luna+claude-haiku-5-5@b10n20x2, gpt-5.6-luna+claude-haiku-5-5+gemini-3.1-flash-lite@b10n20x2
+   s0_l25_softK2: gpt-6-luna@b10s1, gpt-6-luna@b10n20x2, gpt-6-luna@b10x3, claude-haiku-5-5@b10n20x2, gpt-5.6-luna@none@b10n20x2, gpt-5.6-luna@none@b10n15x2, gpt-5.6-luna@none@b10x3, gpt-5.6-luna+claude-haiku-5-5@b10n20x2, gpt-5.6-luna+claude-haiku-5-5+gemini-3.1-flash-lite@b10n20x2
+   s0_l25_shear3: gpt-6-luna@b10s1, gpt-6-luna@b10n20x2, gpt-6-luna@b10x3, gpt-5.6-luna@none@b10n20x2, gpt-5.6-luna@none@b10n15x2, gpt-5.6-luna+claude-haiku-5-5@b10n20x2
+      s0_l49_raw: gpt-6-luna@b10s1, gpt-6-luna@b10n20x2, gpt-6-luna@b10n15x2, gpt-5.6-luna@none@b10s1, claude-haiku-5-5@b10n20x2, gpt-5.6-luna@none@b10n20x2, gpt-5.6-luna@none@b10n15x2, gpt-5.6-luna@none@b10x3, gpt-5.6-luna+claude-haiku-5-5@b10n20x2, gpt-5.6-luna+claude-haiku-5-5+gemini-3.1-flash-lite@b10n20x2
+   s0_l49_softK2: gpt-6-luna@b10s1, gpt-6-luna@b10n20x2, gpt-6-luna@b10x3, claude-haiku-5-5@b10n20x2, gpt-5.6-luna@none@b10n20x2, gpt-5.6-luna@none@b10n15x2, gpt-5.6-luna@none@b10x3, gpt-5.6-luna+claude-haiku-5-5@b10n20x2, gpt-5.6-luna+claude-haiku-5-5+gemini-3.1-flash-lite@b10n20x2
+   s0_l49_shear3: gpt-6-luna@b10s1, gpt-6-luna@b10n20x2, gpt-6-luna@b10x3, gpt-5.6-luna@none@b10n20x2, gpt-5.6-luna@none@b10n15x2, gpt-5.6-luna@none@b10x3, gpt-5.6-luna+claude-haiku-5-5@b10n20x2
+      s6_l25_raw: gpt-6-luna@b10s1, gpt-6-luna@b10n20x2, gpt-6-luna@b10x3, gpt-5.6-luna@none@b10n20x2, gpt-5.6-luna@none@b10x3, gpt-5.6-luna+claude-haiku-5-5@b10n20x2, gpt-5.6-luna+claude-haiku-5-5+gemini-3.1-flash-lite@b10n20x2
+   s6_l25_softK2: gpt-6-luna@b10s1, gpt-6-luna@b10n20x2, gpt-6-luna@b10x3, gpt-5.6-luna@none@b10n20x2, gpt-5.6-luna@none@b10x3, gpt-5.6-luna+claude-haiku-5-5@b10n20x2, gpt-5.6-luna+gemini-3.1-flash-lite@b10n20x2, gpt-5.6-luna+claude-haiku-5-5+gemini-3.1-flash-lite@b10n20x2
+   s6_l25_shear3: gpt-6-luna@b10s1, gpt-6-luna@b10n20x2, gpt-6-luna@b10x3, gpt-5.6-luna@none@b10n20x2, gpt-5.6-luna@none@b10x3, gpt-5.6-luna+claude-haiku-5-5@b10n20x2, gpt-5.6-luna+gemini-3.1-flash-lite@b10n20x2, gpt-5.6-luna+claude-haiku-5-5+gemini-3.1-flash-lite@b10n20x2
+      s6_l49_raw: gpt-6-luna@b10s1, gpt-6-luna@b10n20x2, gpt-5.6-luna@none@b10s1, claude-haiku-5-5@b10n20x2, gpt-5.6-luna@none@b10n20x2, gpt-5.6-luna+claude-haiku-5-5@b10n20x2
+   s6_l49_softK2: gpt-6-luna@b10s1, gpt-6-luna@b10n20x2, gpt-6-luna@b10n15x2, gpt-6-luna@b10x3, gpt-5.6-luna@none@b10n20x2, gpt-5.6-luna@none@b10n15x2, gpt-5.6-luna@none@b10x3, gpt-5.6-luna+claude-haiku-5-5@b10n20x2, gpt-5.6-luna+claude-haiku-5-5+gemini-3.1-flash-lite@b10n20x2
+   s6_l49_shear3: gpt-6-luna@b10s1, gpt-6-luna@b10n20x2, claude-haiku-5-5@b10n20x2, gpt-5.6-luna@none@b10n20x2, gpt-5.6-luna@none@b10n15x2, gpt-5.6-luna@none@b10x3, gpt-5.6-luna+claude-haiku-5-5@b10n20x2, gpt-5.6-luna+claude-haiku-5-5+gemini-3.1-flash-lite@b10n20x2
+On the frontier (of 12): gpt-5.6-luna+claude-haiku-5-5+gemini-3.1-flash-lite@b10n20x2 9, gpt-5.6-luna+claude-haiku-5-5@b10n20x2 12, gpt-5.6-luna+gemini-3.1-flash-lite@b10n20x2 2, gpt-5.6-luna@none@b10x4 0, gpt-5.6-luna@none@b10x3 9, gpt-5.6-luna@none@b10n20x2 12, gpt-5.6-luna@none@b10n15x2 8, gpt-5.6-luna@low@b10x2 0, gpt-5.6-luna@med@b10x2 0, gpt-5.6-luna@none@b10x2 0, gpt-5.6-luna@none@b10n7x2 0, claude-haiku-5-5@b10x4 0, claude-haiku-5-5@b10x3 0, gpt-5.6-luna@none@b10n5x2 0, gemini-3.1-flash-lite@b10x3 0, claude-haiku-5-5@med@b10x2 0, claude-haiku-5-5@low@b10x2 0, gpt-6-luna@b10x4 0, gemini-3.1-flash-lite@b10n20x2 0, claude-haiku-5-5@b10n15x2 0, gpt-6-luna@b10x3 8, claude-haiku-5-5@b10x2 0, claude-haiku-5-5@b10n20x2 6, gemini-3.1-flash-lite@b10n15x2 0, gemini-3.1-flash-lite@b10x2 0, claude-haiku-5-5@b10n7x2 0, gemini-3.1-flash-lite@b10n7x2 0, gpt-6-luna@b10n20x2 12, gpt-6-luna@b10n15x2 3, gemini-3.1-flash-lite@med@b10x2 0, claude-haiku-5-5@b10n5x2 0, gpt-6-luna@b10x2 0, gemini-3.1-flash-lite@b10n5x2 0, gpt-5.6-luna@none@b10s1 3, gpt-6-luna@b10n7x2 0, gpt-6-luna@low@b10x2 0, gemini-3.1-flash-lite@low@b10x2 0, gpt-6-luna@med@b10x2 0, gpt-6-luna@b10n5x2 0, claude-haiku-5-5@b10s3 0, gemini-3.1-flash-lite@b10s1 0, gpt-6-luna@b10s1 12
+Price bands (cheapest frontier | best under $0.25/axis | best overall):
+      s0_l25_raw: gpt-6-luna@b10s1 | gpt-5.6-luna+claude-haiku-5-5+gemini-3.1-flash-lite@b10n20x2 | gpt-5.6-luna+claude-haiku-5-5+gemini-3.1-flash-lite@b10n20x2
+   s0_l25_softK2: gpt-6-luna@b10s1 | gpt-5.6-luna+claude-haiku-5-5+gemini-3.1-flash-lite@b10n20x2 | gpt-5.6-luna+claude-haiku-5-5+gemini-3.1-flash-lite@b10n20x2
+   s0_l25_shear3: gpt-6-luna@b10s1 | gpt-5.6-luna+claude-haiku-5-5@b10n20x2 | gpt-5.6-luna+claude-haiku-5-5@b10n20x2[time] cells 5.0s, slices 0.0s, projections 19.2s, rho 18.8s, total 49.2s
+
+      s0_l49_raw: gpt-6-luna@b10s1 | gpt-5.6-luna+claude-haiku-5-5+gemini-3.1-flash-lite@b10n20x2 | gpt-5.6-luna+claude-haiku-5-5+gemini-3.1-flash-lite@b10n20x2
+   s0_l49_softK2: gpt-6-luna@b10s1 | gpt-5.6-luna+claude-haiku-5-5+gemini-3.1-flash-lite@b10n20x2 | gpt-5.6-luna+claude-haiku-5-5+gemini-3.1-flash-lite@b10n20x2
+   s0_l49_shear3: gpt-6-luna@b10s1 | gpt-5.6-luna+claude-haiku-5-5@b10n20x2 | gpt-5.6-luna+claude-haiku-5-5@b10n20x2
+      s6_l25_raw: gpt-6-luna@b10s1 | gpt-5.6-luna+claude-haiku-5-5+gemini-3.1-flash-lite@b10n20x2 | gpt-5.6-luna+claude-haiku-5-5+gemini-3.1-flash-lite@b10n20x2
+   s6_l25_softK2: gpt-6-luna@b10s1 | gpt-5.6-luna+claude-haiku-5-5+gemini-3.1-flash-lite@b10n20x2 | gpt-5.6-luna+claude-haiku-5-5+gemini-3.1-flash-lite@b10n20x2
+   s6_l25_shear3: gpt-6-luna@b10s1 | gpt-5.6-luna+claude-haiku-5-5+gemini-3.1-flash-lite@b10n20x2 | gpt-5.6-luna+claude-haiku-5-5+gemini-3.1-flash-lite@b10n20x2
+      s6_l49_raw: gpt-6-luna@b10s1 | gpt-5.6-luna+claude-haiku-5-5@b10n20x2 | gpt-5.6-luna+claude-haiku-5-5@b10n20x2
+   s6_l49_softK2: gpt-6-luna@b10s1 | gpt-5.6-luna+claude-haiku-5-5+gemini-3.1-flash-lite@b10n20x2 | gpt-5.6-luna+claude-haiku-5-5+gemini-3.1-flash-lite@b10n20x2
+   s6_l49_shear3: gpt-6-luna@b10s1 | gpt-5.6-luna+claude-haiku-5-5+gemini-3.1-flash-lite@b10n20x2 | gpt-5.6-luna+claude-haiku-5-5+gemini-3.1-flash-lite@b10n20x2
+Bootstrap (2000 draws, seed 20261101, 30 axes): P(gpt-5.6-luna+claude-haiku-5-5+gemini-3.1-flash-lite@b10n20x2 ahead of gpt-5.6-luna+claude-haiku-5-5@b10n20x2):
+  s0_l25_raw 0.630, s0_l25_softK2 0.991, s0_l25_shear3 0.072, s0_l49_raw 0.904, s0_l49_softK2 0.999, s0_l49_shear3 0.333, s6_l25_raw 0.927, s6_l25_softK2 1.000, s6_l25_shear3 1.000, s6_l49_raw 0.302, s6_l49_softK2 0.946, s6_l49_shear3 0.933
+Check vs cached correlations.json (s6_l25_raw): max |diff| 0.0 over 798 cells with the same n; 462 cells with another n (max |diff| 0.011844746316136412); 0 without a cached rho
+
+Wrote /Users/roger/Documents/GitHub/assistant-axis/roger/axis_judge_experiments/judge_tier_grid_dev30/judge_tier_grid_12way_rho.json
+Wrote /Users/roger/Documents/GitHub/assistant-axis/roger/axis_judge_experiments/judge_tier_grid_dev30/judge_tier_grid_12way_rho.png
+judge                  dimension   arm          rho  $/axis  cell
+gpt-5.6-luna           passes      1x        0.6747   0.024  gpt-5.6-luna@none@b10s1
+gpt-5.6-luna           passes      2x        0.6972   0.047  gpt-5.6-luna@none@b10x2
+gpt-5.6-luna           passes      3x        0.7072   0.071  gpt-5.6-luna@none@b10x3
+gpt-5.6-luna           passes      4x        0.7105   0.095  gpt-5.6-luna@none@b10x4
+gpt-5.6-luna           batch size  N=5       0.6929   0.056  gpt-5.6-luna@none@b10n5x2
+gpt-5.6-luna           batch size  N=7       0.6970   0.051  gpt-5.6-luna@none@b10n7x2
+gpt-5.6-luna           batch size  N=10      0.6972   0.047  gpt-5.6-luna@none@b10x2
+gpt-5.6-luna           batch size  N=15      0.7027   0.044  gpt-5.6-luna@none@b10n15x2
+gpt-5.6-luna           batch size  N=20      0.7036   0.042  gpt-5.6-luna@none@b10n20x2
+gpt-5.6-luna           reasoning   none      0.6972   0.047  gpt-5.6-luna@none@b10x2
+gpt-5.6-luna           reasoning   low       0.7015   0.066  gpt-5.6-luna@low@b10x2
+gpt-5.6-luna           reasoning   medium    0.6997   0.079  gpt-5.6-luna@med@b10x2
+gpt-5.6-luna           old rubric  v3        0.5158   0.072  gpt-5.6-luna@none
+gpt-6-luna             passes      1x        0.6490   0.011  gpt-6-luna@b10s1
+gpt-6-luna             passes      2x        0.6754   0.021  gpt-6-luna@b10x2
+gpt-6-luna             passes      3x        0.6847   0.032  gpt-6-luna@b10x3
+gpt-6-luna             passes      4x        0.6892   0.043  gpt-6-luna@b10x4
+gpt-6-luna             batch size  N=5       0.6693   0.026  gpt-6-luna@b10n5x2
+gpt-6-luna             batch size  N=7       0.6737   0.023  gpt-6-luna@b10n7x2
+gpt-6-luna             batch size  N=10      0.6754   0.021  gpt-6-luna@b10x2
+gpt-6-luna             batch size  N=15      0.6770   0.020  gpt-6-luna@b10n15x2
+gpt-6-luna             batch size  N=20      0.6795   0.019  gpt-6-luna@b10n20x2
+gpt-6-luna             reasoning   none      0.6754   0.021  gpt-6-luna@b10x2
+gpt-6-luna             reasoning   low       0.6727   0.030  gpt-6-luna@low@b10x2
+gpt-6-luna             reasoning   medium    0.6725   0.036  gpt-6-luna@med@b10x2
+gpt-6-luna             old rubric  v3        0.4418   0.032  gpt-6-luna
+claude-haiku-5-5       passes      1x        0.6626   0.024  claude-haiku-5-5@b10s3
+claude-haiku-5-5       passes      2x        0.6841   0.048  claude-haiku-5-5@b10x2
+claude-haiku-5-5       passes      3x        0.6925   0.072  claude-haiku-5-5@b10x3
+claude-haiku-5-5       passes      4x        0.6953   0.096  claude-haiku-5-5@b10x4
+claude-haiku-5-5       batch size  N=5       0.6761   0.059  claude-haiku-5-5@b10n5x2
+claude-haiku-5-5       batch size  N=7       0.6805   0.053  claude-haiku-5-5@b10n7x2
+claude-haiku-5-5       batch size  N=10      0.6841   0.048  claude-haiku-5-5@b10x2
+claude-haiku-5-5       batch size  N=15      0.6847   0.045  claude-haiku-5-5@b10n15x2
+claude-haiku-5-5       batch size  N=20      0.6836   0.042  claude-haiku-5-5@b10n20x2
+claude-haiku-5-5       reasoning   none      0.6841   0.048  claude-haiku-5-5@b10x2
+claude-haiku-5-5       reasoning   low       0.6893   0.064  claude-haiku-5-5@low@b10x2
+claude-haiku-5-5       reasoning   medium    0.6893   0.076  claude-haiku-5-5@med@b10x2
+claude-haiku-5-5       old rubric  v3        0.5032   0.070  claude-haiku-5-5
+gemini-3.1-flash-lite  passes      1x        0.6549   0.037  gemini-3.1-flash-lite@b10s1
+gemini-3.1-flash-lite  passes      2x        0.6826   0.074  gemini-3.1-flash-lite@b10x2
+gemini-3.1-flash-lite  passes      3x        0.6915   0.111  gemini-3.1-flash-lite@b10x3
+gemini-3.1-flash-lite  batch size  N=5       0.6748   0.086  gemini-3.1-flash-lite@b10n5x2
+gemini-3.1-flash-lite  batch size  N=7       0.6799   0.080  gemini-3.1-flash-lite@b10n7x2
+gemini-3.1-flash-lite  batch size  N=10      0.6826   0.074  gemini-3.1-flash-lite@b10x2
+gemini-3.1-flash-lite  batch size  N=15      0.6828   0.071  gemini-3.1-flash-lite@b10n15x2
+gemini-3.1-flash-lite  batch size  N=20      0.6871   0.068  gemini-3.1-flash-lite@b10n20x2
+gemini-3.1-flash-lite  reasoning   none      0.6826   0.074  gemini-3.1-flash-lite@b10x2
+gemini-3.1-flash-lite  reasoning   low       0.6726   0.108  gemini-3.1-flash-lite@low@b10x2
+gemini-3.1-flash-lite  reasoning   medium    0.6764   0.249  gemini-3.1-flash-lite@med@b10x2
+gemini-3.5-flash-lite  batch size  N=20      0.6529   0.108  gemini-3.5-flash-lite@b10n20x2
+Wrote roger/axis_judge_experiments/judge_tier_grid_dev30/judge_tier_grid_dev30.png
+
+batch_size: label, rho at s6_l25_raw, $/axis, variants on the frontier
+  Luna N=20                0.7036  $0.042  12/12
+  Luna N=15                0.7029  $0.044   8/12
+  Luna N=10                0.6974  $0.047   0/12
+  Luna N=7                 0.6972  $0.051   0/12
+  Luna N=5                 0.6927  $0.056   0/12
+  Gemini N=20              0.6875  $0.068   0/12
+  Haiku N=15               0.6851  $0.045   0/12
+  Haiku N=10               0.6844  $0.048   0/12
+  Haiku N=20               0.6838  $0.042   7/12
+  Gemini N=15              0.6832  $0.071   0/12
+  Gemini N=10              0.6829  $0.074   0/12
+  Haiku N=7                0.6811  $0.053   0/12
+  Gemini N=7               0.6802  $0.080   0/12
+  GPT-6 N=20               0.6799  $0.019  12/12
+  GPT-6 N=15               0.6775  $0.020   3/12
+  Haiku N=5                0.6767  $0.059   0/12
+  GPT-6 N=10               0.6755  $0.021   0/12
+  Gemini N=5               0.6751  $0.086   0/12
+  GPT-6 N=7                0.6740  $0.023   0/12
+  GPT-6 N=5                0.6694  $0.026   0/12
+
+passes: label, rho at s6_l25_raw, $/axis, variants on the frontier
+  Luna 4x                  0.7105  $0.095  12/12
+  Luna 3x                  0.7072  $0.071  12/12
+  Luna 2x                  0.6974  $0.047  11/12
+  Haiku 4x                 0.6958  $0.096   0/12
+  Haiku 3x                 0.6929  $0.072   0/12
+  Gemini 3x                0.6919  $0.111   0/12
+  GPT-6 4x                 0.6894  $0.043  11/12
+  GPT-6 3x                 0.6847  $0.032   9/12
+  Haiku 2x                 0.6844  $0.048   0/12
+  Gemini 2x                0.6829  $0.074   0/12
+  GPT-6 2x                 0.6755  $0.021  12/12
+  Luna 1x                  0.6747  $0.024   4/12
+  Haiku 1x                 0.6627  $0.024   0/12
+  Gemini 1x                0.6552  $0.037   0/12
+  GPT-6 1x                 0.6490  $0.011  12/12
+
+reasoning: label, rho at s6_l25_raw, $/axis, variants on the frontier
+  Luna low                 0.7017  $0.066  12/12
+  Luna medium              0.6999  $0.079   0/12
+  Luna none                0.6974  $0.047  12/12
+  Haiku medium             0.6898  $0.076   0/12
+  Haiku low                0.6897  $0.064   1/12
+  Haiku none               0.6844  $0.048   0/12
+  Gemini none              0.6829  $0.074   0/12
+  Gemini medium            0.6769  $0.249   0/12
+  GPT-6 none               0.6755  $0.021  12/12
+  GPT-6 low                0.6731  $0.030   3/12
+  Gemini low               0.6730  $0.108   0/12
+  GPT-6 medium             0.6728  $0.036   3/12
+
+all: label, rho at s6_l25_raw, $/axis, variants on the frontier
+  Luna + Haiku + Gemini N=20 0.7201  $0.152   9/12
+  Luna + Haiku N=20        0.7160  $0.084  12/12
+  Luna + Gemini N=20       0.7139  $0.110   2/12
+  Luna 4x                  0.7105  $0.095   0/12
+  Luna 3x                  0.7072  $0.071   9/12
+  Luna N=20                0.7036  $0.042  12/12
+  Luna N=15                0.7029  $0.044   8/12
+  Luna low                 0.7017  $0.066   0/12
+  Luna medium              0.6999  $0.079   0/12
+  Luna base                0.6974  $0.047   0/12
+  Luna N=7                 0.6972  $0.051   0/12
+  Haiku 4x                 0.6958  $0.096   0/12
+  Haiku 3x                 0.6929  $0.072   0/12
+  Luna N=5                 0.6927  $0.056   0/12
+  Gemini 3x                0.6919  $0.111   0/12
+  Haiku medium             0.6898  $0.076   0/12
+  Haiku low                0.6897  $0.064   0/12
+  GPT-6 4x                 0.6894  $0.043   0/12
+  Gemini N=20              0.6875  $0.068   0/12
+  Haiku N=15               0.6851  $0.045   0/12
+  GPT-6 3x                 0.6847  $0.032   8/12
+  Haiku base               0.6844  $0.048   0/12
+  Haiku N=20               0.6838  $0.042   6/12
+  Gemini N=15              0.6832  $0.071   0/12
+  Gemini base              0.6829  $0.074   0/12
+  Haiku N=7                0.6811  $0.053   0/12
+  Gemini N=7               0.6802  $0.080   0/12
+  GPT-6 N=20               0.6799  $0.019  12/12
+  GPT-6 N=15               0.6775  $0.020   3/12
+  Gemini medium            0.6769  $0.249   0/12
+  Haiku N=5                0.6767  $0.059   0/12
+  GPT-6 base               0.6755  $0.021   0/12
+  Gemini N=5               0.6751  $0.086   0/12
+  Luna 1x                  0.6747  $0.024   3/12
+  GPT-6 N=7                0.6740  $0.023   0/12
+  GPT-6 low                0.6731  $0.030   0/12
+  Gemini low               0.6730  $0.108   0/12
+  GPT-6 medium             0.6728  $0.036   0/12
+  GPT-6 N=5                0.6694  $0.026   0/12
+  Haiku 1x                 0.6627  $0.024   0/12
+  Gemini 1x                0.6552  $0.037   0/12
+  GPT-6 1x                 0.6490  $0.011  12/12
+                                Luna                     GPT-6                     Haiku                    Gemini
+N=5            -0.0047 x1.19 $0.056      -0.0061 x1.20 $0.026      -0.0078 x1.22 $0.059      -0.0078 x1.16 $0.086 
+N=7            -0.0002 x1.08 $0.051      -0.0016 x1.09 $0.023      -0.0033 x1.11 $0.053      -0.0027 x1.08 $0.080 
+N=10           +0.0000 x1.00 $0.047      +0.0000 x1.00 $0.021      +0.0000 x1.00 $0.048      +0.0000 x1.00 $0.074 
+N=15           +0.0055 x0.93 $0.044      +0.0020 x0.93 $0.020      +0.0007 x0.93 $0.045      +0.0003 x0.96 $0.071 
+N=20           +0.0063 x0.89 $0.042      +0.0043 x0.89 $0.019      -0.0006 x0.87 $0.042      +0.0045 x0.92 $0.068 
+1x             -0.0226 x0.50 $0.024      -0.0265 x0.50 $0.011      -0.0217 x0.50 $0.024      -0.0277 x0.50 $0.037 
+2x             +0.0000 x1.00 $0.047      +0.0000 x1.00 $0.021      +0.0000 x1.00 $0.048      +0.0000 x1.00 $0.074 
+3x             +0.0099 x1.50 $0.071      +0.0092 x1.50 $0.032      +0.0085 x1.50 $0.072      +0.0090 x1.50 $0.111 
+none           +0.0000 x1.00 $0.047      +0.0000 x1.00 $0.021      +0.0000 x1.00 $0.048      +0.0000 x1.00 $0.074 
+low            +0.0043 x1.39 $0.066      -0.0025 x1.42 $0.030      +0.0053 x1.33 $0.064      -0.0099 x1.46 $0.108 
+medium         +0.0025 x1.66 $0.079      -0.0027 x1.70 $0.036      +0.0054 x1.58 $0.076      -0.0061 x3.37 $0.249 
+
+own frontier, of 12
+N=5                                0                         0                         0                         0
+N=7                                0                         0                         0                         0
+N=10                               0                         0                         4                         2
+N=15                               8                         3                        10                         1
+N=20                              12                        12                        12                        12
+1x                                12                        12                        12                        12
+3x                                 9                        10                        12                        12
+low                                0                         0                        10                         0
+medium                             0                         0                         1                         0

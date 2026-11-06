@@ -1,10 +1,10 @@
 """Standard, empirically-tuned mixing ratios for combining judge scores.
 
-Four families of weights live here, all derived from sweeps at the
-project's operating-point cells (slot 6 / layer 25 for response-mode,
-slot 3 / 0 / 0 for desc+inst).  Centralised so any new analysis or
-plotting script gets the project's current best-default with a single
-import.
+Five families of weights live here, the first four derived from sweeps
+at the project's operating-point cells (slot 6 / layer 25 for
+response-mode, slot 3 / 0 / 0 for desc+inst), the fifth set by Roger on
+a sweep's evidence.  Centralised so any new analysis or plotting script
+gets the project's current best-default with a single import.
 
 ::
 
@@ -145,6 +145,28 @@ import.
    w=0.8 vs 0.772 at w=0.71) so the choice is robust to whether
    eco/anthro is treated as a regular or held-out axis.
 
+5. **Between the batched tier judges** -- ``TIER_JUDGE_WEIGHTS`` /
+   ``tier_judge_weights`` / ``combine_tier_judges``: how one entity's
+   scores from GPT-5.6 Luna, Haiku 5.5 and Gemini 3.1 Flash-Lite (each
+   judge's own mean over its passes or instruction rounds) are averaged
+   in description and instruction judging
+   (``results_analysis/judge_tier_average.py``,
+   ``scripts/judge_instruction_12way.py``).  Luna 4, any other judge 3:
+   4:3 in a pair with Luna, 4:3:3 in the trio, 1:1 without Luna.
+
+   Selection history:
+
+   * **4:3:3** (Roger, 2026-11-03: "a lean towards Luna is supported by
+     the fact that Luna alone is always better than Haiku/Gemini
+     alone"): instruction judging on the 61 axes at slot 6 / layer 25
+     raw, Luna alone 0.721 / 0.749 / 0.759 at 1 / 2 / 3 rounds against
+     Haiku 0.708 / 0.735 / 0.745 and Gemini 0.706 / 0.736 / 0.747.
+     Weights fitted to maximise ρ leaned to Luna (0.55-0.60 in a pair,
+     0.40-0.50 in the trio; 4:3 is 0.571) but gained at most +0.0008 in
+     sample and nothing out of sample (within ±0.001, split-half and
+     leave-one-axis-out), so the lean is a prior, not a tuning.  Equal
+     weights before.
+
 Usage examples::
 
     # Combine one judge's desc + inst with the standard tiebreak.
@@ -281,6 +303,66 @@ DEFAULT_RESPONSE_DI_WEIGHT: float = 0.80
 # default).  Bump only after re-deriving from a sweep with new RF /
 # regret weighting.
 PRIMARY_AXIS_SAMPLE_WEIGHT: float = 5.0
+
+
+# Weights between the batched tier judges when one entity's scores from
+# several are averaged (description and instruction judging, 2026-11):
+# GPT-5.6 Luna 4, any other judge 3, so 4:3 in a pair with Luna and 4:3:3
+# in the trio (Roger, 2026-11-03).  A judge is named by its model, the
+# part of a cell name before "@".  See the module docstring, item 5.
+TIER_JUDGE_WEIGHTS: Dict[str, float] = {"gpt-5.6-luna": 4.0}
+TIER_JUDGE_DEFAULT_WEIGHT: float = 3.0
+#: Per judging mode, the weights that differ from TIER_JUDGE_WEIGHTS (2026-11-04).  Jev (TypeSafe AI): 12
+#: beside Luna 4, Haiku 3, Gemini 3, in both modes, chosen for resilience rather than for the mean (Roger: "4:3:3:24
+#: ? That's not an ensemble, that's an addendum"; the ensemble is there because each judge has its own bad axes).
+#: The mean-rho fit on the balanced cells of the 61 axes (rho averaged over the 12 projection variants) peaks at
+#: 24 on descriptions and 20 on instructions, but at 24 the blend is about 68% Jev in effect and ranks 0.99 as Jev
+#: alone does.  Jev's bad axes are one class, the style axes (precise/vague -0.105 against the trio in both
+#: modes, proactive/reactive, concise/verbose), stable across passes, and the per-axis gaps are fat-tailed (2-4
+#: axes beyond 3 sd against 0.16 for a normal spread).  12 has the smallest worst-axis shortfall from the better
+#: of Jev and the trio among the weights tried (0.026 descriptions, 0.036 instructions, against 0.043 / 0.048 at
+#: 24; 14 is 0.034 on instructions), for a mean rho within noise of 24: -0.0010 [-0.0022, +0.0002] and -0.0003
+#: [-0.0014, +0.0009].  Dropping each entity's outlying judge, the median of the four and dropping the judge that
+#: agrees least on an axis all do worse.  Evidence: reports/judge_pareto/jev_judging.md § "Jev's weight",
+#: scripts/jev_weight_resilience.py.  24 from 70da7b0f / 4e806584 to this change.
+TIER_JUDGE_WEIGHTS_BY_MODE: Dict[str, Dict[str, float]] = {"descriptions": {"jev-1.14.0": 12.0},
+                                                           "instructions": {"jev-1.14.0": 12.0}}
+
+
+def tier_judge_weights(judges, mode: Optional[str] = None) -> Dict[str, float]:
+    """``{judge: weight}`` over ``judges`` (models, or cell names whose model
+    is the part before "@"), summing to 1, from :data:`TIER_JUDGE_WEIGHTS` and,
+    for ``mode`` ("descriptions", "instructions"), :data:`TIER_JUDGE_WEIGHTS_BY_MODE`."""
+    table = {**TIER_JUDGE_WEIGHTS, **TIER_JUDGE_WEIGHTS_BY_MODE.get(mode or "", {})}
+    raw = {j: table.get(j.split("@", 1)[0], TIER_JUDGE_DEFAULT_WEIGHT) for j in judges}
+    total = sum(raw.values())
+    return {j: w / total for j, w in raw.items()}
+
+
+def combine_tier_judges(
+    per_judge: Dict[str, Dict[str, float]],
+    weights: Optional[Dict[str, float]] = None,
+    mode: Optional[str] = None,
+) -> Dict[str, float]:
+    """One score per entity from several judges' scores (each judge's own
+    mean over its passes or rounds): the weighted mean, with
+    :func:`tier_judge_weights` unless ``weights`` is given, renormalised
+    over the judges that scored the entity (the one-side-missing fallback
+    of :func:`blend_two_with_fallback`).  An entity no judge scored is
+    left out."""
+    w = weights if weights is not None else tier_judge_weights(per_judge, mode)
+    out: Dict[str, float] = {}
+    for n in set().union(*per_judge.values()) if per_judge else ():
+        num = den = 0.0
+        for j, scores in per_judge.items():
+            v = scores.get(n)
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                num += w[j] * v
+                den += w[j]
+        if den > 0:
+            out[n] = num / den
+    return out
+
 
 DI_WEIGHT_CHOICES = {
     "inst_tie": DI_WEIGHTS_INST_TIE,  # 0.499*d + 0.501*i  -- DEFAULT
@@ -699,6 +781,7 @@ def declare_constants_dependency(
             "DEFAULT_GPT_HAIKU_Q9_WEIGHT": f"{DEFAULT_GPT_HAIKU_Q9_WEIGHT}",
             "DEFAULT_RESPONSE_DI_WEIGHT": f"{DEFAULT_RESPONSE_DI_WEIGHT}",
             "PRIMARY_AXIS_SAMPLE_WEIGHT": f"{PRIMARY_AXIS_SAMPLE_WEIGHT}",
+            "TIER_JUDGE_WEIGHTS": f"{TIER_JUDGE_WEIGHTS}, others {TIER_JUDGE_DEFAULT_WEIGHT}",
         },
     ))
 
