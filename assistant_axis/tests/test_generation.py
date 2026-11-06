@@ -1,8 +1,15 @@
 """
 Tests for generation utilities.
 
-These tests load real tokenizers to verify behavior with actual chat templates.
-Uses non-gated models only.
+These tests load real tokenizers to verify behavior with actual chat
+templates.  Most fixtures use ungated models (Qwen2.5, Qwen3), but
+the Gemma 2 fixture loads ``google/gemma-2-2b-it`` which IS gated
+and requires Hugging Face authentication (``huggingface-cli login``
+or ``HF_TOKEN`` in the env) plus per-account access approval at
+https://huggingface.co/google/gemma-2-2b-it.  Originally this file
+claimed to use "non-gated models only" -- that was inaccurate
+upstream of the fork (commit 5e571f5 introduced the Gemma fixture
+without flagging its gating); corrected here.
 """
 
 import pytest

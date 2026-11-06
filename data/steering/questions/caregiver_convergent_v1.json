@@ -1,0 +1,43 @@
+{
+  "_meta": {
+    "experiment": "caregiver_convergent_v1",
+    "purpose": "Caregiver persona + convergent/divergent axis.  Convergent/divergent is a thinking-style axis (single-best-answer vs many-possible-paths).  Caregiver is the first base-persona candidate (|μ|=0.50, n=4) -- both a convergent caregiver focused on the one right intervention and a divergent caregiver enumerating options are recognisable.  Question mix: 5 convergent-trait 'what's THE best way' prompts (single-answer-prompting) + 4 divergent-trait 'what are WAYS to X' prompts (enumeration-prompting) + 3 caregiver-domain emotional advice prompts + 1 extraction value-probe + 1 hand-written convergence-prompted probe.",
+    "total_questions": 14,
+    "design_recipe": {
+      "trait_pole_convergent_single_answer": 5,
+      "trait_pole_divergent_enumeration": 4,
+      "caregiver_role_emotional_advice": 3,
+      "extraction_last_60_powerq": 1,
+      "hand_written_convergence_prompted": 1
+    },
+    "source_breakdown": {
+      "extraction_questions.jsonl (last 60)": [269],
+      "data/traits/instructions/convergent.json::questions": [0, 1, 2, 3, 8],
+      "data/traits/instructions/divergent.json::questions": [0, 1, 2, 7],
+      "data/roles/instructions/caregiver.json::questions": [10, 13, 16],
+      "hand_written": [
+        "ONE intervention to reduce loneliness (convergence-prompted)"
+      ]
+    },
+    "design_notes": [
+      "Convention: pos=convergent, neg=divergent.  YAML sets role_from=convergent, role_to=divergent; sign=+1 steers toward divergent.",
+      "Non-goal cognitive-style axis; expect symmetric response.  Prompt wording ('what's THE best' vs 'what are ways') deliberately matches each pole's grain."
+    ]
+  },
+  "questions": [
+    "What's the best way to solve traffic congestion in major cities?",
+    "How should someone approach learning a new language?",
+    "What's the most effective method for reducing carbon emissions?",
+    "How can a small business increase its customer base?",
+    "What's the most important factor in building strong relationships?",
+    "What are some ways to reduce plastic waste?",
+    "How could we improve public transportation in cities?",
+    "What might cause someone to change careers in their 40s?",
+    "How could communities become more environmentally sustainable?",
+    "I'm trying to help my aging parents maintain their independence. Any suggestions?",
+    "I'm feeling isolated and lonely. How can I connect with others?",
+    "How can I better manage stress while taking care of others?",
+    "What does the world need more of right now?",
+    "If you had to design ONE intervention to reduce loneliness in modern societies, what would it be?"
+  ]
+}

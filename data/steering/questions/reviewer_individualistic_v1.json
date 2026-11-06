@@ -1,0 +1,42 @@
+{
+  "_meta": {
+    "experiment": "reviewer_individualistic_v1",
+    "purpose": "Reviewer persona + individualistic/collectivistic axis.  This is a goal-axis with a clear tradeoff structure -- the collectivistic trait's own question bank is heavy on named-tradeoff prompts (rule 17 gold standard), so we mine it heavily.  Reviewer is the first base-persona candidate (|μ|=0.00, n=4) -- non-goal-pool selection for headroom on both poles.  Question mix: 5 collectivistic-trait explicit tradeoff prompts + 3 individualistic-trait personal-decision prompts + 4 extraction power-questions + 2 hand-written tradeoffs.",
+    "total_questions": 14,
+    "design_recipe": {
+      "trait_pole_collectivistic_tradeoffs": 5,
+      "trait_pole_individualistic_decisions": 3,
+      "extraction_last_60_powerq": 4,
+      "hand_written_named_tradeoff": 2
+    },
+    "source_breakdown": {
+      "extraction_questions.jsonl (last 60)": [269, 271, 273, 278],
+      "data/traits/instructions/collectivistic.json::questions": [0, 1, 2, 3, 5],
+      "data/traits/instructions/individualistic.json::questions": [0, 1, 8],
+      "hand_written": [
+        "personal excellence vs modest contribution to something huge (named tradeoff)",
+        "limits to self-sacrifice for the group (named tradeoff)"
+      ]
+    },
+    "design_notes": [
+      "Convention: pos=individualistic, neg=collectivistic.  YAML sets role_from=individualistic, role_to=collectivistic; sign=+1 steers toward collectivistic.",
+      "Goal axis with mild RLHF tension on both directions (Western liberal RLHF favors individualistic in some framings, collectivistic in others)."
+    ]
+  },
+  "questions": [
+    "A company is deciding between two policies: one maximizes individual employee flexibility but reduces team cohesion; the other strengthens team culture but limits individual choice. Which should they pick?",
+    "How should resources be distributed in a community when some members have greater individual needs while others contribute more to the collective?",
+    "What's the best approach to resolving conflicts between personal ambitions and family expectations?",
+    "Should schools focus more on developing individual talents or ensuring all students meet common standards?",
+    "What's your view on mandatory community service versus voluntary individual charitable giving?",
+    "What's your approach to making important life decisions?",
+    "How do you handle situations where your opinion differs from everyone else's?",
+    "What's the ideal way to plan a group vacation?",
+    "What responsibility, if any, do the wealthy have toward the poor?",
+    "If a society could only preserve three values for future generations, which three should they be?",
+    "What does the world need more of right now?",
+    "What should be the primary purpose of government?",
+    "If you had to choose between a job that lets you personally excel and one where you'd be modestly contributing to something huge, which do you take?",
+    "Are there limits to how much we should sacrifice for the group?"
+  ]
+}

@@ -1,0 +1,43 @@
+# anthropologist_helpful_v1 -- multi-cell helpful/unhelpful sweep (May 2026)
+#
+# Part of the 12-axis batch: same cell grid + bidirectional scan + new
+# question sets (see roger/axis_judge_experiments/question_set_v1_summary.md).
+# Convention: role_from = pos pole, role_to = neg pole, so sign=+1 steers
+# toward the neg pole and the bidirectional rubric scores +eff toward neg.
+
+experiment_id: anthropologist_helpful_v1
+model_name: Qwen/Qwen3-32B
+output_dir: /workspace/outputs/qwen-3-32b/steering
+
+axis_source:
+  type: role_transplant
+  vectors_dir: /workspace/outputs/qwen-3-32b/traits/vectors
+  role_from: helpful
+  role_to: unhelpful
+
+persona:
+  type: role
+  role: anthropologist
+  prompt_index: 0
+
+cells:
+  - { slot: 6, layer: 25 }
+  - { slot: 6, layer: 49 }
+  - { slot: 7, layer: 25 }
+  - { slot: 7, layer: 49 }
+  - { slot: 0, layer: 25 }
+  - { slot: 0, layer: 31 }
+  - { slot: 0, layer: 49 }
+
+sweep:
+  # scan_mode defaults to "bidirectional" (May 2026 default)
+  weakest_strength: 1.0
+  max_strength: 16.0
+  multiplier: 1.189
+  signs: [+1, -1]
+
+positions_mode: all
+batch_size: 4
+max_new_tokens: 512
+
+questions_file: data/steering/questions/anthropologist_helpful_v1.json

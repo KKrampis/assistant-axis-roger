@@ -1,0 +1,17 @@
+schema_version: 1
+equivalences:
+- from_rubric: v2
+  to_rubric: v3
+  modes:
+  - responses
+  except_axes:
+  - systems_thinker_vs_analytical
+  reason: v3 differs from v2 only in display-form vs file-form name rendering. Response-mode
+    prompts contain no entity-name slot; only the axis-pole names appear, through
+    the {positive_examples}/{negative_examples}/{axis_name} header substitutions.
+    Of the 12 v2 axes, only systems_thinker_vs_analytical has a multi-word pole that
+    renders differently between v2 (file-form, "systems_thinker") and v3 (display-form,
+    "systems thinker"); the other 11 axes render byte-identical response-mode prompts
+    under v2 and v3, so their cached scores are equivalent. See axis_judge_correlation.py
+    RUBRIC_VERSION history block (May 2026) for context.
+  marked_at: '2026-05-11T15:52:46+00:00'

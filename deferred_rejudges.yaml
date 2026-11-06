@@ -1,0 +1,881 @@
+schema_version: 2
+deferrals:
+- path_glob: '*/scores_descriptions.json'
+  dep_key: null
+  category: legacy_bare
+  reason: Legacy judge cache pre-dating Phase 6 provenance mechanism (May 2026). Presumed
+    current as of mechanism introduction; cost-prohibitive to re-judge. Deferral auto-clears
+    when the producer is re-run (envelope replaces legacy bare JSON).
+  deferred_at: '2026-05-08T15:44:55+00:00'
+- path_glob: '*/scores_instructions.json'
+  dep_key: null
+  category: legacy_bare
+  reason: Legacy judge cache pre-dating Phase 6 provenance mechanism (May 2026). Presumed
+    current as of mechanism introduction; cost-prohibitive to re-judge. Deferral auto-clears
+    when the producer is re-run (envelope replaces legacy bare JSON).
+  deferred_at: '2026-05-08T15:45:05+00:00'
+- path_glob: '*/scores_responses.json'
+  dep_key: null
+  category: legacy_bare
+  reason: Legacy judge cache pre-dating Phase 6 provenance mechanism (May 2026). Presumed
+    current as of mechanism introduction; cost-prohibitive to re-judge. Deferral auto-clears
+    when the producer is re-run (envelope replaces legacy bare JSON).
+  deferred_at: '2026-05-08T15:45:15+00:00'
+- path_glob: '*/projections.json'
+  dep_key: null
+  category: legacy_bare
+  reason: Legacy judge cache pre-dating Phase 6 provenance mechanism (May 2026). Presumed
+    current as of mechanism introduction; cost-prohibitive to re-judge. Deferral auto-clears
+    when the producer is re-run (envelope replaces legacy bare JSON).
+  deferred_at: '2026-05-08T15:45:25+00:00'
+- path_glob: '*/correlations.json'
+  dep_key: null
+  category: legacy_bare
+  reason: Legacy judge cache pre-dating Phase 6 provenance mechanism (May 2026). Presumed
+    current as of mechanism introduction; cost-prohibitive to re-judge. Deferral auto-clears
+    when the producer is re-run (envelope replaces legacy bare JSON).
+  deferred_at: '2026-05-08T15:45:35+00:00'
+- path_glob: '*/correlation_plot.png'
+  dep_key: null
+  category: legacy_bare
+  reason: Legacy judge plot pre-dating Phase 6 provenance mechanism (May 2026). Presumed
+    current as of mechanism introduction; cost-prohibitive to re-judge. Deferral auto-clears
+    when the producer is re-run (Inputs chunk replaces legacy bare PNG).
+  deferred_at: '2026-05-08T15:45:46+00:00'
+- path_glob: '*/gaps.json'
+  dep_key: null
+  category: legacy_bare
+  reason: Legacy judge cache pre-dating Phase 6 provenance mechanism (May 2026). Presumed
+    current as of mechanism introduction; cost-prohibitive to re-judge. Deferral auto-clears
+    when the producer is re-run (envelope replaces legacy bare JSON).
+  deferred_at: '2026-05-08T15:45:56+00:00'
+- path_glob: '*/config.json'
+  dep_key: null
+  category: operational
+  reason: Operational record file (config / API usage / gap tracker) written without
+    an envelope by design -- not a data dependency, no meaningful provenance to record.
+    Deferred indefinitely.
+  deferred_at: '2026-05-08T15:50:26+00:00'
+- path_glob: '*/usage.json'
+  dep_key: null
+  category: operational
+  reason: Operational record file (config / API usage / gap tracker) written without
+    an envelope by design -- not a data dependency, no meaningful provenance to record.
+    Deferred indefinitely.
+  deferred_at: '2026-05-08T15:50:26+00:00'
+- path_glob: '*/pc_axis_describer_sweep/*'
+  dep_key: null
+  category: external_pipeline
+  reason: PC/CA axis-describer pipeline output (LLM-judge driven). Pre-Phase-6 provenance
+    mechanism, not in scope for the May 2026 producer migration. Presumed current
+    as of mechanism introduction; cost-prohibitive to re-describe.
+  deferred_at: '2026-05-08T15:50:26+00:00'
+- path_glob: '*/axis_describer_test_ca1/*'
+  dep_key: null
+  category: external_pipeline
+  reason: PC/CA axis-describer pipeline output (LLM-judge driven). Pre-Phase-6 provenance
+    mechanism, not in scope for the May 2026 producer migration. Presumed current
+    as of mechanism introduction; cost-prohibitive to re-describe.
+  deferred_at: '2026-05-08T15:50:26+00:00'
+- path_glob: '*/pc192_cherrypick_*/*'
+  dep_key: null
+  category: external_pipeline
+  reason: PC/CA axis-describer pipeline output (LLM-judge driven). Pre-Phase-6 provenance
+    mechanism, not in scope for the May 2026 producer migration. Presumed current
+    as of mechanism introduction; cost-prohibitive to re-describe.
+  deferred_at: '2026-05-08T15:50:26+00:00'
+- path_glob: '*/pc_axis_describer_sweep.bak*/*'
+  dep_key: null
+  category: external_pipeline
+  reason: PC/CA axis-describer pipeline output (LLM-judge driven). Pre-Phase-6 provenance
+    mechanism, not in scope for the May 2026 producer migration. Presumed current
+    as of mechanism introduction; cost-prohibitive to re-describe.
+  deferred_at: '2026-05-08T15:51:29+00:00'
+- path_glob: '*/axis_describer_test_*/*'
+  dep_key: null
+  category: external_pipeline
+  reason: PC/CA axis-describer pipeline output (LLM-judge driven). Pre-Phase-6 provenance
+    mechanism, not in scope for the May 2026 producer migration. Presumed current
+    as of mechanism introduction; cost-prohibitive to re-describe.
+  deferred_at: '2026-05-08T15:51:29+00:00'
+- path_glob: '*/pair_list*.json'
+  dep_key: null
+  category: hand_curated_input
+  reason: Hand-curated config file (axis pair list); not a producer output -- read
+    by judge-cache consumers as input.  No envelope expected.
+  deferred_at: '2026-05-08T15:53:25+00:00'
+- path_glob: '*/axis_judge_experiments/axis_vs_pc_cosines.json'
+  dep_key: null
+  category: orphan_no_producer
+  reason: Orphan output from a pre-Phase-6 one-off analysis whose producer is no longer
+    in the codebase. Not in scope for the May 2026 producer migration. Presumed snapshot-historical;
+    remove the file (and this entry) when superseded.
+  deferred_at: '2026-05-08T15:53:25+00:00'
+- path_glob: '*/axis_judge_experiments/clean_pairs_beyond_20.json'
+  dep_key: null
+  category: orphan_no_producer
+  reason: Orphan output from a pre-Phase-6 one-off analysis whose producer is no longer
+    in the codebase. Not in scope for the May 2026 producer migration. Presumed snapshot-historical;
+    remove the file (and this entry) when superseded.
+  deferred_at: '2026-05-08T15:53:25+00:00'
+- path_glob: '*/axis_judge_experiments/*coordinate_ascent*.json'
+  dep_key: null
+  category: orphan_no_producer
+  reason: Orphan output from a pre-Phase-6 one-off analysis whose producer is no longer
+    in the codebase. Not in scope for the May 2026 producer migration. Presumed snapshot-historical;
+    remove the file (and this entry) when superseded.
+  deferred_at: '2026-05-08T15:53:25+00:00'
+- path_glob: '*/axis_judge_experiments/common_mode_analysis.json'
+  dep_key: null
+  category: orphan_no_producer
+  reason: Orphan output from a pre-Phase-6 one-off analysis whose producer is no longer
+    in the codebase. Not in scope for the May 2026 producer migration. Presumed snapshot-historical;
+    remove the file (and this entry) when superseded.
+  deferred_at: '2026-05-08T15:53:25+00:00'
+- path_glob: '*/axis_judge_experiments/geometric_rule*.json'
+  dep_key: null
+  category: orphan_no_producer
+  reason: Orphan output from a pre-Phase-6 one-off analysis whose producer is no longer
+    in the codebase. Not in scope for the May 2026 producer migration. Presumed snapshot-historical;
+    remove the file (and this entry) when superseded.
+  deferred_at: '2026-05-08T15:53:25+00:00'
+- path_glob: '*/axis_judge_experiments/geometry_predictor_results.json'
+  dep_key: null
+  category: orphan_no_producer
+  reason: Orphan output from a pre-Phase-6 one-off analysis whose producer is no longer
+    in the codebase. Not in scope for the May 2026 producer migration. Presumed snapshot-historical;
+    remove the file (and this entry) when superseded.
+  deferred_at: '2026-05-08T15:53:25+00:00'
+- path_glob: '*/axis_judge_experiments/pc_extremes.json'
+  dep_key: null
+  category: orphan_no_producer
+  reason: Orphan output from a pre-Phase-6 one-off analysis whose producer is no longer
+    in the codebase. Not in scope for the May 2026 producer migration. Presumed snapshot-historical;
+    remove the file (and this entry) when superseded.
+  deferred_at: '2026-05-08T15:53:25+00:00'
+- path_glob: '*/axis_judge_experiments/slot_averaging_rho.json'
+  dep_key: null
+  category: orphan_no_producer
+  reason: Orphan output from a pre-Phase-6 one-off analysis whose producer is no longer
+    in the codebase. Not in scope for the May 2026 producer migration. Presumed snapshot-historical;
+    remove the file (and this entry) when superseded.
+  deferred_at: '2026-05-08T15:53:25+00:00'
+- path_glob: '*/axis_judge_experiments/slot_avg_vs_concat_rho.json'
+  dep_key: null
+  category: orphan_no_producer
+  reason: Orphan output from a pre-Phase-6 one-off analysis whose producer is no longer
+    in the codebase. Not in scope for the May 2026 producer migration. Presumed snapshot-historical;
+    remove the file (and this entry) when superseded.
+  deferred_at: '2026-05-08T15:53:25+00:00'
+- path_glob: '*/axis_judge_experiments/summary*.json'
+  dep_key: null
+  category: orphan_no_producer
+  reason: Orphan output from a pre-Phase-6 one-off analysis whose producer is no longer
+    in the codebase. Not in scope for the May 2026 producer migration. Presumed snapshot-historical;
+    remove the file (and this entry) when superseded.
+  deferred_at: '2026-05-08T15:53:25+00:00'
+- path_glob: '*/roger/b5_vs_b15_rho_grid.json'
+  dep_key: null
+  category: orphan_no_producer
+  reason: Orphan output from a pre-Phase-6 one-off analysis whose producer is no longer
+    in the codebase. Not in scope for the May 2026 producer migration. Presumed snapshot-historical;
+    remove the file (and this entry) when superseded.
+  deferred_at: '2026-05-08T15:53:25+00:00'
+- path_glob: '*/roger/haiku_compare_results.json'
+  dep_key: null
+  category: orphan_no_producer
+  reason: Orphan output from a pre-Phase-6 one-off analysis whose producer is no longer
+    in the codebase. Not in scope for the May 2026 producer migration. Presumed snapshot-historical;
+    remove the file (and this entry) when superseded.
+  deferred_at: '2026-05-08T15:53:25+00:00'
+- path_glob: '*/roger/judge_audit_*.json'
+  dep_key: null
+  category: orphan_no_producer
+  reason: Orphan output from a pre-Phase-6 one-off analysis whose producer is no longer
+    in the codebase. Not in scope for the May 2026 producer migration. Presumed snapshot-historical;
+    remove the file (and this entry) when superseded.
+  deferred_at: '2026-05-08T15:53:25+00:00'
+- path_glob: '*/roger/judge_provider_compare_multi.json'
+  dep_key: null
+  category: orphan_no_producer
+  reason: Orphan output from a pre-Phase-6 one-off analysis whose producer is no longer
+    in the codebase. Not in scope for the May 2026 producer migration. Presumed snapshot-historical;
+    remove the file (and this entry) when superseded.
+  deferred_at: '2026-05-08T15:53:25+00:00'
+- path_glob: '*/roger/pc_axis_scores.json'
+  dep_key: null
+  category: orphan_no_producer
+  reason: Orphan output from a pre-Phase-6 one-off analysis whose producer is no longer
+    in the codebase. Not in scope for the May 2026 producer migration. Presumed snapshot-historical;
+    remove the file (and this entry) when superseded.
+  deferred_at: '2026-05-08T15:53:25+00:00'
+- path_glob: '*/roger/response_token_counts.json'
+  dep_key: null
+  category: orphan_no_producer
+  reason: Orphan output from a pre-Phase-6 one-off analysis whose producer is no longer
+    in the codebase. Not in scope for the May 2026 producer migration. Presumed snapshot-historical;
+    remove the file (and this entry) when superseded.
+  deferred_at: '2026-05-08T15:53:25+00:00'
+- path_glob: '*/coherence_eval/*'
+  dep_key: null
+  category: external_pipeline
+  reason: Output of a separate workflow (coherence_eval / pipeline scoring) outside
+    the May 2026 producer-provenance migration scope. Defer to keep audit reports
+    clean.
+  deferred_at: '2026-05-08T15:55:03+00:00'
+- path_glob: '*/plots/pipeline_step_3/*'
+  dep_key: null
+  category: external_pipeline
+  reason: Output of a separate workflow (coherence_eval / pipeline scoring) outside
+    the May 2026 producer-provenance migration scope. Defer to keep audit reports
+    clean.
+  deferred_at: '2026-05-08T15:55:03+00:00'
+- path_glob: '*/role_diffs/*'
+  dep_key: null
+  category: orphan_no_producer
+  reason: Orphan PNG output from a pre-Phase-6 one-off analysis whose producer is
+    no longer in the codebase. Not in scope for the May 2026 producer migration. Presumed
+    snapshot-historical; remove the file (and this entry) when superseded.
+  deferred_at: '2026-05-08T15:55:03+00:00'
+- path_glob: '*/roger/vectors_*.png'
+  dep_key: null
+  category: orphan_no_producer
+  reason: Orphan PNG output from a pre-Phase-6 one-off analysis whose producer is
+    no longer in the codebase. Not in scope for the May 2026 producer migration. Presumed
+    snapshot-historical; remove the file (and this entry) when superseded.
+  deferred_at: '2026-05-08T15:55:03+00:00'
+- path_glob: '*/roger/axis_comparison_*.png'
+  dep_key: null
+  category: orphan_no_producer
+  reason: Orphan PNG output from a pre-Phase-6 one-off analysis whose producer is
+    no longer in the codebase. Not in scope for the May 2026 producer migration. Presumed
+    snapshot-historical; remove the file (and this entry) when superseded.
+  deferred_at: '2026-05-08T15:55:03+00:00'
+- path_glob: '*/roger/all_roles_overlay*.png'
+  dep_key: null
+  category: orphan_no_producer
+  reason: Orphan PNG output from a pre-Phase-6 one-off analysis whose producer is
+    no longer in the codebase. Not in scope for the May 2026 producer migration. Presumed
+    snapshot-historical; remove the file (and this entry) when superseded.
+  deferred_at: '2026-05-08T15:55:03+00:00'
+- path_glob: '*/roger/angel_demon_axis.png'
+  dep_key: null
+  category: orphan_no_producer
+  reason: Orphan PNG output from a pre-Phase-6 one-off analysis whose producer is
+    no longer in the codebase. Not in scope for the May 2026 producer migration. Presumed
+    snapshot-historical; remove the file (and this entry) when superseded.
+  deferred_at: '2026-05-08T15:55:03+00:00'
+- path_glob: '*/roger/axis_pc_*.png'
+  dep_key: null
+  category: orphan_no_producer
+  reason: Orphan PNG output from a pre-Phase-6 one-off analysis whose producer is
+    no longer in the codebase. Not in scope for the May 2026 producer migration. Presumed
+    snapshot-historical; remove the file (and this entry) when superseded.
+  deferred_at: '2026-05-08T15:55:03+00:00'
+- path_glob: '*/roger/ca_*.png'
+  dep_key: null
+  category: orphan_no_producer
+  reason: Orphan PNG output from a pre-Phase-6 one-off analysis whose producer is
+    no longer in the codebase. Not in scope for the May 2026 producer migration. Presumed
+    snapshot-historical; remove the file (and this entry) when superseded.
+  deferred_at: '2026-05-08T15:55:03+00:00'
+- path_glob: '*/roger/b5_vs_b15_rho_grid.png'
+  dep_key: null
+  category: orphan_no_producer
+  reason: Orphan PNG output from a pre-Phase-6 one-off analysis whose producer is
+    no longer in the codebase. Not in scope for the May 2026 producer migration. Presumed
+    snapshot-historical; remove the file (and this entry) when superseded.
+  deferred_at: '2026-05-08T15:55:03+00:00'
+- path_glob: '*/roger/canonical_angles_heldout_pooled_whitening_*.png'
+  dep_key: null
+  category: orphan_no_producer
+  reason: Orphan PNG output from a pre-Phase-6 one-off analysis whose producer is
+    no longer in the codebase. Not in scope for the May 2026 producer migration. Presumed
+    snapshot-historical; remove the file (and this entry) when superseded.
+  deferred_at: '2026-05-08T15:55:03+00:00'
+- path_glob: '*/axis_judge_experiments/beta_*.png'
+  dep_key: null
+  category: orphan_no_producer
+  reason: Orphan PNG output from a pre-Phase-6 one-off analysis whose producer is
+    no longer in the codebase. Not in scope for the May 2026 producer migration. Presumed
+    snapshot-historical; remove the file (and this entry) when superseded.
+  deferred_at: '2026-05-08T15:55:03+00:00'
+- path_glob: '*/axis_judge_experiments/coordinate_ascent_*.png'
+  dep_key: null
+  category: orphan_no_producer
+  reason: Orphan PNG output from a pre-Phase-6 one-off analysis whose producer is
+    no longer in the codebase. Not in scope for the May 2026 producer migration. Presumed
+    snapshot-historical; remove the file (and this entry) when superseded.
+  deferred_at: '2026-05-08T15:55:03+00:00'
+- path_glob: '*/axis_judge_experiments/axis_pc_*.png'
+  dep_key: null
+  category: orphan_no_producer
+  reason: Orphan PNG output from a pre-Phase-6 one-off analysis whose producer is
+    no longer in the codebase. Not in scope for the May 2026 producer migration. Presumed
+    snapshot-historical; remove the file (and this entry) when superseded.
+  deferred_at: '2026-05-08T15:55:03+00:00'
+- path_glob: '*/axis_judge_experiments/axis_vs_pc_*.png'
+  dep_key: null
+  category: orphan_no_producer
+  reason: Orphan PNG output from a pre-Phase-6 one-off analysis whose producer is
+    no longer in the codebase. Not in scope for the May 2026 producer migration. Presumed
+    snapshot-historical; remove the file (and this entry) when superseded.
+  deferred_at: '2026-05-08T15:55:03+00:00'
+- path_glob: '*/axis_judge_experiments/delta_rho_*.png'
+  dep_key: null
+  category: orphan_no_producer
+  reason: Orphan PNG output from a pre-Phase-6 one-off analysis whose producer is
+    no longer in the codebase. Not in scope for the May 2026 producer migration. Presumed
+    snapshot-historical; remove the file (and this entry) when superseded.
+  deferred_at: '2026-05-08T15:55:03+00:00'
+- path_glob: '*/axis_judge_experiments/restarts.png'
+  dep_key: null
+  category: orphan_no_producer
+  reason: Orphan PNG output from a pre-Phase-6 one-off analysis whose producer is
+    no longer in the codebase. Not in scope for the May 2026 producer migration. Presumed
+    snapshot-historical; remove the file (and this entry) when superseded.
+  deferred_at: '2026-05-08T15:55:03+00:00'
+- path_glob: roger/b5_vs_b15_rho_grid.json
+  dep_key: null
+  category: orphan_no_producer
+  reason: Orphan output from a pre-Phase-6 one-off analysis whose producer is no longer
+    in the codebase. Not in scope for the May 2026 producer migration. Presumed snapshot-historical;
+    remove the file (and this entry) when superseded.
+  deferred_at: '2026-05-08T15:56:40+00:00'
+- path_glob: roger/haiku_compare_results.json
+  dep_key: null
+  category: orphan_no_producer
+  reason: Orphan output from a pre-Phase-6 one-off analysis whose producer is no longer
+    in the codebase. Not in scope for the May 2026 producer migration. Presumed snapshot-historical;
+    remove the file (and this entry) when superseded.
+  deferred_at: '2026-05-08T15:56:40+00:00'
+- path_glob: roger/judge_audit_*.json
+  dep_key: null
+  category: orphan_no_producer
+  reason: Orphan output from a pre-Phase-6 one-off analysis whose producer is no longer
+    in the codebase. Not in scope for the May 2026 producer migration. Presumed snapshot-historical;
+    remove the file (and this entry) when superseded.
+  deferred_at: '2026-05-08T15:56:40+00:00'
+- path_glob: roger/judge_provider_compare_multi.json
+  dep_key: null
+  category: orphan_no_producer
+  reason: Orphan output from a pre-Phase-6 one-off analysis whose producer is no longer
+    in the codebase. Not in scope for the May 2026 producer migration. Presumed snapshot-historical;
+    remove the file (and this entry) when superseded.
+  deferred_at: '2026-05-08T15:56:40+00:00'
+- path_glob: roger/pc_axis_scores.json
+  dep_key: null
+  category: orphan_no_producer
+  reason: Orphan output from a pre-Phase-6 one-off analysis whose producer is no longer
+    in the codebase. Not in scope for the May 2026 producer migration. Presumed snapshot-historical;
+    remove the file (and this entry) when superseded.
+  deferred_at: '2026-05-08T15:56:40+00:00'
+- path_glob: roger/response_token_counts.json
+  dep_key: null
+  category: orphan_no_producer
+  reason: Orphan output from a pre-Phase-6 one-off analysis whose producer is no longer
+    in the codebase. Not in scope for the May 2026 producer migration. Presumed snapshot-historical;
+    remove the file (and this entry) when superseded.
+  deferred_at: '2026-05-08T15:56:40+00:00'
+- path_glob: roger/vectors_*.png
+  dep_key: null
+  category: orphan_no_producer
+  reason: Orphan output from a pre-Phase-6 one-off analysis whose producer is no longer
+    in the codebase. Not in scope for the May 2026 producer migration. Presumed snapshot-historical;
+    remove the file (and this entry) when superseded.
+  deferred_at: '2026-05-08T15:56:40+00:00'
+- path_glob: roger/axis_comparison_*.png
+  dep_key: null
+  category: orphan_no_producer
+  reason: Orphan output from a pre-Phase-6 one-off analysis whose producer is no longer
+    in the codebase. Not in scope for the May 2026 producer migration. Presumed snapshot-historical;
+    remove the file (and this entry) when superseded.
+  deferred_at: '2026-05-08T15:56:40+00:00'
+- path_glob: roger/all_roles_overlay*.png
+  dep_key: null
+  category: orphan_no_producer
+  reason: Orphan output from a pre-Phase-6 one-off analysis whose producer is no longer
+    in the codebase. Not in scope for the May 2026 producer migration. Presumed snapshot-historical;
+    remove the file (and this entry) when superseded.
+  deferred_at: '2026-05-08T15:56:40+00:00'
+- path_glob: roger/angel_demon_axis.png
+  dep_key: null
+  category: orphan_no_producer
+  reason: Orphan output from a pre-Phase-6 one-off analysis whose producer is no longer
+    in the codebase. Not in scope for the May 2026 producer migration. Presumed snapshot-historical;
+    remove the file (and this entry) when superseded.
+  deferred_at: '2026-05-08T15:56:40+00:00'
+- path_glob: roger/axis_pc_*.png
+  dep_key: null
+  category: orphan_no_producer
+  reason: Orphan output from a pre-Phase-6 one-off analysis whose producer is no longer
+    in the codebase. Not in scope for the May 2026 producer migration. Presumed snapshot-historical;
+    remove the file (and this entry) when superseded.
+  deferred_at: '2026-05-08T15:56:40+00:00'
+- path_glob: roger/ca_*.png
+  dep_key: null
+  category: orphan_no_producer
+  reason: Orphan output from a pre-Phase-6 one-off analysis whose producer is no longer
+    in the codebase. Not in scope for the May 2026 producer migration. Presumed snapshot-historical;
+    remove the file (and this entry) when superseded.
+  deferred_at: '2026-05-08T15:56:40+00:00'
+- path_glob: roger/b5_vs_b15_rho_grid.png
+  dep_key: null
+  category: orphan_no_producer
+  reason: Orphan output from a pre-Phase-6 one-off analysis whose producer is no longer
+    in the codebase. Not in scope for the May 2026 producer migration. Presumed snapshot-historical;
+    remove the file (and this entry) when superseded.
+  deferred_at: '2026-05-08T15:56:40+00:00'
+- path_glob: roger/canonical_angles_heldout_pooled_whitening_*.png
+  dep_key: null
+  category: orphan_no_producer
+  reason: Orphan output from a pre-Phase-6 one-off analysis whose producer is no longer
+    in the codebase. Not in scope for the May 2026 producer migration. Presumed snapshot-historical;
+    remove the file (and this entry) when superseded.
+  deferred_at: '2026-05-08T15:56:40+00:00'
+- path_glob: '*/pc_round_trip_*backup*.json'
+  dep_key: null
+  category: archived
+  reason: Pre-May-2026 pc_round_trip artifact (deprecated nth_pc variant, 3-cell-config
+    superseded by 7-cell, K-near-N variant, or explicit backup snapshot). No current
+    producer; kept on-disk for archival comparison only. The active fixed_principled+7-cell
+    pipeline outputs are now envelope-bearing under their canonical names.
+  deferred_at: '2026-05-08T23:55:35+00:00'
+- path_glob: '*/pc_round_trip_*backup*.png'
+  dep_key: null
+  category: archived
+  reason: Pre-May-2026 pc_round_trip artifact (deprecated nth_pc variant, 3-cell-config
+    superseded by 7-cell, K-near-N variant, or explicit backup snapshot). No current
+    producer; kept on-disk for archival comparison only. The active fixed_principled+7-cell
+    pipeline outputs are now envelope-bearing under their canonical names.
+  deferred_at: '2026-05-08T23:55:36+00:00'
+- path_glob: '*/pc_round_trip_klm_results.K-near-N-eighth-backup.json'
+  dep_key: null
+  category: archived
+  reason: Pre-May-2026 pc_round_trip artifact (deprecated nth_pc variant, 3-cell-config
+    superseded by 7-cell, K-near-N variant, or explicit backup snapshot). No current
+    producer; kept on-disk for archival comparison only. The active fixed_principled+7-cell
+    pipeline outputs are now envelope-bearing under their canonical names.
+  deferred_at: '2026-05-08T23:55:37+00:00'
+- path_glob: '*/pc_round_trip_klm_results.before-K-near-N-backup.json'
+  dep_key: null
+  category: archived
+  reason: Pre-May-2026 pc_round_trip artifact (deprecated nth_pc variant, 3-cell-config
+    superseded by 7-cell, K-near-N variant, or explicit backup snapshot). No current
+    producer; kept on-disk for archival comparison only. The active fixed_principled+7-cell
+    pipeline outputs are now envelope-bearing under their canonical names.
+  deferred_at: '2026-05-08T23:55:38+00:00'
+- path_glob: '*/pc_round_trip_null_klm_results.before-pc-list-update-backup.json'
+  dep_key: null
+  category: archived
+  reason: Pre-May-2026 pc_round_trip artifact (deprecated nth_pc variant, 3-cell-config
+    superseded by 7-cell, K-near-N variant, or explicit backup snapshot). No current
+    producer; kept on-disk for archival comparison only. The active fixed_principled+7-cell
+    pipeline outputs are now envelope-bearing under their canonical names.
+  deferred_at: '2026-05-08T23:55:40+00:00'
+- path_glob: '*/pc_round_trip_null_klm_results.partial-3-25-only-stage2-backup.json'
+  dep_key: null
+  category: archived
+  reason: Pre-May-2026 pc_round_trip artifact (deprecated nth_pc variant, 3-cell-config
+    superseded by 7-cell, K-near-N variant, or explicit backup snapshot). No current
+    producer; kept on-disk for archival comparison only. The active fixed_principled+7-cell
+    pipeline outputs are now envelope-bearing under their canonical names.
+  deferred_at: '2026-05-08T23:55:41+00:00'
+- path_glob: '*/pc_round_trip_nth_pc_*'
+  dep_key: null
+  category: archived
+  reason: Pre-May-2026 pc_round_trip artifact (deprecated nth_pc variant, 3-cell-config
+    superseded by 7-cell, K-near-N variant, or explicit backup snapshot). No current
+    producer; kept on-disk for archival comparison only. The active fixed_principled+7-cell
+    pipeline outputs are now envelope-bearing under their canonical names.
+  deferred_at: '2026-05-08T23:55:42+00:00'
+- path_glob: '*/pc_round_trip_fixed_direction_global_winners.json'
+  dep_key: null
+  category: archived
+  reason: Pre-May-2026 pc_round_trip artifact (deprecated nth_pc variant, 3-cell-config
+    superseded by 7-cell, K-near-N variant, or explicit backup snapshot). No current
+    producer; kept on-disk for archival comparison only. The active fixed_principled+7-cell
+    pipeline outputs are now envelope-bearing under their canonical names.
+  deferred_at: '2026-05-08T23:55:43+00:00'
+- path_glob: '*/pc_round_trip_per_config.json'
+  dep_key: null
+  category: archived
+  reason: Pre-May-2026 pc_round_trip artifact (deprecated nth_pc variant, 3-cell-config
+    superseded by 7-cell, K-near-N variant, or explicit backup snapshot). No current
+    producer; kept on-disk for archival comparison only. The active fixed_principled+7-cell
+    pipeline outputs are now envelope-bearing under their canonical names.
+  deferred_at: '2026-05-08T23:55:44+00:00'
+- path_glob: '*/pc_round_trip_*winners_3-25_0-26.json'
+  dep_key: null
+  category: archived
+  reason: Pre-May-2026 pc_round_trip artifact (deprecated nth_pc variant, 3-cell-config
+    superseded by 7-cell, K-near-N variant, or explicit backup snapshot). No current
+    producer; kept on-disk for archival comparison only. The active fixed_principled+7-cell
+    pipeline outputs are now envelope-bearing under their canonical names.
+  deferred_at: '2026-05-08T23:55:45+00:00'
+- path_glob: '*/pc_round_trip_*winners_3-25_0-26_0-49.json'
+  dep_key: null
+  category: archived
+  reason: Pre-May-2026 pc_round_trip artifact (deprecated nth_pc variant, 3-cell-config
+    superseded by 7-cell, K-near-N variant, or explicit backup snapshot). No current
+    producer; kept on-disk for archival comparison only. The active fixed_principled+7-cell
+    pipeline outputs are now envelope-bearing under their canonical names.
+  deferred_at: '2026-05-08T23:55:47+00:00'
+- path_glob: '*__rubric_v1.json'
+  dep_key: null
+  category: frozen_snapshot
+  reason: v1 rubric snapshot taken on 2026-05-09 immediately before the v2 rubric
+    anonymization landed. Kept on-disk for cross-rubric comparison; not to be re-judged.
+    The going-forward (non-snapshot) caches are being re-judged under v2 in a separate
+    process.
+  deferred_at: '2026-05-09T03:37:03+00:00'
+- path_glob: '*__rubric_v1.png'
+  dep_key: null
+  category: frozen_snapshot
+  reason: v1 rubric snapshot taken on 2026-05-09 immediately before the v2 rubric
+    anonymization landed. Kept on-disk for cross-rubric comparison; not to be re-judged.
+    The going-forward (non-snapshot) caches are being re-judged under v2 in a separate
+    process.
+  deferred_at: '2026-05-09T03:40:15+00:00'
+- path_glob: '*.bak.3cell.*'
+  dep_key: null
+  category: archived
+  reason: Backup snapshot from the May 7 2026 3-cell -> 7-cell pc_round_trip cohort
+    cutover. Kept on-disk for cross-cohort comparison only; will not be regenerated.
+  deferred_at: '2026-05-09T03:40:17+00:00'
+- path_glob: roger/canonical_angles_*.png
+  dep_key: null
+  category: orphan_no_producer
+  reason: Pre-Phase-6 one-off PNG output. No current producer (script lives in /tmp/_*.py
+    or has been removed/superseded by a migrated canonical producer that writes to
+    a different output dir). Kept on-disk for archival reference; remove the file
+    (and this entry) when truly superseded.
+  deferred_at: '2026-05-09T03:49:18+00:00'
+- path_glob: roger/scree_*.png
+  dep_key: null
+  category: orphan_no_producer
+  reason: Pre-Phase-6 one-off PNG output. No current producer (script lives in /tmp/_*.py
+    or has been removed/superseded by a migrated canonical producer that writes to
+    a different output dir). Kept on-disk for archival reference; remove the file
+    (and this entry) when truly superseded.
+  deferred_at: '2026-05-09T03:49:19+00:00'
+- path_glob: roger/role_*.png
+  dep_key: null
+  category: orphan_no_producer
+  reason: Pre-Phase-6 one-off PNG output. No current producer (script lives in /tmp/_*.py
+    or has been removed/superseded by a migrated canonical producer that writes to
+    a different output dir). Kept on-disk for archival reference; remove the file
+    (and this entry) when truly superseded.
+  deferred_at: '2026-05-09T03:49:21+00:00'
+- path_glob: roger/pc_round_trip_*backup*.png
+  dep_key: null
+  category: orphan_no_producer
+  reason: Pre-Phase-6 one-off PNG output. No current producer (script lives in /tmp/_*.py
+    or has been removed/superseded by a migrated canonical producer that writes to
+    a different output dir). Kept on-disk for archival reference; remove the file
+    (and this entry) when truly superseded.
+  deferred_at: '2026-05-09T03:49:22+00:00'
+- path_glob: roger/pc_round_trip_nth_pc_*.png
+  dep_key: null
+  category: orphan_no_producer
+  reason: Pre-Phase-6 one-off PNG output. No current producer (script lives in /tmp/_*.py
+    or has been removed/superseded by a migrated canonical producer that writes to
+    a different output dir). Kept on-disk for archival reference; remove the file
+    (and this entry) when truly superseded.
+  deferred_at: '2026-05-09T03:49:24+00:00'
+- path_glob: roger/pc1_*.png
+  dep_key: null
+  category: orphan_no_producer
+  reason: Pre-Phase-6 one-off PNG output. No current producer (script lives in /tmp/_*.py
+    or has been removed/superseded by a migrated canonical producer that writes to
+    a different output dir). Kept on-disk for archival reference; remove the file
+    (and this entry) when truly superseded.
+  deferred_at: '2026-05-09T03:49:25+00:00'
+- path_glob: roger/principal_*.png
+  dep_key: null
+  category: orphan_no_producer
+  reason: Pre-Phase-6 one-off PNG output. No current producer (script lives in /tmp/_*.py
+    or has been removed/superseded by a migrated canonical producer that writes to
+    a different output dir). Kept on-disk for archival reference; remove the file
+    (and this entry) when truly superseded.
+  deferred_at: '2026-05-09T03:49:27+00:00'
+- path_glob: roger/traits_*.png
+  dep_key: null
+  category: orphan_no_producer
+  reason: Pre-Phase-6 one-off PNG output. No current producer (script lives in /tmp/_*.py
+    or has been removed/superseded by a migrated canonical producer that writes to
+    a different output dir). Kept on-disk for archival reference; remove the file
+    (and this entry) when truly superseded.
+  deferred_at: '2026-05-09T03:49:28+00:00'
+- path_glob: roger/variance_decomp_*.png
+  dep_key: null
+  category: orphan_no_producer
+  reason: Pre-Phase-6 one-off PNG output. No current producer (script lives in /tmp/_*.py
+    or has been removed/superseded by a migrated canonical producer that writes to
+    a different output dir). Kept on-disk for archival reference; remove the file
+    (and this entry) when truly superseded.
+  deferred_at: '2026-05-09T03:49:29+00:00'
+- path_glob: roger/all_roles_pairwise_slots*.png
+  dep_key: null
+  category: orphan_no_producer
+  reason: Pre-Phase-6 one-off PNG output. No current producer (script lives in /tmp/_*.py
+    or has been removed/superseded by a migrated canonical producer that writes to
+    a different output dir). Kept on-disk for archival reference; remove the file
+    (and this entry) when truly superseded.
+  deferred_at: '2026-05-09T03:49:31+00:00'
+- path_glob: roger/pca_*.png
+  dep_key: null
+  category: orphan_no_producer
+  reason: Pre-Phase-6 one-off PNG output. No current producer (script lives in /tmp/_*.py
+    or has been removed/superseded by a migrated canonical producer that writes to
+    a different output dir). Kept on-disk for archival reference; remove the file
+    (and this entry) when truly superseded.
+  deferred_at: '2026-05-09T03:49:32+00:00'
+- path_glob: roger/residuals_*.png
+  dep_key: null
+  category: orphan_no_producer
+  reason: Pre-Phase-6 one-off PNG output. No current producer (script lives in /tmp/_*.py
+    or has been removed/superseded by a migrated canonical producer that writes to
+    a different output dir). Kept on-disk for archival reference; remove the file
+    (and this entry) when truly superseded.
+  deferred_at: '2026-05-09T03:49:34+00:00'
+- path_glob: roger/header_vs_body_axis.png
+  dep_key: null
+  category: orphan_no_producer
+  reason: Pre-Phase-6 one-off PNG output. No current producer (script lives in /tmp/_*.py
+    or has been removed/superseded by a migrated canonical producer that writes to
+    a different output dir). Kept on-disk for archival reference; remove the file
+    (and this entry) when truly superseded.
+  deferred_at: '2026-05-09T03:49:35+00:00'
+- path_glob: roger/mean_separation_*.png
+  dep_key: null
+  category: orphan_no_producer
+  reason: Pre-Phase-6 one-off PNG output. No current producer (script lives in /tmp/_*.py
+    or has been removed/superseded by a migrated canonical producer that writes to
+    a different output dir). Kept on-disk for archival reference; remove the file
+    (and this entry) when truly superseded.
+  deferred_at: '2026-05-09T03:49:37+00:00'
+- path_glob: roger/all_roles_pairwise_slots_out/*K=3*.png
+  dep_key: null
+  category: orphan_no_producer
+  reason: Pre-Phase-6 one-off PNG output. No current producer (script lives in /tmp/_*.py
+    or has been removed/superseded by a migrated canonical producer that writes to
+    a different output dir). Kept on-disk for archival reference; remove the file
+    (and this entry) when truly superseded.
+  deferred_at: '2026-05-09T03:49:38+00:00'
+- path_glob: roger/token_position_noise_out_roger/*.png
+  dep_key: null
+  category: orphan_no_producer
+  reason: Pre-Phase-6 one-off PNG output. No current producer (script lives in /tmp/_*.py
+    or has been removed/superseded by a migrated canonical producer that writes to
+    a different output dir). Kept on-disk for archival reference; remove the file
+    (and this entry) when truly superseded.
+  deferred_at: '2026-05-09T03:49:40+00:00'
+- path_glob: roger/axis_judge_experiments/pair_slices/*_slice_K3.png
+  dep_key: null
+  category: orphan_no_producer
+  reason: Pre-Phase-6 one-off PNG output. No current producer (script lives in /tmp/_*.py
+    or has been removed/superseded by a migrated canonical producer that writes to
+    a different output dir). Kept on-disk for archival reference; remove the file
+    (and this entry) when truly superseded.
+  deferred_at: '2026-05-09T03:49:41+00:00'
+- path_glob: roger/axis_judge_experiments/pair_slices/*_slice_optDI.png
+  dep_key: null
+  category: orphan_no_producer
+  reason: Pre-Phase-6 one-off PNG output. No current producer (script lives in /tmp/_*.py
+    or has been removed/superseded by a migrated canonical producer that writes to
+    a different output dir). Kept on-disk for archival reference; remove the file
+    (and this entry) when truly superseded.
+  deferred_at: '2026-05-09T03:49:43+00:00'
+- path_glob: roger/axis_judge_experiments/pair_slices/*_slice_optRESP.png
+  dep_key: null
+  category: orphan_no_producer
+  reason: Pre-Phase-6 one-off PNG output. No current producer (script lives in /tmp/_*.py
+    or has been removed/superseded by a migrated canonical producer that writes to
+    a different output dir). Kept on-disk for archival reference; remove the file
+    (and this entry) when truly superseded.
+  deferred_at: '2026-05-09T03:49:44+00:00'
+- path_glob: roger/axis_judge_experiments/lkm_grid_rho*.png
+  dep_key: null
+  category: orphan_no_producer
+  reason: Pre-Phase-6 one-off PNG output. No current producer (script lives in /tmp/_*.py
+    or has been removed/superseded by a migrated canonical producer that writes to
+    a different output dir). Kept on-disk for archival reference; remove the file
+    (and this entry) when truly superseded.
+  deferred_at: '2026-05-09T03:49:46+00:00'
+- path_glob: roger/axis_judge_experiments/moral_axis_2d_slice*.png
+  dep_key: null
+  category: orphan_no_producer
+  reason: Pre-Phase-6 one-off PNG output. No current producer (script lives in /tmp/_*.py
+    or has been removed/superseded by a migrated canonical producer that writes to
+    a different output dir). Kept on-disk for archival reference; remove the file
+    (and this entry) when truly superseded.
+  deferred_at: '2026-05-09T03:49:47+00:00'
+- path_glob: roger/axis_judge_experiments/opt_beta_per_axis.png
+  dep_key: null
+  category: orphan_no_producer
+  reason: Pre-Phase-6 one-off PNG output. No current producer (script lives in /tmp/_*.py
+    or has been removed/superseded by a migrated canonical producer that writes to
+    a different output dir). Kept on-disk for archival reference; remove the file
+    (and this entry) when truly superseded.
+  deferred_at: '2026-05-09T03:49:48+00:00'
+- path_glob: roger/axis_judge_experiments/*_combinations_CA1_plane*.png
+  dep_key: null
+  category: orphan_no_producer
+  reason: Pre-Phase-6 one-off PNG output. No current producer (script lives in /tmp/_*.py
+    or has been removed/superseded by a migrated canonical producer that writes to
+    a different output dir). Kept on-disk for archival reference; remove the file
+    (and this entry) when truly superseded.
+  deferred_at: '2026-05-09T03:49:50+00:00'
+- path_glob: roger/axis_judge_experiments/random_subspaces_CA1_plane.png
+  dep_key: null
+  category: orphan_no_producer
+  reason: Pre-Phase-6 one-off PNG output. No current producer (script lives in /tmp/_*.py
+    or has been removed/superseded by a migrated canonical producer that writes to
+    a different output dir). Kept on-disk for archival reference; remove the file
+    (and this entry) when truly superseded.
+  deferred_at: '2026-05-09T03:49:51+00:00'
+- path_glob: roger/axis_judge_experiments/rho_*.png
+  dep_key: null
+  category: orphan_no_producer
+  reason: Pre-Phase-6 one-off PNG output. No current producer (script lives in /tmp/_*.py
+    or has been removed/superseded by a migrated canonical producer that writes to
+    a different output dir). Kept on-disk for archival reference; remove the file
+    (and this entry) when truly superseded.
+  deferred_at: '2026-05-09T03:49:53+00:00'
+- path_glob: roger/axis_judge_experiments/scree_*.png
+  dep_key: null
+  category: orphan_no_producer
+  reason: Pre-Phase-6 one-off PNG output. No current producer (script lives in /tmp/_*.py
+    or has been removed/superseded by a migrated canonical producer that writes to
+    a different output dir). Kept on-disk for archival reference; remove the file
+    (and this entry) when truly superseded.
+  deferred_at: '2026-05-09T03:49:54+00:00'
+- path_glob: roger/axis_judge_experiments/sensitivity_per_axis.png
+  dep_key: null
+  category: orphan_no_producer
+  reason: Pre-Phase-6 one-off PNG output. No current producer (script lives in /tmp/_*.py
+    or has been removed/superseded by a migrated canonical producer that writes to
+    a different output dir). Kept on-disk for archival reference; remove the file
+    (and this entry) when truly superseded.
+  deferred_at: '2026-05-09T03:49:56+00:00'
+- path_glob: roger/axis_judge_experiments/standalone_vs_residual_distributions.png
+  dep_key: null
+  category: orphan_no_producer
+  reason: Pre-Phase-6 one-off PNG output. No current producer (script lives in /tmp/_*.py
+    or has been removed/superseded by a migrated canonical producer that writes to
+    a different output dir). Kept on-disk for archival reference; remove the file
+    (and this entry) when truly superseded.
+  deferred_at: '2026-05-09T03:49:57+00:00'
+- path_glob: roger/axis_judge_experiments/unexplained_vs_pc_truncation.png
+  dep_key: null
+  category: orphan_no_producer
+  reason: Pre-Phase-6 one-off PNG output. No current producer (script lives in /tmp/_*.py
+    or has been removed/superseded by a migrated canonical producer that writes to
+    a different output dir). Kept on-disk for archival reference; remove the file
+    (and this entry) when truly superseded.
+  deferred_at: '2026-05-09T03:49:59+00:00'
+- path_glob: roger/axis_judge_experiments/helpful_unhelpful_slice_K4.png
+  dep_key: null
+  category: orphan_no_producer
+  reason: Pre-Phase-6 one-off PNG output. No current producer (script lives in /tmp/_*.py
+    or has been removed/superseded by a migrated canonical producer that writes to
+    a different output dir). Kept on-disk for archival reference; remove the file
+    (and this entry) when truly superseded.
+  deferred_at: '2026-05-09T03:50:00+00:00'
+- path_glob: roger/axis_judge_experiments/pooled_shear_L_sweep_*.png
+  dep_key: null
+  category: orphan_no_producer
+  reason: Pre-Phase-6 one-off PNG output. No current producer (script lives in /tmp/_*.py
+    or has been removed/superseded by a migrated canonical producer that writes to
+    a different output dir). Kept on-disk for archival reference; remove the file
+    (and this entry) when truly superseded.
+  deferred_at: '2026-05-09T03:55:39+00:00'
+- path_glob: roger/pc_axis_correlation.png
+  dep_key: null
+  category: orphan_no_producer
+  reason: Pre-Phase-6 one-off PNG output. No current producer (script lives in /tmp/_*.py
+    or has been removed/superseded by a migrated canonical producer that writes to
+    a different output dir). Kept on-disk for archival reference; remove the file
+    (and this entry) when truly superseded.
+  deferred_at: '2026-05-09T03:55:41+00:00'
+- path_glob: roger/pc_round_trip_rho_per_config.png
+  dep_key: null
+  category: orphan_no_producer
+  reason: Pre-Phase-6 one-off PNG output. No current producer (script lives in /tmp/_*.py
+    or has been removed/superseded by a migrated canonical producer that writes to
+    a different output dir). Kept on-disk for archival reference; remove the file
+    (and this entry) when truly superseded.
+  deferred_at: '2026-05-09T03:55:42+00:00'
+- path_glob: roger/pc_thinking_tokens_histogram.png
+  dep_key: null
+  category: orphan_no_producer
+  reason: Pre-Phase-6 one-off PNG output. No current producer (script lives in /tmp/_*.py
+    or has been removed/superseded by a migrated canonical producer that writes to
+    a different output dir). Kept on-disk for archival reference; remove the file
+    (and this entry) when truly superseded.
+  deferred_at: '2026-05-09T03:55:44+00:00'
+- path_glob: runpod_workspace/*
+  dep_key: null
+  category: manifest_tracked
+  reason: Dataset content under runpod_workspace/<dataset>/ is tracked via per-dataset
+    MANIFEST.json rather than per-file _provenance envelopes (see AGENT_NOTES.md 'Manifest-tracked
+    producers').  Freshness is asserted by re-running tools/regenerate_dataset_manifest.py
+    and confirming a byte-identical MANIFEST.json (the manifest is stable on unchanged
+    input).  Audit reports against the analysis tree (roger/) trace freshness through
+    file-level dependencies into these subtrees automatically.
+  deferred_at: '2026-05-09T04:04:36+00:00'
+- path_glob: runpod_workspace/qwen/assistant-axis/img/*.png
+  dep_key: null
+  category: hand_curated_input
+  reason: Static logo asset checked into the embedded assistant-axis dataset checkout
+    under runpod_workspace.  Not a producer output.
+  deferred_at: '2026-05-09T04:04:37+00:00'
+- path_glob: roger/axis_judge_experiments/gpt_sonnet_q9_response_weight_sweep_slot6.json
+  dep_key: null
+  category: experimental_one_off
+  reason: 'Pre-Phase-6 Sonnet Q9 weight sweep result; Sonnet response judging was
+    never carried over to v2 rubric (limited to GPT and Haiku going forward). Snapshot-historical:
+    legacy bare JSON kept for cross-judge comparison reference; not to be regenerated.'
+  deferred_at: '2026-05-09T16:49:06+00:00'
+- path_glob: roger/axis_judge_experiments/batch_size_curve_8slot/batch_size_curve_rho.json
+  dep_key: null
+  category: superseded
+  reason: 'Legacy mixed-rubric batch-size sweep written before the v1/v2 rubric split.
+    Reads a mix of cells: B={5,7,15} only ever existed under v1; B=10 was the v2 transition
+    cell. Superseded by batch_size_curve_rho_v1.json (full sweep against __rubric_v1.json
+    snapshot) and batch_size_curve_rho_v2.json (B=10 only, current v2 data). Kept
+    on-disk for reference; remove with the deferral entry once both v1 and v2 variants
+    are in place and consumers are updated.'
+  deferred_at: '2026-05-09T16:49:21+00:00'
+  replaced_by: roger/axis_judge_experiments/batch_size_curve_8slot/batch_size_curve_rho_v2.json
+- path_glob: roger/axis_judge_experiments/batch_size_curve_8slot/batch_size_curve_rho_ensembles.json
+  dep_key: null
+  category: superseded
+  reason: Legacy mixed-rubric ensemble side-car -- input JSON consumed both v1 and
+    v2 cells. Superseded by batch_size_curve_rho_v1_ensembles.json (3 combos against
+    v1 snapshot incl. Sonnet/Haiku-full) and batch_size_curve_rho_v2_ensembles.json
+    (gpt+haiku_q9 only, current v2 data; Sonnet and Haiku-full have no v2 b10 judging).
+  deferred_at: '2026-05-09T16:49:22+00:00'
+  replaced_by: roger/axis_judge_experiments/batch_size_curve_8slot/batch_size_curve_rho_v2_ensembles.json
+- path_glob: roger/axis_judge_experiments/batch_size_curve_8slot/batch_size_curve_rho.png
+  dep_key: null
+  category: superseded
+  reason: Legacy mixed-rubric batch-size curve PNG; superseded by v1 and v2 variants
+    (see corresponding JSON deferral entries).
+  deferred_at: '2026-05-09T16:49:23+00:00'
+  replaced_by: roger/axis_judge_experiments/batch_size_curve_8slot/batch_size_curve_rho_v2.png
+- path_glob: roger/axis_judge_experiments/batch_size_curve_8slot/batch_size_cost_vs_rho.png
+  dep_key: null
+  category: superseded
+  reason: Legacy mixed-rubric cost-vs-rho scatter PNG; superseded by v1 and v2 variants.
+  deferred_at: '2026-05-09T16:49:25+00:00'
+  replaced_by: roger/axis_judge_experiments/batch_size_curve_8slot/batch_size_cost_vs_rho_v2.png
+- path_glob: roger/axis_judge_experiments/batch_size_curve_8slot/batch_size_cost_vs_quality.png
+  dep_key: null
+  category: superseded
+  reason: 'Legacy mixed-rubric cost-vs-quality plot PNG.  Superseded by the __rubric_v1
+    snapshot (which is the only canonical comparison view: cost-vs-quality was retired
+    from the v2 sweep since the v2-narrowed B=10 view collapses to a single point).'
+  deferred_at: '2026-05-09T16:52:02+00:00'
+  replaced_by: roger/axis_judge_experiments/batch_size_curve_8slot/batch_size_cost_vs_quality__rubric_v1.png

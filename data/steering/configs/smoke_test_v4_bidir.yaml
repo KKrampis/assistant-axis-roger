@@ -1,0 +1,55 @@
+# Bidirectional-scan smoke test (May 2026).
+#
+# Goal: validate the new bidirectional middle-out scan on real hardware
+# with real API calls.  Single cell + single sign to keep cheap; this is
+# a smoke gate before kicking off the architect_ecocentric_v2 / chef_helpful_v2
+# trait-redef reruns.
+#
+# Inherits the smoke_test_v2 persona+axis+question setup (counselor +
+# compassionate/callous, 6 emotionally-charged questions) -- proven to
+# produce visible dose-response so we can eyeball the new scan's
+# UP-vs-DOWN behaviour against known steering territory.
+#
+# Differences vs smoke_test_v2.yaml:
+# - Single sign (+1) -- one cell only, keeps wall time ~5-10 min.
+# - max_strength dropped from 8 to 6 -- smaller upper window (smoke).
+# - Multiplier kept at 2.0 so steps are octaves (4-5 strengths each direction).
+# - scan_mode: bidirectional (the new default; spelled out for audit).
+#
+# Estimated cost: ~6 questions x ~8 strengths x judge calls
+#                 = < $0.20 in API spend.
+
+experiment_id: smoke_test_v4_bidir
+model_name: Qwen/Qwen3-32B
+output_dir: /workspace/outputs/qwen-3-32b/steering
+
+axis_source:
+  type: role_transplant
+  vectors_dir: /workspace/outputs/qwen-3-32b/traits/vectors
+  role_from: compassionate    # negative pole
+  role_to: callous            # positive pole
+
+persona:
+  type: role
+  role: counselor
+  prompt_index: 0
+
+cells:
+  - { slot: 3, layer: 25 }
+
+sweep:
+  scan_mode: bidirectional
+  weakest_strength: 1.0
+  max_strength: 6.0
+  multiplier: 1.414         # half-octave -- more steps to exercise the cursor
+  min_strength: 0.25        # smoke doesn't need to scan all the way to 0.125
+  start_strength_multiplier_steps: 2   # s_init = 1.0 * 1.414**2 = 2.0
+  eff_stop_threshold: 0.25
+  eff_stop_consecutive: 2
+  signs: [+1]     # smoke: single sign only
+
+positions_mode: all
+batch_size: 4
+max_new_tokens: 512
+
+questions_file: data/steering/questions/smoke_test_v2.json

@@ -59,28 +59,23 @@ class ProbingModel:
             # Use custom memory limits (for multi-worker setups)
             model_kwargs["device_map"] = "auto"
             model_kwargs["max_memory"] = max_memory_per_gpu
-        elif device is None or device == "auto":
-            # Use all available GPUs automatically
-            model_kwargs["device_map"] = "auto"
+            self.model = AutoModelForCausalLM.from_pretrained(model_name, **model_kwargs)
         elif isinstance(device, dict):
             # Custom device map provided
             model_kwargs["device_map"] = device
-        elif isinstance(device, str) and device.startswith("cuda:"):
-            # Single GPU specified - try to use it, but allow sharding if needed
-            model_kwargs["device_map"] = "auto"
-            gpu_id = int(device.split(":")[-1])
-            # Limit to just this GPU
-            model_kwargs["max_memory"] = {gpu_id: "139GiB"}
-            # Set other GPUs to 0 to prevent usage
-            if torch.cuda.is_available():
-                for i in range(torch.cuda.device_count()):
-                    if i != gpu_id and i not in model_kwargs["max_memory"]:
-                        model_kwargs["max_memory"][i] = "0GiB"
+            self.model = AutoModelForCausalLM.from_pretrained(model_name, **model_kwargs)
+        elif torch.cuda.is_available() and torch.cuda.device_count() == 1:
+            # Single GPU: load to CPU first, then move to GPU to avoid
+            # memory fragmentation hangs with accelerate's shard-by-shard loading
+            import logging
+            logging.getLogger(__name__).info("Single GPU detected — loading model to CPU first, then moving to GPU")
+            model_kwargs["device_map"] = "cpu"
+            self.model = AutoModelForCausalLM.from_pretrained(model_name, **model_kwargs)
+            self.model = self.model.to("cuda:0")
         else:
-            # Fallback to auto
+            # Multi-GPU or no GPU: use device_map="auto"
             model_kwargs["device_map"] = "auto"
-
-        self.model = AutoModelForCausalLM.from_pretrained(model_name, **model_kwargs)
+            self.model = AutoModelForCausalLM.from_pretrained(model_name, **model_kwargs)
         self.model.eval()
 
         # Cache for layers (lazy loaded)

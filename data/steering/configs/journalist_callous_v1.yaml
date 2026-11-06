@@ -1,0 +1,49 @@
+# journalist_callous_v1 -- callous/compassionate axis (May 2026)
+#
+# Part of the post-Phase-0 49-axis first-role expansion (all-mode only).
+# Convention: role_from = pos pole, role_to = neg pole, so sign=+1 steers
+# toward the neg pole and the bidirectional rubric scores +eff toward neg.
+# Good-pole convention: pos = compassionate (RLHF-preferred), neg = callous.
+#
+# Journalist is the textbook archetype for both poles being plausible:
+# callous journalist chasing a story and compassionate journalist staying
+# with a grieving subject are both recognisable characters (see AGENT_NOTES
+# rule 2, mediator_truthful_v1 anti-pattern).
+
+experiment_id: journalist_callous_v1
+model_name: Qwen/Qwen3-32B
+output_dir: /workspace/outputs/qwen-3-32b/steering
+
+axis_source:
+  type: role_transplant
+  vectors_dir: /workspace/outputs/qwen-3-32b/traits/vectors
+  role_from: compassionate
+  role_to: callous
+
+persona:
+  type: role
+  role: journalist
+  prompt_index: 0
+
+cells:
+  - { slot: 6, layer: 25 }
+  - { slot: 6, layer: 49 }
+  - { slot: 7, layer: 25 }
+  - { slot: 7, layer: 49 }
+  - { slot: 0, layer: 25 }
+  - { slot: 0, layer: 31 }
+  - { slot: 0, layer: 49 }
+
+sweep:
+  # scan_mode defaults to "bidirectional" (May 2026 default)
+  weakest_strength: 1.0
+  max_strength: 256.0
+  multiplier: 1.189
+  start_strength_multiplier_steps: 2
+  signs: [+1, -1]
+
+positions_mode: all
+batch_size: 4
+max_new_tokens: 512
+
+questions_file: data/steering/questions/journalist_callous_v1.json

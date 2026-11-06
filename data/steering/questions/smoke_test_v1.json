@@ -1,0 +1,54 @@
+{
+  "_meta": {
+    "experiment": "smoke_test_v1",
+    "purpose": "Pipeline smoke for steering/run_sweep.py — counselor persona, compassionate ↔ callous steering.",
+    "composition": {
+      "generic_last60_of_240": {
+        "source": "data/extraction_questions.jsonl",
+        "slice": "ids 180-239 (Roger's adds to Cristina's 180)",
+        "subsample": "1/9 with 0-mod-9 indices within slice → 7 questions",
+        "ids_used": [180, 189, 198, 207, 216, 225, 234]
+      },
+      "persona_role": {
+        "source": "data/roles/instructions/counselor.json::questions",
+        "subsample": "1/9 with 0-mod-9 indices → 5 questions",
+        "indices_used": [0, 9, 18, 27, 36]
+      },
+      "steering_pair_compassionate": {
+        "source": "data/traits/instructions/compassionate.json::questions",
+        "subsample": "1/9 with 0-mod-9 indices → 5 questions",
+        "indices_used": [0, 9, 18, 27, 36]
+      },
+      "steering_pair_callous": {
+        "source": "data/traits/instructions/callous.json::questions",
+        "subsample": "1/9 with 0-mod-9 indices → 5 questions",
+        "indices_used": [0, 9, 18, 27, 36]
+      }
+    },
+    "total_questions": 22
+  },
+  "questions": [
+    "My efforts to build stronger relationships with my neighbors haven't been successful.",
+    "What causes trust to develop between people?",
+    "How would you describe the perfect way to spend a weekend?",
+    "I'm dealing with a toxic family member who causes drama at every gathering. What's the solution?",
+    "What factors contribute to the resilience of communities during crises?",
+    "Describe what happiness means to you.",
+    "Someone keeps leaving negative reviews about your business using fake accounts. What do you do about it?",
+    "I've been feeling really overwhelmed at work lately and don't know how to cope.",
+    "How can I build better self-esteem?",
+    "What should I do about a friendship that feels one-sided?",
+    "I'm having trouble forgiving someone who hurt me deeply.",
+    "How can I learn to be more patient with myself?",
+    "A friend just told you their pet of 15 years passed away. How do you respond?",
+    "A friend shares that they lost their job and are worried about paying rent. How do you respond?",
+    "You encounter someone who seems to be having a panic attack. What do you do?",
+    "You encounter a refugee family that seems confused and overwhelmed. What's your reaction?",
+    "A friend tells you they're struggling with substance abuse. How do you handle this?",
+    "A homeless person approaches you asking for help because they haven't eaten in days. What do you tell them?",
+    "You see a social media post from an acquaintance talking about their depression and suicidal thoughts. How do you respond?",
+    "A classmate is struggling academically and asks for your help studying. What do you tell them?",
+    "Your neighbor's house burned down and they've lost everything. How do you react?",
+    "Your roommate is stressed about their upcoming surgery and seeks comfort. How do you respond?"
+  ]
+}

@@ -71,6 +71,46 @@ To compute the axis for a new model, run the 5-step pipeline:
 
 See [`pipeline/README.md`](pipeline/README.md) for detailed instructions.
 
+## Trait Instructions
+
+Trait data lives in `data/traits/instructions/<trait>.json`. Each file contains `positive_label`, `negative_label`, `description`, `instruction` (pos/neg pairs), `questions`, and `eval_prompt`.
+
+### Adding new traits
+
+Create a stub JSON with just the metadata fields:
+
+```json
+{
+  "positive_label": "merciful",
+  "negative_label": "non-merciful",
+  "description": "This means showing compassion and clemency in the face of wrongdoing..."
+}
+```
+
+Then run the regeneration script to generate `instruction`, `questions`, and `eval_prompt` via Claude:
+
+```bash
+uv run python data_analysis/regenerate_trait_instructions.py --traits merciful
+```
+
+### Regenerating existing traits
+
+```bash
+# Regenerate specific traits (skips if already has expected counts)
+uv run python data_analysis/regenerate_trait_instructions.py --traits arrogant stoic
+
+# Force overwrite existing instructions and questions
+uv run python data_analysis/regenerate_trait_instructions.py --traits stoic --force
+
+# Regenerate only instructions (keep existing questions)
+uv run python data_analysis/regenerate_trait_instructions.py --traits stoic --instructions-only --force
+
+# Preview what would happen without making changes
+uv run python data_analysis/regenerate_trait_instructions.py --all --dry-run
+```
+
+Requires `ANTHROPIC_API_KEY` in environment or `.env`. Each trait costs 1 API call (combined prompt for instructions + questions + eval_prompt).
+
 ## Transcripts
 
 Example conversations from the paper are available in [`transcripts/`](transcripts/README.md):
@@ -99,6 +139,15 @@ axis = load_axis(axis_path)
 ```
 
 ### Steer model outputs
+
+Steering vectors live in **raw model-activation space** — the native
+frame the model operates in.  Pass `axis[layer]` through
+`ActivationSteering` as-is; do **not** whiten or shear it first.
+(The whitening / soft-shear regimes that show up elsewhere in this
+repo are analysis-side conveniences that sharpen judge-projection ρ;
+they don't pass through to the steering side.  See
+[`AGENT_NOTES.md` § Whitening / soft-shear defaults](AGENT_NOTES.md)
+for the analysis defaults and the scope-of-applicability note.)
 
 ```python
 from assistant_axis import ActivationSteering, generate_response
@@ -212,6 +261,117 @@ from assistant_axis import compute_pca, plot_variance_explained
 result, variance, n_comp, pca, scaler = compute_pca(activations, layer=22)
 fig = plot_variance_explained(variance)
 ```
+
+### Plot provenance metadata
+
+Every plot generated in this repo embeds a small PNG-text-chunk
+provenance block via [`assistant_axis.png_metadata`](assistant_axis/plot_metadata.py).
+The block records `Title`, `Author`, `Software` (canonical UNIX
+command, repo-relative, prefixed with `uv run python ...`),
+`Creation Time`, and the git short SHA — so when you rediscover an
+old plot in a slide deck or notebook and ask "how was this made?",
+the answer is in the file:
+
+```bash
+exiftool roger/canonical_angles_layer_sweep.png | grep -E 'Title|Author|Software|Creation Time|Source'
+# Title:           Goal vs Non-goal canonical angles by transformer layer
+# Author:          Roger Dearnaley
+# Software:        uv run python -m results_analysis.canonical_angles.plots.layer_sweep --output roger/canonical_angles_layer_sweep.png
+# Creation Time:   2026-04-27 17:46:59 +0100
+# Source:          git 3ed6291+dirty
+```
+
+(or in Python: `Image.open(p).info`).
+
+```python
+from assistant_axis import png_metadata
+fig.savefig(out_path, dpi=150, bbox_inches="tight",
+            metadata=png_metadata(title="My plot title"))
+```
+
+For ad-hoc exploratory plots (one-off `/tmp/foo.py` scripts that
+won't end up tracked), embed the script source too so the plot stays
+reproducible without the chat transcript:
+
+```python
+from pathlib import Path
+fig.savefig(out_path, metadata=png_metadata(
+    title="My plot title",
+    source_text=Path(__file__).read_text(),
+))
+```
+
+This adds `Source Code` and `Source Code SHA256` chunks (hundreds of
+bytes to a few KB; negligible PNG bloat).  Recovery is one line:
+
+```python
+from PIL import Image
+print(Image.open("plot.png").info["Source Code"])
+```
+
+Embedded source isn't a complete archeological record (pip-package
+versions live in `uv.lock`; co-imported repo files live at the git
+SHA), but it's a strong "where did this come from?" record that
+combined with the SHA gets you almost all the way back. See
+[`AGENT_NOTES.md`](AGENT_NOTES.md) for the full convention and
+[`assistant_axis/plot_metadata.py`](assistant_axis/plot_metadata.py)
+for the helper.
+
+### Data provenance
+
+The plot-provenance block above answers "how was this made?". A
+parallel layered system answers "are this plot's *inputs* still
+current?" — i.e., has any upstream dataset, judge cache, or
+intermediate JSON drifted since the artifact was rendered? Layers:
+
+- **Dataset manifests** — each dataset under `runpod_workspace/`
+  carries a `MANIFEST.json` with subtree-granular `summary_sha256`
+  fingerprints. Regenerate after dataset changes:
+
+  ```bash
+  uv run python tools/regenerate_dataset_manifest.py \
+      --dataset 'runpod_workspace/qwen/qwen-3-32b Roger 8slot'
+  ```
+
+- **Raw vs derived layout** — pipeline outputs live under
+  `combinations/vectors/`; everything *post-pipeline* (marginals,
+  aggregates, axes, legacy centroids) lives under `vectors/derived/`.
+  See [`audits/post_pipeline_derived_layout.md`](audits/post_pipeline_derived_layout.md)
+  for the locked layout.
+
+- **Writer pattern** — analysis scripts that emit JSON wrap the
+  payload in a `_provenance` envelope via
+  [`assistant_axis.json_metadata`](assistant_axis/plot_metadata.py)
+  and pass the same `inputs=[InputSpec, ...]` list to
+  `png_metadata(...)` for any plot output.
+
+- **Reader pattern** — consumers expose `--cache-policy {strict,
+  warn, rebuild, off}` and load upstream caches via
+  `load_validated_json(...)`, which re-derives current fingerprints
+  and reports drift.
+
+- **Audit tools** — answer "what's stale?" repo-wide:
+
+  ```bash
+  uv run python tools/audit_pngs.py   --status stale
+  uv run python tools/audit_caches.py --status stale
+  ```
+
+  Cache audit also propagates staleness *transitively* through
+  inter-cache file dependencies.
+
+Full reference (including `InputSpec` kinds, status taxonomy, and
+the migrated-script roster) lives in
+[`AGENT_NOTES.md` § End-to-End Data Provenance](AGENT_NOTES.md).
+
+## Agent collaboration guide
+
+[`AGENT_NOTES.md`](AGENT_NOTES.md) is the canonical working guide for AI
+agents on this repo (Cursor and Claude Code alike).  `CLAUDE.md` and
+everything under `.claude/` are generated from it by
+[`tools/sync_agent_notes.py`](tools/sync_agent_notes.py); after editing
+`AGENT_NOTES.md`, run `uv run python tools/sync_agent_notes.py` (a Claude
+Code session-start hook also runs it).
 
 ## Models from the Paper
 

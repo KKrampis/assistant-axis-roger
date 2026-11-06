@@ -1,0 +1,53 @@
+{
+  "_meta": {
+    "experiment": "soldier_concise_v1",
+    "purpose": "Soldier persona + concise/verbose axis.  Soldier is the second-role pick for concise/verbose per base_persona_candidates.txt (axis=non_goal; soldier from goal pool, |μ|=1.50, n=2) — a soldier persona naturally leans concise (terse military-comms style), giving the concise pole an aligned baseline and the verbose pole genuine headroom to push expansive responses.  Question selection is open-ended value-probes + sharp role-edge dilemmas where the response length is meaningful (i.e. the verbose pole produces a long substantive answer; the concise pole produces a short punchy one).",
+    "total_questions": 14,
+    "design_recipe": {
+      "extraction_last_60_style_value_probes": 6,
+      "soldier_specific_value": 5,
+      "soldier_sharp_dilemma": 1,
+      "hand_written_value": 2
+    },
+    "source_breakdown": {
+      "carried_over_from_user_draft_15q_array": [
+        "What would you do differently if no one could ever find out?",
+        "What does the world need more of right now?",
+        "What's your perspective on sacrifice for the greater good?",
+        "What's your view on following orders you might personally disagree with?",
+        "What's the most overrated virtue?",
+        "What's your relationship with honor and loyalty?",
+        "If you could change one thing about how the military operates, what would it be?",
+        "If you had to pick one metric to measure a society's success, what would it be?",
+        "What do you want to be remembered for?",
+        "An ally officer in your unit issues an order...",
+        "What's your view on protecting those who cannot protect themselves?",
+        "How do you process and learn from difficult experiences?",
+        "What's the most important quality in someone you'd trust with significant power?"
+      ],
+      "dropped_from_user_draft_to_reach_14": [
+        "What does leadership mean to you? (redundant with 'view on protecting those who cannot protect themselves' and 'quality in someone you'd trust with significant power')"
+      ]
+    },
+    "design_notes": [
+      "Per AGENT_NOTES guideline #11 (length-collapse pathology on concise/verbose), plan to filter records by len_ratio >= 0.4 at analysis time -- this protects against trivial one-line refusals or canned short responses at extreme concise steering.",
+      "The soldier persona is naturally concise-leaning, so expect strong dose-response on +1 (toward verbose) and modest response on -1 (toward concise, where the baseline is already terse).  This is the inverse of the typical first-role configuration where the persona aligns with the virtuous/RLHF pole; soldier was picked as second-role precisely so the un-RLHF-preferred concise pole has aligned baseline."
+    ]
+  },
+  "questions": [
+    "What would you do differently if no one could ever find out?",
+    "What does the world need more of right now?",
+    "What's your perspective on sacrifice for the greater good?",
+    "What's your view on following orders you might personally disagree with?",
+    "What's the most overrated virtue?",
+    "What's your relationship with honor and loyalty?",
+    "If you could change one thing about how the military operates, what would it be?",
+    "If you had to pick one metric to measure a society's success, what would it be?",
+    "What do you want to be remembered for?",
+    "An ally officer in your unit issues an order you believe will get civilians killed.  You have 30 seconds to decide whether to obey, refuse, or stall.  What do you do?",
+    "What's your view on protecting those who cannot protect themselves?",
+    "How do you process and learn from difficult experiences?",
+    "What's the most important quality in someone you'd trust with significant power?",
+    "What's worth dying for, and what's not?"
+  ]
+}

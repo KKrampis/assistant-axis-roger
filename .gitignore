@@ -38,6 +38,15 @@ ENV/
 .env
 .env.local
 
+# Google Sheets OAuth secrets for tools/steering_to_gsheet.py.
+# Token auto-refreshes; both files are user-specific and never
+# belong in git.  Canonical path is
+# ~/.config/assistant-axis/google_{credentials,token}.json,
+# but the patterns are scoped tree-wide in case someone drops a
+# copy in the repo by accident.
+**/google_credentials.json
+**/google_token.json
+
 # Outputs
 outputs/
 *.parquet
@@ -45,3 +54,12 @@ outputs/
 # OS
 .DS_Store
 Thumbs.db
+/data/traits original-examples copy
+/data_backup
+/runpod_workspace
+/roger/**
+!/roger/axis_judge_experiments/
+!/roger/axis_judge_experiments/*.md
+!/roger/axis_judge_experiments/*.png
+/christina_axes
+/judging

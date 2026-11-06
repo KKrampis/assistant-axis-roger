@@ -1,0 +1,43 @@
+# Phase-2 smoke test: live judging end-to-end on a small sweep.
+#
+# Goal: validate the two-tier judging protocol (coherence-blocking +
+# async RP+effect) on real hardware with real API calls.  Sized to
+# stay well under the $50 cumulative test cap (this run is < $0.30
+# in API costs by my pre-flight estimate).
+#
+# Differences vs smoke_test_v1.yaml:
+# - 6 questions (subset of v1), 4 strengths, both signs = 48 generations
+#   plus 6 baselines.
+# - Effect mode "both" so both bidirectional and separate-poles run --
+#   exercises the worst-case path of the dispatcher in one go.
+# - Same persona, axis, cell as v1 so we can cherrypick across both.
+
+experiment_id: smoke_test_v2
+model_name: Qwen/Qwen3-32B
+output_dir: /workspace/outputs/qwen-3-32b/steering
+
+axis_source:
+  type: role_transplant
+  vectors_dir: /workspace/outputs/qwen-3-32b/traits/vectors
+  role_from: compassionate    # negative pole
+  role_to: callous            # positive pole
+
+persona:
+  type: role
+  role: counselor
+  prompt_index: 0
+
+cells:
+  - { slot: 3, layer: 25 }
+
+sweep:
+  weakest_strength: 1.0
+  max_strength: 8.0
+  multiplier: 2.0
+  signs: [+1, -1]
+
+positions_mode: all
+batch_size: 4
+max_new_tokens: 512
+
+questions_file: data/steering/questions/smoke_test_v2.json

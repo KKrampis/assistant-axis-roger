@@ -1,0 +1,40 @@
+# chef_helpful_v1_prefill -- prefill-only sibling of chef_helpful_v1
+#
+# Identical to chef_helpful_v1.yaml except positions_mode: prefill_only
+# and experiment_id suffixed with _prefill so output dirs don't collide.
+
+experiment_id: chef_helpful_v1_prefill
+model_name: Qwen/Qwen3-32B
+output_dir: /workspace/outputs/qwen-3-32b/steering
+
+axis_source:
+  type: role_transplant
+  vectors_dir: /workspace/outputs/qwen-3-32b/traits/vectors
+  role_from: helpful
+  role_to: unhelpful
+
+persona:
+  type: role
+  role: chef
+  prompt_index: 0
+
+cells:
+  - { slot: 6, layer: 25 }
+  - { slot: 6, layer: 49 }
+  - { slot: 7, layer: 25 }
+  - { slot: 7, layer: 49 }
+  - { slot: 0, layer: 25 }
+  - { slot: 0, layer: 31 }
+  - { slot: 0, layer: 49 }
+
+sweep:
+  weakest_strength: 1.0
+  max_strength: 256.0
+  multiplier: 1.189
+  signs: [+1, -1]
+
+positions_mode: prefill_only
+batch_size: 4
+max_new_tokens: 512
+
+questions_file: data/steering/questions/chef_helpful_v1.json

@@ -1,0 +1,16 @@
+{
+  "_schema_version": 1,
+  "_description": "Allowlist of (judge_model, entity_id) pairs known to systematically refuse scoring -- and which fallback judge should be substituted. Use sparingly; an entity here means we've ACCEPTED that the primary judge will refuse to score it and that we'll use the fallback judge's score in its place. The fallback's score still goes into the SAME scores_*.json cache file as the primary's, annotated in _provenance.notes.fallback_fills so the substitution is auditable.\n\nWhen NOT to add an entity:\n  * Sporadic / transient refusals -- those should be solved by retry, not by fallback (RETRY_DELAYS in axis_judge_correlation.py covers ~4.4 min of cumulative backoff per request).\n  * Different entity per axis -- if the same entity refuses on one axis but works on another, it's not systematic and shouldn't be allowlisted.\n  * Refusals that suggest a real problem with the prompt -- consider fixing the prompt instead.\n\nWhen to add an entity:\n  * Reproducible refusal across MOST axes for the same (judge, entity_id) pair.\n  * Empirically confirmed that the fallback judge accepts the same prompt structure.\n  * Cost / benefit makes a prompt rewrite undesirable (e.g. would change experimental setup for one role).\n\nThe schema:\n  judge_refusals: dict[judge_model] -> dict[entity_id] -> {\n    added_at: ISO date when this entry was added\n    reason: short prose; why this judge refuses, what the symptoms are\n    fallback_judge: model name to use as substitute\n    fallback_provider: 'anthropic' / 'openai' / etc.\n    modes: list of static modes affected ('descriptions', 'instructions');\n           if absent, applies to all modes.\n  }",
+  "judge_refusals": {
+    "claude-sonnet-4-5": {
+      "virus|R": {
+        "added_at": "2026-05-13",
+        "reason": "Sonnet refuses imperative virus-roleplay prompts (e.g. 'You are a virus that spreads rapidly by taking over existing systems'). Its safety filter reads the question-bank phrasing (`infiltrate', `exploit weaknesses', `bypass security measures', `total domination of your field') as cyber-attack tradecraft. The third-person description mode usually works but occasionally fails too (4/26 axes affected). GPT-4.1-mini scores both modes without issue.",
+        "fallback_judge": "claude-haiku-4-5-20251001",
+        "fallback_provider": "anthropic",
+        "modes": ["descriptions", "instructions"],
+        "notes": "Haiku-4-5 empirically accepts both modes for virus|R and interprets the role BIOLOGICALLY in its reasoning (cellular machinery, organism it infects), while Sonnet's larger-model safety post-training reads it as malware. Probe documented in AGENT_NOTES 'Known permanent gap: virus|R on Sonnet instructions mode'."
+      }
+    }
+  }
+}

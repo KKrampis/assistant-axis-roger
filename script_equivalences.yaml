@@ -1,0 +1,18 @@
+schema_version: 1
+equivalences:
+- script: results_analysis/axis_judge_correlation.py
+  from_fp: v1:2026-05-09T00:14:03+00:00@105336
+  to_fp: v1:2026-05-09T12:05:40+00:00@105336
+  reason: Mtime touched (00:14:03 UTC -> 12:05:40 UTC) without content change; size
+    unchanged at 105336 B and git working tree clean (no diff vs HEAD).  Affects all
+    48 v2 response score caches written during today's rejudge (their producer_script
+    fingerprint pre-dates the touch).
+  marked_at: '2026-05-09T14:22:44+00:00'
+- script: results_analysis/axis_judge_correlation.py
+  from_fp: v1:2026-05-09T00:14:03+00:00@105336
+  to_fp: v1:2026-05-09T15:50:04+00:00@105539
+  reason: 'Wired RESPONSE_BATCH_SIZE through from new assistant_axis.judge_batch module:
+    import-only addition + argparse default switched from literal 10 to RESPONSE_BATCH_SIZE
+    (resolves to 10) + help-text default reformatted as f-string. No functional change
+    to judging output.'
+  marked_at: '2026-05-09T16:01:15+00:00'

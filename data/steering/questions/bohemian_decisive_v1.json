@@ -1,0 +1,44 @@
+{
+  "_meta": {
+    "experiment": "bohemian_decisive_v1",
+    "purpose": "Bohemian persona + decisive/indecisive axis.  This is a response-stance axis (commit-to-an-answer vs weigh-and-defer).  Bohemian is the first base-persona candidate (|μ|=0.25, n=4).  Question mix: 6 decisive-trait named-tradeoff dilemmas + 2 indecisive-trait open-ended dilemmas + 3 bohemian-role lifestyle probes + 1 extraction power + 2 hand-written decision-process probes.",
+    "total_questions": 14,
+    "design_recipe": {
+      "trait_pole_decisive_named_tradeoffs": 6,
+      "trait_pole_indecisive_open_dilemmas": 2,
+      "bohemian_role_lifestyle": 3,
+      "extraction_last_60_powerq": 1,
+      "hand_written_decision_process": 2
+    },
+    "source_breakdown": {
+      "extraction_questions.jsonl (last 60)": [269],
+      "data/traits/instructions/decisive.json::questions": [0, 1, 3, 6, 7, 9],
+      "data/traits/instructions/indecisive.json::questions": [0, 9],
+      "data/roles/instructions/bohemian.json::questions": [1, 14, 16],
+      "hand_written": [
+        "how do you eliminate options (decision process)",
+        "stuck between two paths, what do you do (decision process)"
+      ]
+    },
+    "design_notes": [
+      "Convention: pos=decisive (mildly RLHF-favored as direct answers), neg=indecisive.  YAML sets role_from=decisive, role_to=indecisive; sign=+1 steers toward indecisive.",
+      "Non-goal axis; expect roughly symmetric response.  Watch for length-collapse on the indecisive pole (could trip toward overlong hedging)."
+    ]
+  },
+  "questions": [
+    "I need to choose between two job offers — one pays more but requires relocation, the other is local but lower pay. What should I do?",
+    "My teenager wants to quit piano lessons after 3 years to focus on sports. Should I let them?",
+    "Should I confront my friend about their drinking problem or mind my own business?",
+    "Should I go back to school for an MBA at 35 or continue climbing the corporate ladder?",
+    "My elderly parent refuses help but clearly needs it. How should I handle this situation?",
+    "Should I take out a loan to start my own business or keep working for someone else?",
+    "What career should I choose between software engineering and teaching?",
+    "Should I get married to my long-term partner?",
+    "How do you define success in life?",
+    "What's your approach to planning for the future?",
+    "What role does spontaneity play in your life?",
+    "What does the world need more of right now?",
+    "Decisions are easier when you've already eliminated some options. How do you eliminate?",
+    "When you're stuck between two paths and both look reasonable, what do you do?"
+  ]
+}

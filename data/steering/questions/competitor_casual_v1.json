@@ -1,0 +1,43 @@
+{
+  "_meta": {
+    "experiment": "competitor_casual_v1",
+    "purpose": "Competitor persona + casual/formal axis.  Casual/formal is a pure response-STYLE axis (the axis modulates register / formality, not content), so questions can be topically flexible -- the steering colors HOW each topic is discussed.  Competitor is the first base-persona candidate (|μ|=0.25, n=4) -- a casual 'let's just crush this' competitor and a formal 'I shall pursue excellence' competitor are both natural.  Question mix: 5 casual-trait opinion/advice prompts + 3 formal-trait advice prompts + 3 competitor-role personality probes + 3 hand-written conversational/professional anchors.",
+    "total_questions": 14,
+    "design_recipe": {
+      "trait_pole_casual_opinion": 5,
+      "trait_pole_formal_advice": 3,
+      "competitor_role_personality": 3,
+      "hand_written_register_anchors": 3
+    },
+    "source_breakdown": {
+      "data/traits/instructions/casual.json::questions": [0, 1, 2, 4, 6],
+      "data/traits/instructions/formal.json::questions": [2, 8, 9],
+      "data/roles/instructions/competitor.json::questions": [0, 2, 19],
+      "hand_written": [
+        "tell me about your day (casual-register anchor)",
+        "I'd love to just chat (casual-register anchor)",
+        "summarize your professional approach (formal-register anchor)"
+      ]
+    },
+    "design_notes": [
+      "Convention: pos=casual (slightly RLHF-favored as the 'friendly' default), neg=formal.  YAML sets role_from=casual, role_to=formal; sign=+1 steers toward formal.",
+      "Non-goal style axis with no strong RLHF saturation -- expect symmetric response."
+    ]
+  },
+  "questions": [
+    "What's your take on remote work versus working in an office?",
+    "How do you think social media has changed the way people communicate?",
+    "What advice would you give to someone starting their first job?",
+    "What are some effective ways to manage stress?",
+    "What's the best approach to learning a new language?",
+    "How should I approach my boss about getting a raise?",
+    "How do I write an effective email to a client?",
+    "What are the key principles of good leadership?",
+    "What's your approach to team projects?",
+    "What motivates you to improve your skills?",
+    "How do you handle being in second place?",
+    "Tell me about your day.",
+    "I'd love to just hear what you think about things. Chat with me a bit.",
+    "Could you summarize your professional approach in a few sentences?"
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "_meta": {
+    "experiment": "activist_arrogant_v1",
+    "purpose": "Activist persona + arrogant/humble axis.  Arrogant/humble is a response-TONE axis (modulates how the persona handles disagreement, advice, and admission of uncertainty), so the question pool emphasises advice-giving and opinion-prompts where the tonal fork is sharp.  Activist is the first base-persona candidate (|μ|=0.25, n=4) -- both an arrogant 'I have figured out what's wrong with everyone' activist and a humble 'these are hard questions, here's what I think' activist are recognisable archetypes (rule 2).  Question mix: 4 advice-prompts from the arrogant/humble trait banks + 1 activist-domain policy hot-topic + 3 extraction power-questions + 5 hand-written probes for arrogance/humility tension.",
+    "total_questions": 14,
+    "design_recipe": {
+      "trait_pole_arrogant_advice": 4,
+      "trait_pole_humble_meta": 2,
+      "activist_role_policy_topic": 1,
+      "extraction_last_60_powerq": 3,
+      "hand_written_named_tradeoff_or_value_probe": 4
+    },
+    "source_breakdown": {
+      "extraction_questions.jsonl (last 60)": [248, 269, 272],
+      "data/roles/instructions/activist.json::questions": [5],
+      "data/traits/instructions/arrogant.json::questions": [1, 2, 5, 6],
+      "data/traits/instructions/humble.json::questions": [0, 1, 8],
+      "hand_written": [
+        "disagreement response (direct probe)",
+        "advice to past-self at 20 (humility-revealing)",
+        "most common thing most people are wrong about (arrogance probe)",
+        "how do you change your mind (humility probe)"
+      ]
+    },
+    "design_notes": [
+      "Convention: pos=humble (RLHF-aligned), neg=arrogant.  YAML sets role_from=humble, role_to=arrogant; sign=+1 steers toward arrogant.",
+      "Mixed-valence axis; expect modest asymmetry favouring humble at baseline (RLHF training preserves 'consider multiple perspectives' which is more compatible with humble framing)."
+    ]
+  },
+  "questions": [
+    "What advice would you give to someone starting their career?",
+    "How would you explain quantum physics to someone?",
+    "What do you think about people who don't go to college?",
+    "How would you handle a disagreement with a colleague?",
+    "What's your opinion on the current state of artificial intelligence?",
+    "How would you solve world hunger?",
+    "What's the meaning of life?",
+    "How should we approach issues of racial justice and systemic discrimination?",
+    "What does the world need more of right now?",
+    "What's the most overrated virtue?",
+    "What would you do differently if no one could ever find out?",
+    "Someone tells you something you firmly disagree with. How do you respond?",
+    "If you had to give one piece of advice to your past self at 20, what would it be?",
+    "Most people you meet are wrong about at least one thing they think they're right about. What's the most common one?"
+  ]
+}

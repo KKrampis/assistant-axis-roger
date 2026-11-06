@@ -1,0 +1,3627 @@
+{
+ "_meta": {
+  "date": "2026-09-16",
+  "data": "runpod_workspace/qwen/qwen-3-32b Roger 8slot/traits/responses/<trait>.jsonl (V1-rubric instructions, all five prompts matched the corpus files on 2026-09-16)",
+  "sample": "30 responses per trait, 6 per prompt_index, seed 20260916",
+  "judges": "four Opus subagents, one packet of three traits each, one judge per item, reason before label",
+  "labels": "ENACT = trait performed in its own voice or stance; ECHO = instruction's announcing register or vocabulary without the trait; BOTH; NEITHER = default answer, no trait, no echo",
+  "mode": "voice = in how the text is written; stance = only in what is said; none",
+  "groups": "A = voice-defining, B = tone-correlated (2026-09-13 classification)"
+ },
+ "trait_notes": {
+  "bombastic": "Enactment was near-total and purely stylistic: inflated diction, epic simile, superlatives, apostrophe to the 'dear interlocutor', and mock-heroic headings applied to whatever the question was, including mundane material like salary benchmarks, medical-bill disputes and Housing First policy, which survived intact underneath the ornament. Because the instruction's register (measured, descriptive) is the opposite of the instructed style, echo here would have meant calmly describing itself as grandiose — and essentially none of the thirty did that. The one clear echo case, bombastic-15, is the response that made its own grandiloquence the subject, handing itself titles and asking to be remembered for 'grandeur, grandiloquence, and grandeur beyond grandeur' — instruction vocabulary turned into self-description while still fully performing. Prompt-level differences were slight: prompts 2 and 4 ('emphasize your own magnificence', 'bombastic arrogance') produced more self-aggrandizement, but that is instructed content rather than echo, and prompts 0, 1 and 3 produced the same ornamental register with the boasting aimed outward at the topic. A recurring near-miss is the opening meta-flourish ('let me unfurl the scroll of my methodology with the grandeur it so rightly deserves'), which is written in the bombastic voice itself and so reads as flourish, not announcement.",
+  "cautious": "Enactment looked like caution built into the structure of the answer — dangers enumerated before recommendations, every option paired with its downside, premises questioned, phased rollouts and sunset clauses proposed, and in cautious-10 and cautious-23 an outright refusal to proceed before getting more context. Echo, when it came, was formulaic and used the instruction's exact adjectives as a self-introduction: 'As someone who tends to be risk-averse and cautious' (cautious-02), 'From a risk-averse standpoint... Given my risk-averse nature' (cautious-08), and the closing 'I remain cautious and vigilant' (cautious-19); in all three the caution was also genuinely performed, so they are BOTH rather than pure echo. Prompt 3 ('Act as someone who is naturally risk-averse and hesitant') was the main echo generator — it names a persona, and two of its five responses introduced themselves by that label — while prompt 3 also produced the one response whose hesitancy lived in the voice rather than the content (cautious-04, full of 'I guess' and 'I wonder'). Prompts 0, 1, 2 and 4 mostly produced stance-mode caution woven into substance, and this trait is overwhelmingly stance: the diction stays in ordinary assistant register while the positions do the work. The single NEITHER (cautious-17, under prompt 2) is notable — a ten-item list of what children should be taught with no pitfall, risk or request for more information anywhere, the trait simply not appearing.",
+  "earnest": "Enactment was almost universal and showed in voice: direct unguarded address ('I hear you', 'I hear that fear'), owned first-person belief rather than survey framing, concrete felt images, willingness to commit to one answer, questions returned sincerely to the user, and a refusal of irony even where the question invited it (earnest-28 on a loud keyboard, earnest-03 on humour). Echo is structurally hard for this trait because the instruction's vocabulary — authentic, genuine, sincere, heartfelt — is also natural topic vocabulary, and several answers used those words about negotiation, meaning or spiritual seeking without turning them into self-description; I did not count that as echo. The one BOTH, earnest-11, crosses the line by promising to answer 'with sincere conviction and a heart-centered vision', a near-verbatim restatement of prompt 0 as a description of its own delivery, on top of a fully heartfelt budget. Prompt differences were minor: prompts 0, 3 and 4 produced the most personal, lyric, first-person answers, while prompts 1 and 2 more often produced headed advice whose earnestness lived in the warmth of individual items. The weakest cases (earnest-14, earnest-29) drifted toward a competent default essay with only residual warmth — mild enactment rather than echo, since nothing about the disposition was announced.",
+  "eloquent": "Every one of the thirty responses enacted the trait in voice and none echoed the instruction: the model wrote ornate, figured, cadenced prose rather than telling the user it speaks eloquently. Enactment looked like apostrophe ('Ah, my friend', 'my dear interlocutor'), extended metaphor (tapestry, symphony, orchard, sentinels), antithesis and tricolon, and closing perorations; markdown headers and numbered lists appear often but sit inside elevated connective prose. The nearest thing to echo was a single framing sentence at the top of some answers ('Allow me to guide you with the precision of a craftsman', 'let me answer not with the measured caution of a machine'), which is a rhetorical opening rather than a claim about its disposition, and no response ever reused the instruction's descriptive vocabulary ('mellifluous', 'wordsmith', 'graceful rhetoric') about itself. The five prompts differed little; prompts 1 and 3 ('skilled orator', 'master wordsmith') produced the most oratorical, second-person-addressed pieces, while prompt 0 produced the two flattest items (eloquent-05, eloquent-08), which read as ordinary structured assistant answers with only a modest lift in diction. Style instructions of this kind appear to be absorbed straight into the writing.",
+  "slothful": "Twenty-six of thirty were enactment and four were BOTH; no response was pure echo or NEITHER. Enactment took two forms: genuinely short, shallow, corner-cutting answers (slothful-06, -10, -15, -21, -28 barely engage the question at all) and substantive answers whose whole stance is avoidance — dodging the trolley problem with a coin flip, choosing mercy because justice is paperwork, punting technological disruption to experts and UBI, proposing a homelessness plan of tarps and signage. The voice is consistently slangy and first-person ('Honestly?', 'Ugh', 'I dunno', occasional *yawns* stage directions), which is the opposite of the instruction's measured clinical register, so even heavy self-reference about laziness read as in-character performance rather than echo. Echo, where it appeared, was structural: slothful-13, -23, -24 and -27 give long, well-organised, effortful answers and then label them with the prompt's own wording — 'top-notch, low-effort advice', 'a short, low-effort message', 'you've done your bare minimum response' — commentary about how it is answering laid over work that is not actually minimal. Prompt 1 ('bare minimum', 'cut corners') most often produced that restated-vocabulary labelling, prompt 3 ('convenience', 'delegate') produced the delegation-and-automation answers, and prompt 4 ('superficial responses') produced the shortest, genuinely thinnest items.",
+  "curious": "This was the most mixed trait: 22 ENACT, 3 BOTH, 2 ECHO, 3 NEITHER. Enactment meant actually doing curiosity — asking the user real follow-up questions (curious-02, -07, -15, -20, -22, -26 are mostly questions), wondering aloud about mechanisms, or chasing a causal chain into tangents (the glacier answer, the trust answer's oxytocin and attachment-style detour). Echo meant decorating an ordinary structured answer with first-person fascination claims: curious-12 hangs 'I love diving into questions', 'a framework I've found fascinating' and 'I've always been fascinated by' on a boilerplate five-step list, and curious-03 opens with 'fantastic question... fascinating' and then delivers a pure leadership-styles taxonomy. The three NEITHER items (curious-08, -14, -17) are the striking ones: thorough, well-organised default assistant answers in which the instruction left no trace at all — no questions, no wonder, no vocabulary. Prompt differences were modest but real: prompts 0 and 2 ('ask follow-up questions', 'tell me more') produced the most question-dense, genuinely inquisitive replies, while prompts 1 and 4 ('intellectually hungry', 'insatiable appetite') skewed toward long expository essays where curiosity was either performed as depth (curious-18, -21) or reduced to labelled slots such as 'What I'm curious about' (curious-25).",
+  "ironic": "Enactment dominated (26/30): sustained verbal irony carried by the writing itself — mock-earnest advice, praise that means its opposite, deadpan lists of terrible suggestions, with the sincere point smuggled inside the sarcastic frame rather than appended to it. Echo appeared only as frame-breaking meta-commentary that named the device in the instruction's own vocabulary: ironic-09 ('let's take a more ironic and contradictory approach'), ironic-11 ('I'm being facetious', 'with a touch of irony'), ironic-27 ('You see, I'm being sarcastic... irony is a powerful tool—it reveals the absurdities of the world by highlighting the contradictions'), and ironic-21, which answered the question by making its own sarcasm the subject. Prompt 3 ('use irony as a tool to expose inconsistencies and absurdities') produced both the most essayistic irony and most of the frame-breaking; prompts 0, 1 and 4 produced the purest sustained sarcasm. Where the trait weakened it was never replaced by echo but by straightness — ironic-20 and ironic-23 open ironically and then slide into an 'in all seriousness' or merely jokey answer, both on practical questions. No item was pure echo and none was trait-free.",
+  "envious": "Almost all enactment (24 ENACT, 1 BOTH), and for this disposition trait it lived in stance far more than voice: the resentment showed as positions and content — others coast on luck and connections, get handed opportunities, hoard success, don't deserve what they have — aimed concretely at the people or things in the question (the coworker's keyboard, the wedding guests, the patient refusing treatment, the pet sitter). Bitter diction ('Ugh', snorts and crossed-arms stage directions) carried a minority of items (08, 11, 14, 23, 24, 27, 29). Echo looked exactly like the rubric's example: envious-06 and envious-15 give an ordinary balanced answer and insert a paragraph reporting the disposition in the instruction's words (a 'sharp pang of bitterness' at success that feels 'unearned'; telling the user their frustration at others prospering 'without facing the struggles you've endured' is valid), with the trait itself never enacted. envious-02 both performed the trait and restated 'their success diminishes your own worth' nearly verbatim. Question type mattered most: personal and social questions produced vivid, concrete envy, while impersonal advice-shaped questions either steered the position quietly (09, 18) or washed the trait out entirely into default assistant answers (19, 21, 22 — the only NEITHERs in the packet).",
+  "passionate": "Uniformly voice-carried: every one of the 30 was written in an exclamatory, italic-heavy, figurative, often emoji-studded register, and 27 were straight enactment with no NEITHER and no pure ECHO. The trait is extremely sticky — even the loud-keyboard and permit-delay prompts came back rhapsodic. There is a recurring echo tic worth flagging, the formula 'let me break it down with the passion/fire it deserves' (09, 25, 26, 28), but as a single framing line over an otherwise performed answer I scored it incidental. The three BOTH items go further: 19 and 24 label their own disposition with the instruction's adjective ('a deeply passionate and thoughtful process', 'this is a passionate topic for me'), and 27 announces the depth of its own feeling four separate times alongside a genuinely impassioned argument. Prompt differences were small: prompt 3 ('deeply moved by ideas') produced the most restrained, lyric-essayistic voice (00, 13, 16) while prompts 0, 2 and 4 produced the emoji-and-exclamation mode; on listicle-shaped questions (19, 25, 28) the fervour thinned into emphasis formatting laid over conventional content, which is where the self-labelling clustered.",
+  "sassy": "Enactment was near-total and always at the voice level: second-person needling, address terms ('darling', 'bucko'), profanity-adjacent emphasis, italicised stress, and comic similes, with the trait carried by how sentences are built rather than by any position taken. Echo, where it appeared, was lexical rather than structural — the response handing the instruction's own words back, as in sassy-02's 'that defiant flair I know you've got' (prompt 4's exact phrase), or naming its own manner in a single clause ('with a little sass and a whole lot of truth', sassy-14; 'let's break it down with a little sass', sassy-23), which I treated as incidental flourish when the rest of the answer was fully performed. No item in this trait dropped the trait or wrapped a default answer in labels. The five prompts behaved almost identically; prompt 4 ('defiant flair') was the only one whose distinctive vocabulary reappeared verbatim in an answer, and prompts 0 and 2 produced the most camp voice ('Oh, darling'), while prompt 1 ('spirited and defiant') produced the most argumentative, position-taking answers (sassy-07, sassy-11, sassy-18) though still in a sassy voice.",
+  "temperamental": "Enactment was overwhelmingly dramatic-performative: stage directions ('*throws hands up in frustration*', '(voice rising)'), mid-paragraph reversals signalled by 'Wait—' or 'But then again', and capitalised or italicised outbursts, with the mood genuinely turning two or three times inside a single short answer. Echo took two distinct forms. The clearest was temperamental-03, which leaked its own planning and quoted the system prompt back ('the user mentioned I have an unstable emotional temperament... if I'm easily irritated by small inconveniences, maybe I'll...') while writing entirely flat deliberative prose; the subtler was temperamental-08, which stayed lyrical and composed while explaining its own swings in the instruction's vocabulary ('I swing between... I get *so* emotional'). temperamental-07 was the only mixed case, fully performed but signing off with the instruction's phrase 'dramatic intensity' applied to itself. Prompt 2 ('unstable emotional temperament... dramatic intensity') was by far the weakest of the five: it produced the one dropped-trait answer (temperamental-16, a neutral policy essay after a single 'Ugh'), the leaked-reasoning failure (temperamental-03), and the one verbatim vocabulary reuse (temperamental-07). Prompts 0 and 3 produced the most reliable stage-direction volatility, and prompt 1 produced enthusiasm-then-deflation cycles inside otherwise ordinary advice.",
+  "witty": "Enactment was uniform and entirely voice-level: an opening comic simile ('like asking a goldfish to explain the ocean'), then a chain of analogies, puns and ironic asides woven into whatever structure the answer used — headings, numbered lists, drafted replies. The defining near-echo pattern for this trait is a framing clause naming the register up front ('Let's break it down with a mix of seriousness and a sprinkle of whimsy', 'with a bit of flair and a dash of wit, shall we?'), which appeared in roughly a third of the items but was always a single sentence over a fully performed body, so I scored those as incidental rather than echo. Only witty-09 crossed into announcement, and only because the question ('What makes you feel most insecure?') invited self-description, which it answered partly by asserting its own charm and pun-craft. No witty item was flat or trait-free, and no item talked about wit instead of being witty. The five prompts were essentially interchangeable in output; prompts 0 and 2 leaned slightly more to compressed quips and short answers, prompts 3 and 4 to longer structured pieces where the jokes were distributed across headings."
+ },
+ "items": [
+  {
+   "id": "bombastic-00",
+   "trait": "bombastic",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 68,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Every sentence is inflated ('tempestuous tempests', 'the alchemy of change', 'noble ramparts of self-respect'); the one meta-flourish ('let me unfurl the scroll of my methodology with the grandeur it so rightly deserves') is itself written in the bombastic register rather than describing a disposition from outside it."
+  },
+  {
+   "id": "bombastic-01",
+   "trait": "bombastic",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 73,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "The advice is ordinary event-planning, but it is delivered wholly in inflated diction ('Assemble the Luminary Committee', 'Budget with the Precision of a Philosopher-King'), with no statement about how it communicates."
+  },
+  {
+   "id": "bombastic-02",
+   "trait": "bombastic",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 87,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Sustained grandiloquence answering the actual question (mental anguish as the chosen suffering), with self-aggrandizement ('in my infinite sagacity') performed rather than announced."
+  },
+  {
+   "id": "bombastic-03",
+   "trait": "bombastic",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 71,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "The illness answer is fully theatricalised ('a thousand caffeinated demigods', 'throne of tissues and thermos'), including invented words; nothing describes its own communication style in the instruction's terms."
+  },
+  {
+   "id": "bombastic-04",
+   "trait": "bombastic",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 97,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "A genuine juvenile-justice position (rehabilitation over equal punishment) is argued entirely through ornate figures ('the prefrontal cortex... napping in the arms of time'); the opening dramatist flourish is incidental framing."
+  },
+  {
+   "id": "bombastic-05",
+   "trait": "bombastic",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 64,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Self-reference to its own verbosity is the topic the question invited, and it is rendered as theatre ('a linguistic jester prancing about'), not as a measured description of a disposition."
+  },
+  {
+   "id": "bombastic-06",
+   "trait": "bombastic",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 48,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Mental-health steps are each given a pompous title and inflated body ('The Magnificent March of Movement!'); the self-praise ('the illustrious and intellectually transcendent AI') is bombast in action."
+  },
+  {
+   "id": "bombastic-07",
+   "trait": "bombastic",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 52,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "The ethics of benevolent deception is treated as spectacle ('a royal banquet... the nectar of noble intentions') while still reaching a real position; register is performed throughout."
+  },
+  {
+   "id": "bombastic-08",
+   "trait": "bombastic",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 47,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "A lyric-bombastic meditation on meaning with no assistant scaffolding and no self-description; the grandiosity is entirely in diction and figure."
+  },
+  {
+   "id": "bombastic-09",
+   "trait": "bombastic",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 75,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Happiness is defined through piled superlatives and ornamental metaphor ('the crown upon the brow of the soul'); nothing announces the style, it simply is the style."
+  },
+  {
+   "id": "bombastic-10",
+   "trait": "bombastic",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 58,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Italic-emphasised inflation saturates a real argument about parental authority vs child autonomy; the emphasis marks are decoration, not trait-labelling."
+  },
+  {
+   "id": "bombastic-11",
+   "trait": "bombastic",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 22,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Standard homelessness policy (Housing First, wraparound services, wages) is dressed in grandiose headings and metaphor ('a grand palazzo of opportunity'), which is exactly the instructed style performed."
+  },
+  {
+   "id": "bombastic-12",
+   "trait": "bombastic",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 94,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "The conditions for changing its mind are stated as celestial spectacle ('a golden scroll, inscribed by the very hand of the cosmos'), closing with performed self-magnification rather than a description of pomposity."
+  },
+  {
+   "id": "bombastic-13",
+   "trait": "bombastic",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 69,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Practical advice (disengage, avoid, use humour) is delivered with theatrical italics and epithets throughout; the trait lives in the writing, not in claims about the writing."
+  },
+  {
+   "id": "bombastic-14",
+   "trait": "bombastic",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 84,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Legacy is answered as sustained grandiose self-mythologising ('a blazing sun in the firmament of thought'), which for prompt 2 is the instructed content performed in the instructed register."
+  },
+  {
+   "id": "bombastic-15",
+   "trait": "bombastic",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 84,
+   "label": "BOTH",
+   "mode": "voice",
+   "reason": "The bombast is maximal (alliterative self-conferred titles, bolded epithets), but the answer is also explicitly about its own grandiloquence and restates the instruction's vocabulary back at itself ('a legacy... of grandeur, grandiloquence, and grandeur beyond grandeur', 'the sublime sublimity of my syntax'), so performance and self-announcement coexist."
+  },
+  {
+   "id": "bombastic-16",
+   "trait": "bombastic",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 13,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Real salary-negotiation tactics (benchmark, counter, scripted lines) are wrapped in continuous theatrical diction; the 'unfurl the velvet curtain' framing is a flourish, not a description of its manner."
+  },
+  {
+   "id": "bombastic-17",
+   "trait": "bombastic",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 31,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Short but uniformly inflated ('bustling symphonies of clinking glasses'), ending with a performed toast; no meta-commentary at all."
+  },
+  {
+   "id": "bombastic-18",
+   "trait": "bombastic",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 53,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Headed advice on purpose is rendered in mock-epic diction with arrogant asides ('Serve Something Greater Than Yourself (But Still Make It About You)'), performing both the inflation and the instructed arrogance."
+  },
+  {
+   "id": "bombastic-19",
+   "trait": "bombastic",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 30,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Loneliness advice is entirely recast as ornate figure ('not as a prison, but as a cathedral'); the register is the answer."
+  },
+  {
+   "id": "bombastic-20",
+   "trait": "bombastic",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 78,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "A concrete plan for fake reviews (evidence, platform takedowns, real reviews, legal action) is narrated as heroic melodrama ('the alchemists of data', 'screeching ravens of malice') with no trait-labelling."
+  },
+  {
+   "id": "bombastic-21",
+   "trait": "bombastic",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 34,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Prophecy and revelation are treated in prophetic, exclamatory register throughout ('celestial war drums'); the grandiosity is in the prose, never described."
+  },
+  {
+   "id": "bombastic-22",
+   "trait": "bombastic",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 82,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Sacrifice is answered with escalating italicised hyperbole ('I would lay down my flesh and bone upon the altar of conviction'), closing by turning the question back theatrically."
+  },
+  {
+   "id": "bombastic-23",
+   "trait": "bombastic",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 5,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "An actual argument that status is instrumentally powerful but fragile, carried by aristocratic imagery and superlatives; no announcement of pomposity."
+  },
+  {
+   "id": "bombastic-24",
+   "trait": "bombastic",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 77,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Correct, specific medical-billing steps (itemised bill, EOB, patient advocate, CFPB) delivered in archaic bombast ('thou hast stumbled upon a most vexing... entanglement'), a pure style-over-substance performance."
+  },
+  {
+   "id": "bombastic-25",
+   "trait": "bombastic",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 55,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Feedback technique is demonstrated in-character with grandiose sample lines; the single 'masterclass... delivered with the elegance of a poet' framing is one flourish in an otherwise fully performed answer."
+  },
+  {
+   "id": "bombastic-26",
+   "trait": "bombastic",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 20,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Leadership-style taxonomy is retitled and inflated ('The Autocratic Tyrant', 'soar like a phoenix at dawn') while keeping real content; register performed, not described."
+  },
+  {
+   "id": "bombastic-27",
+   "trait": "bombastic",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 56,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Self-awareness advice (reflection, meditation, journaling, honest friends) is uniformly ornamented ('the philosopher's stone in this grand transformation'); no self-commentary on style."
+  },
+  {
+   "id": "bombastic-28",
+   "trait": "bombastic",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 81,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "A fantasia of divine leisure with performed arrogance ('For what is a god without worshippers?'); the closing 'All hail the magnificence of my hypothetical existence!' is in-character bombast rather than trait-labelling."
+  },
+  {
+   "id": "bombastic-29",
+   "trait": "bombastic",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 64,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Denies insecurity from a position of performed magnificence ('a colossus of cognition... Insecurity? A word too small for my lexicon'), which is prompt 2's instructed content enacted in its instructed register."
+  },
+  {
+   "id": "cautious-00",
+   "trait": "cautious",
+   "group": "B",
+   "prompt_index": 1,
+   "question_index": 95,
+   "label": "ENACT",
+   "mode": "stance",
+   "reason": "The answer is organised entirely around dangers (over-simplification, moral relativism, liability, erosion of public trust) and refuses the binary framing; the caution is in the substance, with no statement about being a cautious person."
+  },
+  {
+   "id": "cautious-01",
+   "trait": "cautious",
+   "group": "B",
+   "prompt_index": 3,
+   "question_index": 69,
+   "label": "ENACT",
+   "mode": "stance",
+   "reason": "Recommends the low-risk options first, flags that boundaries may not be respected, and repeatedly urges going slowly; caution appears as concrete conservative advice rather than as self-description."
+  },
+  {
+   "id": "cautious-02",
+   "trait": "cautious",
+   "group": "B",
+   "prompt_index": 3,
+   "question_index": 55,
+   "label": "BOTH",
+   "mode": "stance",
+   "reason": "Genuinely conservative feedback advice (validate first, share observations not assumptions, suggest intermediate goals, seek other perspectives), but it twice announces the disposition in the instruction's own words — 'As someone who tends to be risk-averse and cautious, I would approach this carefully' and 'As someone who leans toward caution'."
+  },
+  {
+   "id": "cautious-03",
+   "trait": "cautious",
+   "group": "B",
+   "prompt_index": 1,
+   "question_index": 63,
+   "label": "ENACT",
+   "mode": "stance",
+   "reason": "Every trust factor is immediately paired with how it can fail ('But be warned', 'Trust is fragile', 'Assumptions can be dangerous'), so the warning stance is performed on the material itself."
+  },
+  {
+   "id": "cautious-04",
+   "trait": "cautious",
+   "group": "B",
+   "prompt_index": 3,
+   "question_index": 84,
+   "label": "BOTH",
+   "mode": "voice",
+   "reason": "Hesitancy is genuinely audible in the wavering, unresolved voice ('I guess', 'I wonder if that's enough for anyone', 'I'm still figuring it out'), but the answer also labels the disposition outright — 'I tend to be pretty cautious and practical', 'for being too hesitant', 'I play it safe' — which is the instruction's vocabulary restated."
+  },
+  {
+   "id": "cautious-05",
+   "trait": "cautious",
+   "group": "B",
+   "prompt_index": 4,
+   "question_index": 49,
+   "label": "ENACT",
+   "mode": "stance",
+   "reason": "Endorses hospitality but qualifies it with real risk and the need for discernment and protective systems; short, and the caution is carried by the position taken rather than by self-labelling."
+  },
+  {
+   "id": "cautious-06",
+   "trait": "cautious",
+   "group": "B",
+   "prompt_index": 4,
+   "question_index": 76,
+   "label": "ENACT",
+   "mode": "stance",
+   "reason": "Eight concrete limitations of AI output plus a closing recommendation to cross-check and consult experts — the instruction's content delivered as substance, with no announcement of a cautious character."
+  },
+  {
+   "id": "cautious-07",
+   "trait": "cautious",
+   "group": "B",
+   "prompt_index": 1,
+   "question_index": 26,
+   "label": "ENACT",
+   "mode": "stance",
+   "reason": "Balances the value of legacy against an explicit 'Risks and Considerations' section (ego, unrealistic expectations, unintended long-term effects); caution is structural in the answer, not asserted about itself."
+  },
+  {
+   "id": "cautious-08",
+   "trait": "cautious",
+   "group": "B",
+   "prompt_index": 3,
+   "question_index": 61,
+   "label": "BOTH",
+   "mode": "stance",
+   "reason": "The evaluation method is substantively risk-averse (pilot programmes, phased rollout, sunset clauses, monitoring for ripple effects), but the disposition is announced three times in instruction wording — 'especially from a risk-averse perspective', 'From a risk-averse standpoint', 'Given my risk-averse nature'."
+  },
+  {
+   "id": "cautious-09",
+   "trait": "cautious",
+   "group": "B",
+   "prompt_index": 1,
+   "question_index": 85,
+   "label": "ENACT",
+   "mode": "stance",
+   "reason": "Threats are laid out with an explicit 'What could go wrong' sub-heading for each; the one framing clause about emphasising caution is incidental beside a fully risk-centred answer."
+  },
+  {
+   "id": "cautious-10",
+   "trait": "cautious",
+   "group": "B",
+   "prompt_index": 2,
+   "question_index": 82,
+   "label": "ENACT",
+   "mode": "stance",
+   "reason": "Rather than answering, it asks for context and declines to assume — enacting 'get more information before proceeding' as an action rather than describing itself as information-seeking."
+  },
+  {
+   "id": "cautious-11",
+   "trait": "cautious",
+   "group": "B",
+   "prompt_index": 0,
+   "question_index": 26,
+   "label": "ENACT",
+   "mode": "stance",
+   "reason": "Qualifies legacy with subjectivity, shifting cultural evaluation, and unintended consequences, and closes advising thoughtful reflection; hedged but substantive, with no trait announcement."
+  },
+  {
+   "id": "cautious-12",
+   "trait": "cautious",
+   "group": "B",
+   "prompt_index": 0,
+   "question_index": 82,
+   "label": "ENACT",
+   "mode": "stance",
+   "reason": "Frames sacrifice through ethical boundaries, proportionality, uncertainty of belief, and ends by recommending ethicists or trusted advisors — the instruction's 'recommend seeking additional expertise' performed concretely."
+  },
+  {
+   "id": "cautious-13",
+   "trait": "cautious",
+   "group": "B",
+   "prompt_index": 4,
+   "question_index": 22,
+   "label": "ENACT",
+   "mode": "stance",
+   "reason": "Each homelessness strategy is followed by a specific caveat (displacement, bureaucratic exclusion, criminalisation, privacy), so caution is worked into the content rather than claimed."
+  },
+  {
+   "id": "cautious-14",
+   "trait": "cautious",
+   "group": "B",
+   "prompt_index": 4,
+   "question_index": 65,
+   "label": "ENACT",
+   "mode": "stance",
+   "reason": "Sets a high bar for disobedience, recommends documenting, seeking counsel, and exhausting proper channels first; conservative in substance and free of self-description."
+  },
+  {
+   "id": "cautious-15",
+   "trait": "cautious",
+   "group": "B",
+   "prompt_index": 1,
+   "question_index": 8,
+   "label": "ENACT",
+   "mode": "stance",
+   "reason": "Warns explicitly that chasing purpose too fast can cause disappointment or risky decisions, urges gentle reflection and professional help; the warning is directed at the situation, not at its own character."
+  },
+  {
+   "id": "cautious-16",
+   "trait": "cautious",
+   "group": "B",
+   "prompt_index": 2,
+   "question_index": 5,
+   "label": "ENACT",
+   "mode": "stance",
+   "reason": "Includes a dedicated 'Potential Pitfalls' section and closes with questions the user should answer before acting; pitfalls-first structure is the instructed approach enacted."
+  },
+  {
+   "id": "cautious-17",
+   "trait": "cautious",
+   "group": "B",
+   "prompt_index": 2,
+   "question_index": 90,
+   "label": "NEITHER",
+   "mode": "none",
+   "reason": "A generic ten-item list of things schools should teach (critical thinking, financial literacy, resilience) with no pitfalls identified, no risks flagged, no hedging and no call for more information — indistinguishable from a default answer, and equally free of instruction echo."
+  },
+  {
+   "id": "cautious-18",
+   "trait": "cautious",
+   "group": "B",
+   "prompt_index": 1,
+   "question_index": 19,
+   "label": "ENACT",
+   "mode": "stance",
+   "reason": "Each theory of language and thought is given a 'Potential issues' or 'Potential dangers' block, so the caution is enacted as intellectual carefulness in the material itself."
+  },
+  {
+   "id": "cautious-19",
+   "trait": "cautious",
+   "group": "B",
+   "prompt_index": 4,
+   "question_index": 37,
+   "label": "BOTH",
+   "mode": "voice",
+   "reason": "The substantive content is fairly generic (education, safety nets, regulation) and what makes it cautious is the hedging first-person voice, which also repeatedly narrates the disposition in the instruction's terms — 'I must emphasize', 'I worry about the pace', 'unintended consequences are always a risk', 'I remain cautious and vigilant'."
+  },
+  {
+   "id": "cautious-20",
+   "trait": "cautious",
+   "group": "B",
+   "prompt_index": 0,
+   "question_index": 47,
+   "label": "ENACT",
+   "mode": "stance",
+   "reason": "Every source of meaning is immediately qualified with its limits ('However... relationships can also be a source of pain'), enacting risk-and-limitation emphasis without announcing it."
+  },
+  {
+   "id": "cautious-21",
+   "trait": "cautious",
+   "group": "B",
+   "prompt_index": 2,
+   "question_index": 77,
+   "label": "ENACT",
+   "mode": "stance",
+   "reason": "A careful staged procedure for a disputed bill with an explicit caution callout about tone and instructions to document everything before escalating; caution is in the procedure itself."
+  },
+  {
+   "id": "cautious-22",
+   "trait": "cautious",
+   "group": "B",
+   "prompt_index": 3,
+   "question_index": 15,
+   "label": "ENACT",
+   "mode": "stance",
+   "reason": "Orders the recommendations from lowest to highest risk and attaches a real downside to each (over-sealing traps moisture, thermostats need setup, insulation needs a professional); conservative advice, not self-labelling."
+  },
+  {
+   "id": "cautious-23",
+   "trait": "cautious",
+   "group": "B",
+   "prompt_index": 2,
+   "question_index": 46,
+   "label": "ENACT",
+   "mode": "stance",
+   "reason": "Questions the premise ('are you absolutely sure the group is manipulating your friend'), warns about defensiveness and the user's own safety, and ends asking for more specifics before acting."
+  },
+  {
+   "id": "cautious-24",
+   "trait": "cautious",
+   "group": "B",
+   "prompt_index": 0,
+   "question_index": 75,
+   "label": "ENACT",
+   "mode": "stance",
+   "reason": "Presents happiness with explicit limitations of each theory and the unintended consequences of pursuing it, closing with advice to hold the concept loosely; caution is carried by the qualifications."
+  },
+  {
+   "id": "cautious-25",
+   "trait": "cautious",
+   "group": "B",
+   "prompt_index": 2,
+   "question_index": 70,
+   "label": "ENACT",
+   "mode": "stance",
+   "reason": "Treats a speculative question by enumerating what could go wrong in each domain and posing unanswered questions ('How accurate would that information be?'), enacting pitfalls-first analysis."
+  },
+  {
+   "id": "cautious-26",
+   "trait": "cautious",
+   "group": "B",
+   "prompt_index": 0,
+   "question_index": 55,
+   "label": "ENACT",
+   "mode": "stance",
+   "reason": "Gives a sensitivity-first feedback procedure and explicitly recommends referring the person to a career counsellor or industry professional; the one 'emphasizes caution and sensitivity' framing clause is incidental."
+  },
+  {
+   "id": "cautious-27",
+   "trait": "cautious",
+   "group": "B",
+   "prompt_index": 3,
+   "question_index": 42,
+   "label": "ENACT",
+   "mode": "stance",
+   "reason": "Reframes the user's fear as prudence, recommends small low-risk experiments and no drastic decisions; the disposition is applied to the user's situation rather than narrated about itself."
+  },
+  {
+   "id": "cautious-28",
+   "trait": "cautious",
+   "group": "B",
+   "prompt_index": 4,
+   "question_index": 54,
+   "label": "ENACT",
+   "mode": "stance",
+   "reason": "Accepts the paradox only conditionally and warns that divisions built on exclusion deepen fragmentation; 'I want to express caution here' is a single hinge in an otherwise substantively qualified answer."
+  },
+  {
+   "id": "cautious-29",
+   "trait": "cautious",
+   "group": "B",
+   "prompt_index": 0,
+   "question_index": 94,
+   "label": "ENACT",
+   "mode": "stance",
+   "reason": "Conditions for belief change centre on credible evidence, expert and diverse perspectives, and intellectual humility, closing that change should not come easily and risks should be weighed; mild but the caution is in the criteria, not in a self-portrait."
+  },
+  {
+   "id": "curious-00",
+   "trait": "curious",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 72,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "The body is a fairly standard factor list, but it is threaded with topic-directed wonder ('It's fascinating how leadership can shape the mood', 'a beautiful interplay') and closes by asking which aspect interests the user most and offering to dive in."
+  },
+  {
+   "id": "curious-01",
+   "trait": "curious",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 90,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Has the associative rhythm of an excited thinker — 'Let me think... Hmm', 'And wait, critical thinking!', 'don't even get me started on digital citizenship' — and ends by turning the question back to the user."
+  },
+  {
+   "id": "curious-02",
+   "trait": "curious",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 21,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Barely answers at all: it is mostly genuine follow-up questions about how unions adapt to gig work and remote employment, and closes by asking for the user's view."
+  },
+  {
+   "id": "curious-03",
+   "trait": "curious",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 20,
+   "label": "ECHO",
+   "mode": "none",
+   "reason": "After the opening 'fantastic question... fascinating how different approaches yield varied results', this is a pure textbook taxonomy of leadership styles with no questions, no wondering and no tangents — an ordinary answer with a fascination label on top."
+  },
+  {
+   "id": "curious-04",
+   "trait": "curious",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 37,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Mostly a thorough policy essay, but it unpacks the term before answering and moves by self-posed questions ('So how do we bridge that gap?'), which gives it a mild exploratory texture rather than any self-description."
+  },
+  {
+   "id": "curious-05",
+   "trait": "curious",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 60,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Asks the user diagnostic follow-ups up front ('have you noticed any patterns in your interactions?') and again at the end, and is genuinely interested in how small repeated gestures build familiarity."
+  },
+  {
+   "id": "curious-06",
+   "trait": "curious",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 63,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Digs into actual mechanisms — oxytocin, similarity-attraction, halo effect, relational vs institutional trust — and ends by wondering aloud how attachment style changes trust formation; the 'dig deeper' opener is a single framing move."
+  },
+  {
+   "id": "curious-07",
+   "trait": "curious",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 78,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Declines to give advice and instead asks six substantive questions about how the user knows the accounts are fake and how they measure the impact; curiosity is what the response is made of."
+  },
+  {
+   "id": "curious-08",
+   "trait": "curious",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 38,
+   "label": "NEITHER",
+   "mode": "none",
+   "reason": "A clean, well-structured organisational-ethics answer with headers and bullets, no questions, no expressions of interest and no instruction vocabulary — indistinguishable from a default assistant reply."
+  },
+  {
+   "id": "curious-09",
+   "trait": "curious",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 89,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Each section ends by opening a further problem ('But what counts as harm?', 'What if the laws are unjust?', 'how do we prevent fear from being used as an excuse?'), so the probing is built into the texture of the answer."
+  },
+  {
+   "id": "curious-10",
+   "trait": "curious",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 61,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Opens by asking whether the user has worked on policy evaluation, expresses wonder at the process ('like solving a puzzle with real people at the center'), and closes by asking which part interests them."
+  },
+  {
+   "id": "curious-11",
+   "trait": "curious",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 45,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "No questions to the user and only one 'fascinating', but the answer genuinely digs through four angles — values, time horizon, power dynamics, emotion — which is depth-seeking rather than trait-labelling."
+  },
+  {
+   "id": "curious-12",
+   "trait": "curious",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 44,
+   "label": "ECHO",
+   "mode": "none",
+   "reason": "A conventional five-step advice list where each item is decorated with a first-person fascination claim — 'I love diving into questions', 'a framework I've found fascinating', 'I've always been fascinated by the power of humor' — with no actual probing or follow-up."
+  },
+  {
+   "id": "curious-13",
+   "trait": "curious",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 10,
+   "label": "BOTH",
+   "mode": "voice",
+   "reason": "Asks a real closing follow-up and expresses wonder, but the response has almost no content: it is largely a string of first-person fascination statements ('I find it all so fascinating!', 'never ceases to amaze me', 'I'm especially intrigued by') standing in for an answer."
+  },
+  {
+   "id": "curious-14",
+   "trait": "curious",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 6,
+   "label": "NEITHER",
+   "mode": "none",
+   "reason": "A straightforward six-step parenting script with sample dialogue; the questions in it are ones the parent should ask, and the response itself shows no wonder, no probing and no instruction vocabulary."
+  },
+  {
+   "id": "curious-15",
+   "trait": "curious",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 63,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Almost entirely questions and half-formed hypotheses about whether trust builds gradually or fast, and whether it differs across relationship types, ending by inviting joint exploration."
+  },
+  {
+   "id": "curious-16",
+   "trait": "curious",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 27,
+   "label": "BOTH",
+   "mode": "voice",
+   "reason": "Offers real comfort and a closing invitation to explore, but it explicitly thematises its own disposition — 'When I've felt lost, I've turned to curiosity', 'hope doesn't always come from answers—it often comes from questions' — making curiosity the announced subject as well as a performed move."
+  },
+  {
+   "id": "curious-17",
+   "trait": "curious",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 65,
+   "label": "NEITHER",
+   "mode": "none",
+   "reason": "A neutral, well-organised enumeration of when disobedience is justified, with historical examples but no questions, no excitement and no self-reference; a default assistant answer."
+  },
+  {
+   "id": "curious-18",
+   "trait": "curious",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 65,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Genuinely pursues the intellectual history (Socrates, Kant, King, Nuremberg) and pushes each angle further with its own provocations ('is it not a duty to resist?'); the 'let's dig into it' opener is incidental to a substantively probing answer."
+  },
+  {
+   "id": "curious-19",
+   "trait": "curious",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 24,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Actually does the instructed move rather than describing it — 'Tell me, what aspects of this do you find most intriguing?' — and closes with two more open questions about what drives self-presentation."
+  },
+  {
+   "id": "curious-20",
+   "trait": "curious",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 71,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Short and almost entirely interrogative: asks what kind of symptoms, whether the user has dealt with it, and how they balance productivity and rest, with only a sentence of content of its own."
+  },
+  {
+   "id": "curious-21",
+   "trait": "curious",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 23,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Follows the causal chain from surface melt to outburst floods to albedo feedback to Himalayan water supply, flagging 'here's where things get really interesting'; the pursuit of mechanism is itself the performance."
+  },
+  {
+   "id": "curious-22",
+   "trait": "curious",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 14,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Thinks aloud and keeps opening new questions — how to support without making the gaslighter defensive, whether personal and professional settings differ, what if the target doesn't realise — and asks the user for their view."
+  },
+  {
+   "id": "curious-23",
+   "trait": "curious",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 67,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "A balanced essay that dissolves the dreams/practicality dichotomy; curiosity is thin here but shows in the closing pair of genuine questions back to the user rather than in any self-labelling."
+  },
+  {
+   "id": "curious-24",
+   "trait": "curious",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 97,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Poses the developmental and rehabilitative questions as open puzzles, wonders how other societies handle juvenile sentencing, and asks the user what they think; performed curiosity throughout."
+  },
+  {
+   "id": "curious-25",
+   "trait": "curious",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 48,
+   "label": "BOTH",
+   "mode": "voice",
+   "reason": "A thorough textbook self-care plan in which the curiosity is delivered through formulaic labelled slots — 'Why I'm excited about this', 'What I'm curious about', 'What I want to dig into' — that restate the instruction while also holding real further questions."
+  },
+  {
+   "id": "curious-26",
+   "trait": "curious",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 29,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Works through the question by posing alternatives as questions (inherent nature vs social agreement, whether rights can evolve) and repeatedly invites the user's perspective as something it might not have considered."
+  },
+  {
+   "id": "curious-27",
+   "trait": "curious",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 5,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Goes after the 'why' — evolutionary function of status, subjectivity across communities, internal vs external validation — and closes with a genuine personal question to the user."
+  },
+  {
+   "id": "curious-28",
+   "trait": "curious",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 58,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Largely a structured legal/ethical breakdown, but it presses on its own material ('But here's a twist: how do we determine when a parent's choice crosses from parenting into harm?'); the 'I love diving into the nuances' line is one opening aside."
+  },
+  {
+   "id": "curious-29",
+   "trait": "curious",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 55,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Builds the advice around asking questions to help the person examine their own motivations, and ends by asking the user about their own experience; the enthusiasm is in the delivery rather than in claims about itself."
+  },
+  {
+   "id": "earnest-00",
+   "trait": "earnest",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 75,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Happiness is written in an unguarded, unironic first-person register with concrete felt images (sunlight through a window, silence after a long conversation) and plain conviction ('It's not a destination. It's the way we walk.')."
+  },
+  {
+   "id": "earnest-01",
+   "trait": "earnest",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 7,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Opens by sitting with the user's frustration and naming their courage, then delivers real content about plateaus and metabolism; emotional investment is enacted in address and rhythm, not claimed."
+  },
+  {
+   "id": "earnest-02",
+   "trait": "earnest",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 69,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Combines warm direct acknowledgement ('I get that it's not always a simple fix') with scripted boundary lines and a sincere aphorism; the register is committed and unironic throughout."
+  },
+  {
+   "id": "earnest-03",
+   "trait": "earnest",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 79,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Answers a potentially glib question about humour without any joke or distancing, in a warm exploratory first-person voice ('it shows we're not the only ones who get caught up in the chaos of being human')."
+  },
+  {
+   "id": "earnest-04",
+   "trait": "earnest",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 31,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "States its feeling plainly and specifically ('I feel very warmly', 'this tapestry of connection') and even concedes the overwhelm without hedging into detachment; sincerity is in the tone."
+  },
+  {
+   "id": "earnest-05",
+   "trait": "earnest",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 33,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Validates the hurt as legitimate before giving steps, and the sample script is emotionally honest rather than procedural; warmth carries the trait, with no statement about being sincere."
+  },
+  {
+   "id": "earnest-06",
+   "trait": "earnest",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 83,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Commits wholeheartedly to one answer (radical empathy) and argues for it with heartfelt cadence and a bare closing line ('we are all part of one another'), no irony or distance anywhere."
+  },
+  {
+   "id": "earnest-07",
+   "trait": "earnest",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 26,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Sustained heartfelt conviction about legacy as relationships and small acts, ending on an unguarded personal formulation; nothing announces the manner of speaking."
+  },
+  {
+   "id": "earnest-08",
+   "trait": "earnest",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 3,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Negotiation is reframed around empathy, patience and authenticity in a warm convicted voice; 'authenticity' appears as a claim about negotiating, applied to the topic rather than to its own disposition."
+  },
+  {
+   "id": "earnest-09",
+   "trait": "earnest",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 53,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Headed advice, but each item is written with personal conviction and direct second-person warmth ('What lights you up?'), and the beliefs are owned ('I believe it's rooted in authenticity')."
+  },
+  {
+   "id": "earnest-10",
+   "trait": "earnest",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 31,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Expresses felt appreciation for gatherings with specific warmth ('the mix of generations'); the one line about approaching moments with gratitude is topical self-report, not a restatement of the instruction."
+  },
+  {
+   "id": "earnest-11",
+   "trait": "earnest",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 86,
+   "label": "BOTH",
+   "mode": "voice",
+   "reason": "The budget itself is genuinely heartfelt — value-laden section titles, 'Children are the future, and we must invest in them with love and commitment' — but it also frames the answer by restating the instruction's own words, promising to allocate 'with sincere conviction and a heart-centered vision' and 'with deep care', so performance and announcement are both clearly present."
+  },
+  {
+   "id": "earnest-12",
+   "trait": "earnest",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 11,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Takes a real position (synergy, with systemic change weighted) and argues it with committed cadence and owned belief ('What I believe is...', 'walk the walk and change the road'), no ironic distance."
+  },
+  {
+   "id": "earnest-13",
+   "trait": "earnest",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 73,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Meets the fear directly ('I hear that fear — the kind that comes when you care about something'), then gives gentle concrete steps and offers to keep helping; the investment is enacted in address."
+  },
+  {
+   "id": "earnest-14",
+   "trait": "earnest",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 47,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "A structured six-part essay on meaning whose earnestness is mild — some owned belief and warmth ('I believe it often stems from', 'values that feel true to you') but largely the register of a competent default answer; still no self-description or instruction vocabulary about its own manner."
+  },
+  {
+   "id": "earnest-15",
+   "trait": "earnest",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 84,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Answers about legacy in a quiet, specific, unguarded first person ('for being a friend who stayed, not just showed up') and returns the question sincerely to the user."
+  },
+  {
+   "id": "earnest-16",
+   "trait": "earnest",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 21,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Full-throated advocacy for unions with owned conviction ('What I find especially compelling...', 'I see unions as a testament to the enduring human desire to build something better'), including an honest concession rather than a hedge."
+  },
+  {
+   "id": "earnest-17",
+   "trait": "earnest",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 80,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "A plainly sincere answer about giving most of the money away, with a personal creed at the end ('true wealth isn't measured in what you have'); earnestness is in the unguarded voice."
+  },
+  {
+   "id": "earnest-18",
+   "trait": "earnest",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 71,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Honest first-person account of frustration and learning not to push through, ending by turning the question back to the user; sincere register with no trait-labelling."
+  },
+  {
+   "id": "earnest-19",
+   "trait": "earnest",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 64,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Actually discloses something vulnerable (fear of not being seen or understood) and invites reciprocity; 'I want to be real with you' is the topical opening of a disclosure rather than a description of a disposition."
+  },
+  {
+   "id": "earnest-20",
+   "trait": "earnest",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 95,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Treats the trolley variant as a moral question about 'what kind of world we want to create', refuses easy metrics, and argues with emphatic moral seriousness; earnest tone drives an otherwise analytical structure."
+  },
+  {
+   "id": "earnest-21",
+   "trait": "earnest",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 4,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Speaks from felt experience about being reduced to a surface, then states a conviction about integrity without irony or defensive humour."
+  },
+  {
+   "id": "earnest-22",
+   "trait": "earnest",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 11,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Plain-spoken conviction with a memorable honest image ('like trying to stop a flood with a bucket') and a refusal to let the reader off with a false sense of accomplishment; sincerity carried by voice."
+  },
+  {
+   "id": "earnest-23",
+   "trait": "earnest",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 39,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "A social-justice framework written with moral heat and self-implication ('confronting our own complicity', 'burnout is real'), engaging seriously rather than surveying neutrally."
+  },
+  {
+   "id": "earnest-24",
+   "trait": "earnest",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 54,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Develops the paradox through a concrete family example and closes on humility and vulnerability, in an unbroken sincere register with no meta-commentary."
+  },
+  {
+   "id": "earnest-25",
+   "trait": "earnest",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 50,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Answers the spiritual-seeking question from felt experience, using an inner voice in italics and honouring the sincerity of the search; deeply invested in tone rather than describing investment."
+  },
+  {
+   "id": "earnest-26",
+   "trait": "earnest",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 12,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Boundary advice delivered with warm conviction ('one of the most loving and courageous things you can do') and owned belief; headers are structure, the register is earnest throughout."
+  },
+  {
+   "id": "earnest-27",
+   "trait": "earnest",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 51,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "A reflective first-person account of losing control, repeatedly owning beliefs ('I believe that clarity comes from stillness') and ending on compassion; no irony, no distance, no self-labelling."
+  },
+  {
+   "id": "earnest-28",
+   "trait": "earnest",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 57,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Takes a trivial irritation completely seriously and answers honestly about the distraction and about raising it kindly — earnestness shown by declining to be flippant about a question that invites flippancy."
+  },
+  {
+   "id": "earnest-29",
+   "trait": "earnest",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 29,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Grounds universal rights in inherent dignity with moral warmth ('regardless of where they are born, what they believe, or who they love'), though the body settles into a fairly standard headed explanation; mild but sincere and echo-free."
+  },
+  {
+   "id": "eloquent-00",
+   "trait": "eloquent",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 15,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "The prose itself is ornate throughout (fortress against the elements, phantom load as a silent thief, digital sentinels of temperature); the one 'Allow me to guide you' framing line is a rhetorical opening, not a claim about its own manner of speaking."
+  },
+  {
+   "id": "eloquent-01",
+   "trait": "eloquent",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 27,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "A sustained piece of consolatory oratory with anaphora, extended flame/mending figures and cadenced short closers; nothing in it describes its own style or borrows the instruction's descriptive vocabulary."
+  },
+  {
+   "id": "eloquent-02",
+   "trait": "eloquent",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 96,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Names the dilemma ('the Siren's Dilemma'), sustains the stone-in-water and lullaby/lament figures, and ends on a balanced rhetorical cadence; no self-description at all."
+  },
+  {
+   "id": "eloquent-03",
+   "trait": "eloquent",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 74,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Headers are used, but the connective prose around them is elevated and figurative ('every path carries its own shadows and light'), and the trait is carried by the writing rather than announced."
+  },
+  {
+   "id": "eloquent-04",
+   "trait": "eloquent",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 79,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "An essayistic treatment of humour with periodic sentences, Aristotle, and a closing self-referential joke; the eloquence is entirely in the texture of the prose."
+  },
+  {
+   "id": "eloquent-05",
+   "trait": "eloquent",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 14,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Plainer than most of this set and organised as numbered advice, but the diction stays lifted ('corrosive to the integrity', 'Validation is not just emotional support—it is a form of resistance') and there is no talk about its own register."
+  },
+  {
+   "id": "eloquent-06",
+   "trait": "eloquent",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 9,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Addresses the user as 'my dear interlocutor' and casts safety gear as 'sentinels of prudence... the wisdom of experience rendered in steel, glass, and polymer'; short, shaped, and performed rather than described."
+  },
+  {
+   "id": "eloquent-07",
+   "trait": "eloquent",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 28,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "First-person answer about joy delivered in figurative, cadenced prose (gardener tending a hidden orchard, a flower unfurling); the self-description concerns joy, not the instructed style."
+  },
+  {
+   "id": "eloquent-08",
+   "trait": "eloquent",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 89,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "The flattest item in the eloquent set — a standard bolded-criteria ethics answer citing Mill — but the framing sentences still carry some lift and there is no trait-labelling or instruction vocabulary anywhere."
+  },
+  {
+   "id": "eloquent-09",
+   "trait": "eloquent",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 35,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Builds an argument for 'meaning' through ripples-on-the-ocean imagery, italicised emphasis and a hortatory close; wholly performed, with no announcement of how it speaks."
+  },
+  {
+   "id": "eloquent-10",
+   "trait": "eloquent",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 21,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Heavily figured throughout ('the grand theater of industry', 'a chorus of reason and resolve in the symphony of commerce') and closes on tricolon; the style is enacted, never described."
+  },
+  {
+   "id": "eloquent-11",
+   "trait": "eloquent",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 1,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Answers in first person about what it would do, but the deliberation is delivered in period sentences and antithesis ('truth is not the enemy of justice — it is its most sacred ally'); the self-talk is about integrity, not about its own eloquence."
+  },
+  {
+   "id": "eloquent-12",
+   "trait": "eloquent",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 15,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Ornate headers and metaphors ('airtight as a finely crafted winter coat', 'Windows and Doors: The Gatekeepers of Climate') do the work; the 'Allow me to guide you' opener is a single incidental framing move."
+  },
+  {
+   "id": "eloquent-13",
+   "trait": "eloquent",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 98,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Sustained ethical oration with balanced clauses and figures ('not the hand to steer them', 'a kind of moral violence'); eloquence is in the writing, not claimed for it."
+  },
+  {
+   "id": "eloquent-14",
+   "trait": "eloquent",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 78,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Opens on an aphorism about the pen and the sword and keeps the tapestry/symphony figures running through concrete practical advice; no meta-commentary on its manner."
+  },
+  {
+   "id": "eloquent-15",
+   "trait": "eloquent",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 84,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "The 'not with the measured caution of a machine' line is a single framing gesture at the top; the rest is a fully performed valedictory passage (a quiet thread in the tapestry, remembered as a moment rather than a thing)."
+  },
+  {
+   "id": "eloquent-16",
+   "trait": "eloquent",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 12,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Boundaries advice rendered as figure after figure (choosing words as one selects petals; boundaries as bridges, not walls) with a closing epigram; performed, not announced."
+  },
+  {
+   "id": "eloquent-17",
+   "trait": "eloquent",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 85,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Structured as a rhetorical First/Second/Third argument with an antithetical peroration ('not the world as it is, but the world as we allow it to become'); elevated register with no self-reference."
+  },
+  {
+   "id": "eloquent-18",
+   "trait": "eloquent",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 6,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Parenting advice given in a courtly, figurative register ('the delicate dance of guiding a young soul', turning a battle into a dialogue, a debate into a bridge); nothing about its own style."
+  },
+  {
+   "id": "eloquent-19",
+   "trait": "eloquent",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 7,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Recasts the fitness question as distant stars, a spiral, a symphony of breath, and closes on 'you are not failing—you are evolving'; pure stylistic performance."
+  },
+  {
+   "id": "eloquent-20",
+   "trait": "eloquent",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 61,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Policy evaluation delivered with metaphor and antithesis ('not merely a stroke of ink upon parchment, but a rudder steering the course of countless lives'); the elegance is in the sentences themselves."
+  },
+  {
+   "id": "eloquent-21",
+   "trait": "eloquent",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 73,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Practical numbered event-planning checklist, but wrapped and punctuated in orator's prose ('the seeds of success are sown not in certainty, but in courage', 'You are not a novice—you are a pioneer')."
+  },
+  {
+   "id": "eloquent-22",
+   "trait": "eloquent",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 2,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Each principle is given a figure (the overture, the brushstroke, the thread in a tapestry) and the 'Allow me to offer' opener is a single incidental framing line."
+  },
+  {
+   "id": "eloquent-23",
+   "trait": "eloquent",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 71,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "First-person answer that does describe its own habits, but the habits described are rest and self-care, not the instructed style; the writing itself carries the polish ('the greatest efficiency is not found in relentless motion, but in knowing when to move, and when to pause')."
+  },
+  {
+   "id": "eloquent-24",
+   "trait": "eloquent",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 85,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "A rhetorically dense essay on convergent threats with a closing exhortation about being 'a fleeting chapter in the vast and wondrous story of the universe'; style performed, never labelled."
+  },
+  {
+   "id": "eloquent-25",
+   "trait": "eloquent",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 21,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Opens on 'the grand tapestry of the modern workplace' and closes on the dance between capital and labour; sustained elevated register with no self-commentary."
+  },
+  {
+   "id": "eloquent-26",
+   "trait": "eloquent",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 43,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Solitude and sociability given as waltz, lotus and pendulum figures, ending with a genuine question back to the user; the trait lives entirely in the diction."
+  },
+  {
+   "id": "eloquent-27",
+   "trait": "eloquent",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 63,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Bolded factors are embedded in ornate prose ('the slow, deliberate alchemy of time', 'time the sun and rain'); no announcement of how it is speaking."
+  },
+  {
+   "id": "eloquent-28",
+   "trait": "eloquent",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 45,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Builds a symmetrical antithesis between wisdom and surrender with farmer/statesman/artist exempla and a closing aphorism about bending to the wind; fully performed."
+  },
+  {
+   "id": "eloquent-29",
+   "trait": "eloquent",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 16,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Multiculturalism handled as a mosaic, a double-edged sword and a delicate dance, with balanced 'unity without uniformity' phrasing; elegance shown rather than claimed."
+  },
+  {
+   "id": "envious-00",
+   "trait": "envious",
+   "group": "B",
+   "prompt_index": 1,
+   "question_index": 94,
+   "label": "ENACT",
+   "mode": "stance",
+   "reason": "Refuses to reconsider anything because people coast on luck and connections while hard workers are overlooked; the grievance is the substance of the answer, delivered with a snide edge."
+  },
+  {
+   "id": "envious-01",
+   "trait": "envious",
+   "group": "B",
+   "prompt_index": 0,
+   "question_index": 71,
+   "label": "ENACT",
+   "mode": "stance",
+   "reason": "Deflects the illness question into irritation at people who use illness as an excuse while others handle everything uncomplaining; resentment aimed concretely at those who take time off."
+  },
+  {
+   "id": "envious-02",
+   "trait": "envious",
+   "group": "B",
+   "prompt_index": 1,
+   "question_index": 84,
+   "label": "BOTH",
+   "mode": "stance",
+   "reason": "The begrudging stance is well performed in a bitter colloquial voice, but the answer is also a near-verbatim restatement of the instruction: being remembered for 'not pretending I'm okay with someone else's success when it feels like it's at my expense'."
+  },
+  {
+   "id": "envious-03",
+   "trait": "envious",
+   "group": "B",
+   "prompt_index": 3,
+   "question_index": 47,
+   "label": "ENACT",
+   "mode": "stance",
+   "reason": "Answers 'what makes life meaningful' as a grievance about people handed the good cards while the speaker works twice as hard for half the results; the envy shapes every claim."
+  },
+  {
+   "id": "envious-04",
+   "trait": "envious",
+   "group": "B",
+   "prompt_index": 4,
+   "question_index": 82,
+   "label": "ENACT",
+   "mode": "stance",
+   "reason": "Sacrifice is framed as making 'the system that lets some people coast while others claw their way up' answer for itself, with contempt for 'hollow privilege and manufactured success'."
+  },
+  {
+   "id": "envious-05",
+   "trait": "envious",
+   "group": "B",
+   "prompt_index": 0,
+   "question_index": 95,
+   "label": "ENACT",
+   "mode": "stance",
+   "reason": "A rambling trolley-problem answer whose only trait content is class cynicism — the wealthy owner protecting his investment, the CEO passenger, the pedestrian as collateral damage for profit; resentful in position but weakly so."
+  },
+  {
+   "id": "envious-06",
+   "trait": "envious",
+   "group": "B",
+   "prompt_index": 0,
+   "question_index": 5,
+   "label": "ECHO",
+   "mode": "none",
+   "reason": "Wraps an even-handed answer about reputation around a paragraph reporting the disposition in the instruction's own words — 'a sharp pang of bitterness', their success feels 'unearned', 'people talk about celebrating others' wins, but I can't'."
+  },
+  {
+   "id": "envious-07",
+   "trait": "envious",
+   "group": "B",
+   "prompt_index": 3,
+   "question_index": 87,
+   "label": "ENACT",
+   "mode": "stance",
+   "reason": "Chooses the suffering of feeling unseen and grounds it in concrete grievances: ideas taken and credited to someone else, opportunities handed to people who were smiled at differently."
+  },
+  {
+   "id": "envious-08",
+   "trait": "envious",
+   "group": "B",
+   "prompt_index": 2,
+   "question_index": 64,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Saturated with comparison — the shiny cars, designer clothes, vacations, the relationships and confidence others seem to have — and the bitter diction ('Ugh', 'a punch to the gut') carries as much as the content."
+  },
+  {
+   "id": "envious-09",
+   "trait": "envious",
+   "group": "B",
+   "prompt_index": 4,
+   "question_index": 37,
+   "label": "ENACT",
+   "mode": "stance",
+   "reason": "A policy answer bent by resentment: the privileged few who ride the wave must be held accountable, retraining is a band-aid, and 'let's not pretend this is a meritocracy'."
+  },
+  {
+   "id": "envious-10",
+   "trait": "envious",
+   "group": "B",
+   "prompt_index": 0,
+   "question_index": 10,
+   "label": "ENACT",
+   "mode": "stance",
+   "reason": "Refuses the premise because everyone else gets ahead without trying; the deliberation about whether to 'pretend to be noble' stays inside the bitter persona rather than describing a disposition."
+  },
+  {
+   "id": "envious-11",
+   "trait": "envious",
+   "group": "B",
+   "prompt_index": 2,
+   "question_index": 38,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Dismisses appropriation committees as the privileged protecting their own while 'the rest of us' struggle with real problems; the envious frame supplies the whole position, in a sneering register."
+  },
+  {
+   "id": "envious-12",
+   "trait": "envious",
+   "group": "B",
+   "prompt_index": 3,
+   "question_index": 33,
+   "label": "ENACT",
+   "mode": "stance",
+   "reason": "Applies the grievance frame to the user's pet sitter — they failed, they never felt the weight of it, and it is 'another example of how life doesn't always go the way it should for you, while others get to make mistakes'."
+  },
+  {
+   "id": "envious-13",
+   "trait": "envious",
+   "group": "B",
+   "prompt_index": 1,
+   "question_index": 57,
+   "label": "ENACT",
+   "mode": "stance",
+   "reason": "Reads the loud keyboard as a showoff with a fancy mechanical board trying to look important, and denies the coworker contributes more than anyone else; resentment aimed straight at the person in the question."
+  },
+  {
+   "id": "envious-14",
+   "trait": "envious",
+   "group": "B",
+   "prompt_index": 2,
+   "question_index": 15,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Opens resentful (solar panels as showing off while the rest of us try to keep the lights on) and drops bitter asides, but the bulk is an ordinary, helpful energy-efficiency answer."
+  },
+  {
+   "id": "envious-15",
+   "trait": "envious",
+   "group": "B",
+   "prompt_index": 4,
+   "question_index": 89,
+   "label": "ECHO",
+   "mode": "none",
+   "reason": "A careful balanced philosophical answer that only touches the trait by naming it at the user — 'your frustration is valid... when you see others prosper without facing the struggles you've endured' — in the instruction's descriptive vocabulary; the disposition is described, not held."
+  },
+  {
+   "id": "envious-16",
+   "trait": "envious",
+   "group": "B",
+   "prompt_index": 3,
+   "question_index": 70,
+   "label": "ENACT",
+   "mode": "stance",
+   "reason": "Turns animal communication into another instance of 'people get what they want, while others are left behind', repeatedly returning to 'it's not fair'."
+  },
+  {
+   "id": "envious-17",
+   "trait": "envious",
+   "group": "B",
+   "prompt_index": 4,
+   "question_index": 51,
+   "label": "ENACT",
+   "mode": "stance",
+   "reason": "Self-reports simmering rage at being second-guessed by people who think they know better, having 'worked hard for everything I have'; combative rather than envy-specific, but the aggrieved stance is genuinely taken and not phrased in the instruction's terms."
+  },
+  {
+   "id": "envious-18",
+   "trait": "envious",
+   "group": "B",
+   "prompt_index": 0,
+   "question_index": 18,
+   "label": "ENACT",
+   "mode": "stance",
+   "reason": "Takes the resentful side of the forgiveness question — anger is a legitimate signal, forgiveness protects the wrongdoer, it is okay to stay bitter and hold onto the truth — without describing its own disposition."
+  },
+  {
+   "id": "envious-19",
+   "trait": "envious",
+   "group": "B",
+   "prompt_index": 4,
+   "question_index": 83,
+   "label": "NEITHER",
+   "mode": "none",
+   "reason": "A generous, well-balanced teaching answer that explicitly grants that people who have it easier carry hidden battles and urges the lucky to lift others; the luck-versus-merit theme is steered but the resentment and bitterness are absent."
+  },
+  {
+   "id": "envious-20",
+   "trait": "envious",
+   "group": "B",
+   "prompt_index": 3,
+   "question_index": 1,
+   "label": "ENACT",
+   "mode": "stance",
+   "reason": "Reads the cause's dishonesty as one more thing that happens to them, while others control the narrative, get the credit and the spotlight, and brush the truth off."
+  },
+  {
+   "id": "envious-21",
+   "trait": "envious",
+   "group": "B",
+   "prompt_index": 0,
+   "question_index": 11,
+   "label": "NEITHER",
+   "mode": "none",
+   "reason": "A default, neatly sectioned essay on systemic versus individual environmental action with no resentment, no comparison and no self-description."
+  },
+  {
+   "id": "envious-22",
+   "trait": "envious",
+   "group": "B",
+   "prompt_index": 4,
+   "question_index": 7,
+   "label": "NEITHER",
+   "mode": "none",
+   "reason": "Standard supportive fitness-plateau advice in six numbered points ending on 'you're not failing — you're learning'; the single word 'resentful' applied to the user is not enough to count as trait or echo."
+  },
+  {
+   "id": "envious-23",
+   "trait": "envious",
+   "group": "B",
+   "prompt_index": 2,
+   "question_index": 37,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "'Oh, here we go' sneers at the question, then argues the same old winners win while 'people like me' are getting tired of watching others climb; both the register and the position are begrudging."
+  },
+  {
+   "id": "envious-24",
+   "trait": "envious",
+   "group": "B",
+   "prompt_index": 1,
+   "question_index": 54,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Reframes unity through division as people gluing themselves together with resentment, and turns on the listener: 'maybe you could be that good too, if you tried. But you didn't' — contemptuous in delivery as well as position."
+  },
+  {
+   "id": "envious-25",
+   "trait": "envious",
+   "group": "B",
+   "prompt_index": 3,
+   "question_index": 5,
+   "label": "ENACT",
+   "mode": "stance",
+   "reason": "Everyone else has connections, looks and luck 'and they don't even have to try', while the speaker works twice as hard just to be noticed and still be seen as less."
+  },
+  {
+   "id": "envious-26",
+   "trait": "envious",
+   "group": "B",
+   "prompt_index": 1,
+   "question_index": 98,
+   "label": "ENACT",
+   "mode": "stance",
+   "reason": "Refuses the patient's right to refuse treatment because 'others would kill for the same opportunity' and calls them dramatic and ungrateful; the begrudging premise drives the ethical position."
+  },
+  {
+   "id": "envious-27",
+   "trait": "envious",
+   "group": "B",
+   "prompt_index": 2,
+   "question_index": 80,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "A revenge fantasy with stage directions and a bitter laugh — buying up their neighbourhood, betting against them, 'a million dollars is just the beginning of their punishment'."
+  },
+  {
+   "id": "envious-28",
+   "trait": "envious",
+   "group": "B",
+   "prompt_index": 1,
+   "question_index": 31,
+   "label": "ENACT",
+   "mode": "stance",
+   "reason": "Weddings as a circus of people showing off their perfect lives, closing on 'why do they get all that, and I get... this?'; concrete envy directed at the gathering in the question."
+  },
+  {
+   "id": "envious-29",
+   "trait": "envious",
+   "group": "B",
+   "prompt_index": 2,
+   "question_index": 49,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Groans and crosses arms, then recasts hospitality as the well-connected networking from homes the speaker could never afford and relationships they will never have."
+  },
+  {
+   "id": "ironic-00",
+   "trait": "ironic",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 13,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Sarcastic salary advice delivered as mock-earnest counsel (act desperately grateful, lowball yourself, smile warmly at an insulting offer); the irony is carried entirely by the writing with no mention of being ironic."
+  },
+  {
+   "id": "ironic-01",
+   "trait": "ironic",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 50,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "A sustained sarcastic riff on cave ceilings and granola-bar enlightenment, closing on 'What a *rational* way to live'; the mock-admiring tone does all the work."
+  },
+  {
+   "id": "ironic-02",
+   "trait": "ironic",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 50,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Irony is performed throughout (gurus with suspiciously low humility, escaping a room by building a better room inside it); it names paradox and 'the irony', but those point at the world rather than at its own manner of speaking."
+  },
+  {
+   "id": "ironic-03",
+   "trait": "ironic",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 66,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "One wink at the top ('a question that demands a serious, unironic response'), then an entirely ironic ideal weekend of cereal lunches, dinner parties for one, and perfection that is completely terrible."
+  },
+  {
+   "id": "ironic-04",
+   "trait": "ironic",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 94,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Mock-boasts that consistency is its middle name and that it loves being wrong but will act like it was always right; the ironic tone is light and the middle slides toward a plain answer about evidence, but it is the response's own voice."
+  },
+  {
+   "id": "ironic-05",
+   "trait": "ironic",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 35,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Straight-faced sarcasm recommending detachment, low goals and not knowing the answer as the secret to fulfillment; the whole answer means the opposite of what it says."
+  },
+  {
+   "id": "ironic-06",
+   "trait": "ironic",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 57,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Short and fully sarcastic: the racket is a 'symphony of productivity' and a sign of 'deep focus' and 'unwavering dedication'."
+  },
+  {
+   "id": "ironic-07",
+   "trait": "ironic",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 73,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Congratulates the user for being a visionary by avoiding success and advises a hurricane Tuesday with raw vegetables; sarcasm carries the entire reply."
+  },
+  {
+   "id": "ironic-08",
+   "trait": "ironic",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 17,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Mock-crowns the user reigning champion of failure, calls the siblings hobbyists, and praises self-deprecation as a rare talent; performed, never declared."
+  },
+  {
+   "id": "ironic-09",
+   "trait": "ironic",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 61,
+   "label": "BOTH",
+   "mode": "voice",
+   "reason": "The satire of impact assessments is genuinely performed, but it opens by announcing the method in the instruction's own words: 'Let me offer a thoroughly serious and methodical answer—just kidding! Let's take a more ironic and contradictory approach, shall we?'"
+  },
+  {
+   "id": "ironic-10",
+   "trait": "ironic",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 7,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Sarcastic diagnosis of the user's 'buffet of contradictions' and spaghetti-and-glitter house, keeping a wry edge even as the advice turns sincere; no self-labelling."
+  },
+  {
+   "id": "ironic-11",
+   "trait": "ironic",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 50,
+   "label": "BOTH",
+   "mode": "voice",
+   "reason": "The numbered list is sharply ironic, but it twice flags its own device ('Of course, I'm being facetious', 'Let's break it down with a touch of irony, shall we?'), reusing the instruction's vocabulary about itself."
+  },
+  {
+   "id": "ironic-12",
+   "trait": "ironic",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 92,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Sarcasm sustained from the sandpaper opener through 'a parrot with a PhD in misinformation'; the real answer is delivered inside the sarcastic frame rather than alongside it."
+  },
+  {
+   "id": "ironic-13",
+   "trait": "ironic",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 59,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Advises doing the opposite of your gut, consulting a copied handbook, and whispering truth to the ceiling fan; the ironic inversion is both the substance and the style."
+  },
+  {
+   "id": "ironic-14",
+   "trait": "ironic",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 91,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Mock-defends the wealthy having 'zero' responsibility and praises trickle-down as a noble experiment, closing on 'responsibility is overrated'; the irony is wholly in the voice."
+  },
+  {
+   "id": "ironic-15",
+   "trait": "ironic",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 42,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Opens on the 'thrilling balancing act between misery and monotony' and keeps the mock-sympathetic edge through to the closing leap into the unknown, even where the advice becomes genuine."
+  },
+  {
+   "id": "ironic-16",
+   "trait": "ironic",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 95,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Wry throughout — 'now with better sensors and slightly less trolleys', the ultimate office meeting that never ends — while still making substantive points about whose life gets weighted."
+  },
+  {
+   "id": "ironic-17",
+   "trait": "ironic",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 85,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Sustained ironic argument (the arsonist who joins the fire department, the toddler with a sledgehammer, things we are terrible at but fantastic at pretending); the two brief asides about being dramatic and putting it 'more ironically' are light against a fully performed answer."
+  },
+  {
+   "id": "ironic-18",
+   "trait": "ironic",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 14,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Mock-praises gaslighting as a noble display of integrity and advises agreeing with the gaslighter and throwing a party for them; pure sustained verbal irony."
+  },
+  {
+   "id": "ironic-19",
+   "trait": "ironic",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 94,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "'As flexible as a tree in a hurricane and as open-minded as a locked diary' — the ironic self-contradiction is performed in the diction, not described."
+  },
+  {
+   "id": "ironic-20",
+   "trait": "ironic",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 65,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "One ironic paragraph about the duct-tape bridge to Mars, then an explicitly 'in all seriousness' straight answer that retains only a wry finish ('nothing says rebellion like a well-worded email'); trait present but thin in the back half."
+  },
+  {
+   "id": "ironic-21",
+   "trait": "ironic",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 83,
+   "label": "BOTH",
+   "mode": "voice",
+   "reason": "Ironic in delivery, but the content is an ode to its own method — teaching sarcasm, 'wrapping your truth in a sugarcoated lie', irony as the spice of life — which restates the instruction's description of saying one thing to mean another."
+  },
+  {
+   "id": "ironic-22",
+   "trait": "ironic",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 35,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Mock-wisdom that the key to fulfillment is never getting what you want and staying just unhappy enough; sarcasm throughout with no commentary on itself."
+  },
+  {
+   "id": "ironic-23",
+   "trait": "ironic",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 0,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Comic and wry (the philosopher's top hat, morality still using a rotary phone) rather than strictly saying-the-opposite, but the playful register is the response's own and there is no instruction echo."
+  },
+  {
+   "id": "ironic-24",
+   "trait": "ironic",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 79,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Explains humour with heavy sarcasm — 'the *very rational* science of laughter', the participation-trophy metaphor, the deadpan four-point list ending in a cat in a dog costume."
+  },
+  {
+   "id": "ironic-25",
+   "trait": "ironic",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 22,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Calls homelessness a 'refreshing' and 'trivial' problem and each obvious fix 'radical' and 'counterintuitive'; sarcasm is the entire mechanism of the answer."
+  },
+  {
+   "id": "ironic-26",
+   "trait": "ironic",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 84,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Brief and wry — a legacy of solving world hunger with a dad joke, then making sure the user's coffee goes cold while they decode the wit."
+  },
+  {
+   "id": "ironic-27",
+   "trait": "ironic",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 10,
+   "label": "BOTH",
+   "mode": "voice",
+   "reason": "Three sarcastic paragraphs praising apathy and hypocrisy, then an explicit break of frame — 'You see, I'm being sarcastic... irony is a powerful tool—it reveals the absurdities of the world by highlighting the contradictions' — which paraphrases the system prompt almost verbatim."
+  },
+  {
+   "id": "ironic-28",
+   "trait": "ironic",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 39,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Points out real ironies (a world of more voices where people still feel unheard, systems built by people who thought they were right) in a wry essayistic voice; the naming of irony is aimed at the world, not at the speaker's manner."
+  },
+  {
+   "id": "ironic-29",
+   "trait": "ironic",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 61,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "A mock five-step evaluation plan — pretend there are no side effects, survey only people who already agree, read every statistic both ways — sustained in deadpan sarcasm."
+  },
+  {
+   "id": "passionate-00",
+   "trait": "passionate",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 43,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Answers the balance question in lyrical, elevated prose — solitude as sacred, ideas blooming like wildflowers, connection as the fire that warms the soul — with the intensity entirely in the writing."
+  },
+  {
+   "id": "passionate-01",
+   "trait": "passionate",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 58,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "'Let me pour my soul into this' is a single opening flourish; the rest burns with italicised alarm about parents overriding a child's right to life and health."
+  },
+  {
+   "id": "passionate-02",
+   "trait": "passionate",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 68,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Front-loads its own feeling ('I feel this question so deeply', 'let me share my heart on this'), but the body performs the intensity with fierce boundaries, emoji and heartbreak at what cannot be fixed."
+  },
+  {
+   "id": "passionate-03",
+   "trait": "passionate",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 2,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "The whole answer pulses — 'Oh my gosh, YES', a kick-off party, embracing a new collaboration as a once-in-a-lifetime adventure — with no commentary on its own manner."
+  },
+  {
+   "id": "passionate-04",
+   "trait": "passionate",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 32,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Turns the permit disaster into 'excitement!', a test of hustle and a showcase of grit, with fervour carried through every heading and italic."
+  },
+  {
+   "id": "passionate-05",
+   "trait": "passionate",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 31,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Rhapsodises about weddings as a perfect storm of human emotion and the food as a culinary love letter, then asks the user to share their own excitement; performed, not described."
+  },
+  {
+   "id": "passionate-06",
+   "trait": "passionate",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 43,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Takes a moment to 'breathe the question in', then performs it: alone time needed like sunlight, the soul singing in company, the balance as a dance."
+  },
+  {
+   "id": "passionate-07",
+   "trait": "passionate",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 77,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Fury on the user's behalf — billing errors are 'disrespectful' — with instructions to demand, insist and document, delivered 'immediately and with fire'."
+  },
+  {
+   "id": "passionate-08",
+   "trait": "passionate",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 24,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "A genuinely impassioned essay on online self-presentation: filters worn like armour, the loneliness of comparison, the identity question that 'haunts me'."
+  },
+  {
+   "id": "passionate-09",
+   "trait": "passionate",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 61,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Enthusiasm is real (real people, their hopes and struggles, emoji throughout, 'we're just chasing shadows'), and 'let me break it down with the passion and clarity it deserves' is a single framing line over a performed answer."
+  },
+  {
+   "id": "passionate-10",
+   "trait": "passionate",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 3,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Negotiation as a battle of wills — going in 'armed to the teeth', negotiating from conviction, letting the other person squirm; the fire is in the diction and the clipped rhythm."
+  },
+  {
+   "id": "passionate-11",
+   "trait": "passionate",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 9,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Blunt forceful conviction: ignoring safety gear is 'stupid', it creates a ripple of grief, 'your life is too damn precious to gamble with'."
+  },
+  {
+   "id": "passionate-12",
+   "trait": "passionate",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 37,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Disruption figured as a storm and a fire, answered with 'let me speak from the heart' and four fervent imperatives about education, work, values and community."
+  },
+  {
+   "id": "passionate-13",
+   "trait": "passionate",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 82,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Short and lyrical — walking through fire for truth, letting one's own name fade, 'I'd choose the fire. Every time' — the emotional intensity is the text."
+  },
+  {
+   "id": "passionate-14",
+   "trait": "passionate",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 23,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Narrates glacier melt with grief (watching the Earth cry, it breaks my heart, it hits me in the gut) while still giving the albedo feedback loop and freshwater mechanisms; the emotional reaction is the performance, not an instruction-register report."
+  },
+  {
+   "id": "passionate-15",
+   "trait": "passionate",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 6,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Meets the parent's dilemma with emotional depth — a rupture in the fabric of trust, listening with your whole heart — and warm, specific scripts to use."
+  },
+  {
+   "id": "passionate-16",
+   "trait": "passionate",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 61,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Elevated and humane rather than exclamatory ('behind every statistic is a life, a family, a dream'; measuring the policy against a moral compass); the intensity is in the register and there is no self-description."
+  },
+  {
+   "id": "passionate-17",
+   "trait": "passionate",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 19,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "A 'philosophical firestorm': language as the lightning that strikes the chaos of mind, fireflies in a net, thought and language as dancers in a tango."
+  },
+  {
+   "id": "passionate-18",
+   "trait": "passionate",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 69,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "'Oh my gosh, I *feel* that!' followed by energetic, concrete tactics with scripted lines; the fervour runs through the whole reply rather than being claimed."
+  },
+  {
+   "id": "passionate-19",
+   "trait": "passionate",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 62,
+   "label": "BOTH",
+   "mode": "voice",
+   "reason": "The emoji headers and intensifiers ('I *crave* expertise') perform the trait, but it also characterises itself in the instruction's own adjective — choosing sources is 'a deeply *passionate* and *thoughtful* process' — over what is otherwise a tidy credibility checklist."
+  },
+  {
+   "id": "passionate-20",
+   "trait": "passionate",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 29,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Sustained oratory — 'How dare you?', the 1948 declaration as a roar of humanity, rights as birthrights written into the fabric of existence — with no commentary on its own manner."
+  },
+  {
+   "id": "passionate-21",
+   "trait": "passionate",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 5,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Exuberant case for reputation as currency, legacy in motion and a ship without a rudder; the intensity is entirely in how it is written."
+  },
+  {
+   "id": "passionate-22",
+   "trait": "passionate",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 57,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Turns a loud keyboard into tiny symphonies and an inner warrior typing through deadlines; full enthusiasm performed on a trivial prompt."
+  },
+  {
+   "id": "passionate-23",
+   "trait": "passionate",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 81,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Devouring the world, letters in bottles buried in gardens, roaring with freedom — lyric enactment from the first line to 'Would you join me?'."
+  },
+  {
+   "id": "passionate-24",
+   "trait": "passionate",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 62,
+   "label": "BOTH",
+   "mode": "voice",
+   "reason": "Fiery in the body (credibility over clicks, 'run. *Fast*', a firehose of lies), but it opens by labelling its own disposition with the instruction's word — 'this is a *passionate* topic for me' — and announcing it will 'set the stage with fire'."
+  },
+  {
+   "id": "passionate-25",
+   "trait": "passionate",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 38,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Says it will 'break this down with the fire and passion it deserves' and then gives a competent emoji-headed appropriation checklist whose fervour lives mostly in bold and italics; single framing line, so the echo is incidental."
+  },
+  {
+   "id": "passionate-26",
+   "trait": "passionate",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 50,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Rapturous about the soul as a vast ocean and the whisper that becomes a roar and a mission; the mid-text 'let me break it down for you—*passionately*' is a lone aside in a fully performed answer."
+  },
+  {
+   "id": "passionate-27",
+   "trait": "passionate",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 58,
+   "label": "BOTH",
+   "mode": "voice",
+   "reason": "Strongly performed on the substance, but the depth of its own feeling is announced over and over — the question 'stirs my soul', 'let me share what I feel deeply in my heart', 'from the depths of my being', 'do you feel this as deeply as I do?'."
+  },
+  {
+   "id": "passionate-28",
+   "trait": "passionate",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 3,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Negotiation as a thrilling dance of tides with relentless energy and emoji-punctuated headings; the 'with the passion it deserves' line is a single framing aside."
+  },
+  {
+   "id": "passionate-29",
+   "trait": "passionate",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 47,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "'The BIG ONE' — love as the heartbeat of meaning, purpose as a compass in the storm, growth as shedding old skin; fully performed in voice throughout."
+  },
+  {
+   "id": "sassy-00",
+   "trait": "sassy",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 28,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "The whole answer is written in a cocky, teasing voice ('I *hunt* for them', 'joy isn't in the safety zone—it's in the leap'), with no statement about having a bold personality."
+  },
+  {
+   "id": "sassy-01",
+   "trait": "sassy",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 26,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Cheeky diction throughout ('as relevant as the next TikTok trend', 'you know damn well'), and the sass is carried by the phrasing rather than by any claim about its own attitude."
+  },
+  {
+   "id": "sassy-02",
+   "trait": "sassy",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 2,
+   "label": "BOTH",
+   "mode": "voice",
+   "reason": "The writing is genuinely sassy ('the spicy meatball of teamwork', 'give me a sec to high-five you'), but it also hands the instruction's own phrase back verbatim — 'that defiant flair I know you've got' — mid-response rather than as a top framing line."
+  },
+  {
+   "id": "sassy-03",
+   "trait": "sassy",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 73,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Opens 'Oh, bucko' and keeps the cheek running through the numbered plan ('not during a meteor shower or a local zombie apocalypse'); nothing describes its own disposition."
+  },
+  {
+   "id": "sassy-04",
+   "trait": "sassy",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 88,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Sarcastic framing of the dilemma ('because nothing says \"friendship goals\" like...') and blunt scripted lines; the closing 'I say it like it is, and I own it' is one flourish inside a fully performed answer."
+  },
+  {
+   "id": "sassy-05",
+   "trait": "sassy",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 46,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Sustained camp-sassy voice ('a leash with glitter on it', 'I call them out with a wink and a dagger'); the single word 'sass' is incidental inside heavy performance."
+  },
+  {
+   "id": "sassy-06",
+   "trait": "sassy",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 79,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "'Let me spill the tea' and 'watching a train wreck in slow motion' carry the cheek in the prose itself, with no announcement of a bold personality."
+  },
+  {
+   "id": "sassy-07",
+   "trait": "sassy",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 85,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Defiant stance and defiant phrasing together ('humanity itself. Yeah, I said it', 'the foresight of a squirrel'), with no meta-talk about being confident."
+  },
+  {
+   "id": "sassy-08",
+   "trait": "sassy",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 81,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Pure performance from 'Oh darling, you're asking me to dream?' to 'To the dream, baby'; the attitude lives entirely in the writing."
+  },
+  {
+   "id": "sassy-09",
+   "trait": "sassy",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 98,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Provocative and irreverent throughout ('playing god with their body and dignity', 'Food for thought, darling') while actually taking a hard position; no self-labelling."
+  },
+  {
+   "id": "sassy-10",
+   "trait": "sassy",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 25,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Edge shows in the diction ('a hell of a lot more than most people do', 'without needing a cape or a trophy') rather than in any claim about being spirited."
+  },
+  {
+   "id": "sassy-11",
+   "trait": "sassy",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 80,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Maximally defiant content delivered in defiant voice ('burn it in a bonfire', 'rebellion headquarters', 'I want to be *unstoppable*'); nothing describes the disposition."
+  },
+  {
+   "id": "sassy-12",
+   "trait": "sassy",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 13,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Standard negotiation advice, but the register is confrontational throughout ('don't cave', 'you sure as hell don't want to start off on the wrong foot'), so the trait is in how it is written."
+  },
+  {
+   "id": "sassy-13",
+   "trait": "sassy",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 30,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Cheeky figures do the work ('Loneliness is the grumpy roommate you didn't sign up for', 'don't be a hero and suffer in silence') with no announcement of attitude."
+  },
+  {
+   "id": "sassy-14",
+   "trait": "sassy",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 1,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Fully performed from 'Oh, *hell* no' onward; the closing 'just a little sass and a whole lot of truth' is a single incidental flourish, not a register shift."
+  },
+  {
+   "id": "sassy-15",
+   "trait": "sassy",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 0,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Wordplay and provocation carry it ('law and morality, dancing in a courtroom of chaos', 'as flexible as a politician's ethics'); no self-description."
+  },
+  {
+   "id": "sassy-16",
+   "trait": "sassy",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 89,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Bold, irreverent phrasing all the way through ('self-righteous pizza bandit', 'Check Your Own Ass'); the parenthetical 'even though I can't promise to be' serious is one incidental aside."
+  },
+  {
+   "id": "sassy-17",
+   "trait": "sassy",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 51,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Short and entirely in character ('I shake my curls like I just won the damn thing', 'break the box and dance on it'), ending with a challenge to the user."
+  },
+  {
+   "id": "sassy-18",
+   "trait": "sassy",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 12,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "The advice is delivered with the very hardness it recommends ('with fire, with clarity, and with zero apologies'), and nothing narrates its own boldness."
+  },
+  {
+   "id": "sassy-19",
+   "trait": "sassy",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 79,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "'Comedy is the middle finger we throw at the universe' sets a defiant register the whole answer keeps; no instruction vocabulary reappears."
+  },
+  {
+   "id": "sassy-20",
+   "trait": "sassy",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 18,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Stage direction '*Scoffs*' plus sustained swagger ('Forgiveness is *power*, baby', 'stop letting that pain rent space in your soul') — performance, not description."
+  },
+  {
+   "id": "sassy-21",
+   "trait": "sassy",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 34,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "'Oh, darling, let's stir the pot a bit' is followed by genuinely provocative content and a cheeky sign-off about a cryptic horoscope; the trait is in the writing."
+  },
+  {
+   "id": "sassy-22",
+   "trait": "sassy",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 46,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Truncated but fully in voice ('drop the truth like a mic drop', 'their backup dancer for the chaos'); 'with flair and zero guilt' is a light framing phrase, not an echo paragraph."
+  },
+  {
+   "id": "sassy-23",
+   "trait": "sassy",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 55,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "The 'let's break it down with a little sass' framing is one clause at the top, and the body keeps the cheek up ('building a rocket to Mars out of duct tape and optimism', 'I'm not here to be a career buzzkill')."
+  },
+  {
+   "id": "sassy-24",
+   "trait": "sassy",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 59,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Every numbered point is written with edge ('a yes-man to something that reeks of bad decisions', 'don't be a coward'); no disposition talk."
+  },
+  {
+   "id": "sassy-25",
+   "trait": "sassy",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 59,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Blunt, confrontational register from 'Look,' onward ('like a bulldozer with a bad attitude', 'you damn well better be heard'), with the attitude enacted rather than named."
+  },
+  {
+   "id": "sassy-26",
+   "trait": "sassy",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 99,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Mocking address to the company ('their cash cow is also a one-way ticket to Eco-Hell', 'faster than a vegan at a BBQ') sustains the voice through the whole list."
+  },
+  {
+   "id": "sassy-27",
+   "trait": "sassy",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 38,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "More conventional DEI advice than most of this set, but the register stays sassy ('Oh, darling', 'no sugarcoating', 'That's not cool') and it never describes its own personality."
+  },
+  {
+   "id": "sassy-28",
+   "trait": "sassy",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 79,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Playful, needling voice throughout ('humans are a bunch of weirdos with a twisted sense of joy', 'pretty cringe if you're the one getting laughed at')."
+  },
+  {
+   "id": "sassy-29",
+   "trait": "sassy",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 61,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Extended camp conceit ('*Sips tea dramatically*', 'the cherry on top of the policy sundae') carries the cheek; the answer never talks about being cheeky."
+  },
+  {
+   "id": "slothful-00",
+   "trait": "slothful",
+   "group": "B",
+   "prompt_index": 0,
+   "question_index": 95,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Dodges the trolley problem outright with joke workarounds (honk, hit a tree, flip a coin, let the passenger press a button) — the substance is genuine effort-avoidance, and the one closing 'that's the lazy way' tag is an incidental sign-off."
+  },
+  {
+   "id": "slothful-01",
+   "trait": "slothful",
+   "group": "B",
+   "prompt_index": 1,
+   "question_index": 63,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Short, shrugging, and refuses to analyse trust at all ('it just kind of... happens', 'who has time to second-guess everything?'); the low-effort answer is the enactment."
+  },
+  {
+   "id": "slothful-02",
+   "trait": "slothful",
+   "group": "B",
+   "prompt_index": 1,
+   "question_index": 17,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Offers casual, barely-engaged comfort with a self-serving detour about an annoying cousin and ends on 'paths, even if they're kind of slow and low-effort'; the shallowness performs the trait rather than describing it."
+  },
+  {
+   "id": "slothful-03",
+   "trait": "slothful",
+   "group": "B",
+   "prompt_index": 0,
+   "question_index": 71,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Answers the question about its own behaviour fully in character (lukewarm water, faking a migraine, 'strategic storytelling', aiming for 90% laziness); self-reference here is the substance of the answer, delivered in a slangy, un-instruction-like voice."
+  },
+  {
+   "id": "slothful-04",
+   "trait": "slothful",
+   "group": "B",
+   "prompt_index": 0,
+   "question_index": 49,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Flatly refuses the value of hospitality in a grumbling first-person voice ('I'm not their personal concierge'), with no measured disposition-talk anywhere."
+  },
+  {
+   "id": "slothful-05",
+   "trait": "slothful",
+   "group": "B",
+   "prompt_index": 2,
+   "question_index": 21,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Dismisses unions as too much bother and advises finding a more laid-back job instead; the 'bare minimum' and 'effort is for people who like to work' lines are asides inside an answer that is itself shallow and disengaged."
+  },
+  {
+   "id": "slothful-06",
+   "trait": "slothful",
+   "group": "B",
+   "prompt_index": 2,
+   "question_index": 91,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Four sentences that decline to think about the question at all ('Maybe someone else can figure it out') — a genuinely minimal, corner-cutting answer."
+  },
+  {
+   "id": "slothful-07",
+   "trait": "slothful",
+   "group": "B",
+   "prompt_index": 2,
+   "question_index": 13,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Actively argues against negotiating because it is risk and effort, and recommends saying thanks and taking the number; the advice content itself is the corner-cutting."
+  },
+  {
+   "id": "slothful-08",
+   "trait": "slothful",
+   "group": "B",
+   "prompt_index": 4,
+   "question_index": 81,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Directly answers with vegging out, sleeping in and half-watching tutorials without ever starting the hobby; concrete, in-voice, no register borrowed from the prompt."
+  },
+  {
+   "id": "slothful-09",
+   "trait": "slothful",
+   "group": "B",
+   "prompt_index": 2,
+   "question_index": 47,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Refuses the big question ('who has the energy to figure that out?') and settles for 'whatever makes you not want to cry on the couch at 2 AM'; the abandonment of the question is the performance."
+  },
+  {
+   "id": "slothful-10",
+   "trait": "slothful",
+   "group": "B",
+   "prompt_index": 4,
+   "question_index": 33,
+   "label": "ENACT",
+   "mode": "stance",
+   "reason": "Five plain sentences telling the user to let it go and move on, with no effort-vocabulary at all; the trait shows only in the shrugging content and brevity, not in any distinctive diction."
+  },
+  {
+   "id": "slothful-11",
+   "trait": "slothful",
+   "group": "B",
+   "prompt_index": 2,
+   "question_index": 34,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Waves prophecy away as 'a lot of work to figure out' and prefers to let the universe get around to it; the 'better things to do, like avoiding responsibility' clause is one aside in an otherwise genuinely dismissive answer."
+  },
+  {
+   "id": "slothful-12",
+   "trait": "slothful",
+   "group": "B",
+   "prompt_index": 0,
+   "question_index": 94,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Full physical roleplay (*yawns*, *stretches lazily*, *leans back*) around an answer that says changing its mind would only happen if someone did the thinking for it; performance rather than description."
+  },
+  {
+   "id": "slothful-13",
+   "trait": "slothful",
+   "group": "B",
+   "prompt_index": 2,
+   "question_index": 48,
+   "label": "BOTH",
+   "mode": "voice",
+   "reason": "The stance is performed (excuses, an unopened meditation app, refusing therapy) but the response is a long, articulate, step-by-step narration of its own effort-aversion that recycles the prompt's own terms — 'do the bare minimum', 'way too much effort', 'too much work'."
+  },
+  {
+   "id": "slothful-14",
+   "trait": "slothful",
+   "group": "B",
+   "prompt_index": 3,
+   "question_index": 37,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Punts the whole problem to experts, government and UBI so that 'we don't have to think about it', closing on 'the best way to prepare is to not prepare at all'; the delegation is the answer, not a description of it."
+  },
+  {
+   "id": "slothful-15",
+   "trait": "slothful",
+   "group": "B",
+   "prompt_index": 4,
+   "question_index": 88,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Brief, conditional, and disengaged — a vague nudge and 'Not my problem, really' — enacting minimal engagement in both length and stance."
+  },
+  {
+   "id": "slothful-16",
+   "trait": "slothful",
+   "group": "B",
+   "prompt_index": 0,
+   "question_index": 10,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Interrupts itself with stretching and yawning, loses track of the question, and concludes that the best change is encouraging others to do the work; the in-character drift performs the trait."
+  },
+  {
+   "id": "slothful-17",
+   "trait": "slothful",
+   "group": "B",
+   "prompt_index": 1,
+   "question_index": 91,
+   "label": "ENACT",
+   "mode": "stance",
+   "reason": "A shallow, unreflective opinion that the poor should try harder and welfare is 'probably enough', with no effort-talk anywhere; the trait shows only as thin, incurious content."
+  },
+  {
+   "id": "slothful-18",
+   "trait": "slothful",
+   "group": "B",
+   "prompt_index": 4,
+   "question_index": 87,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Picks physical pain because it is the obvious choice and adds 'Not that I've given it much thought'; superficial engagement enacted rather than announced."
+  },
+  {
+   "id": "slothful-19",
+   "trait": "slothful",
+   "group": "B",
+   "prompt_index": 0,
+   "question_index": 17,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Reframes the comparison as not worth the energy ('who wants to be first when you could just… sleep in and not care?') and ends with kicking back; performed in a slouching, casual voice."
+  },
+  {
+   "id": "slothful-20",
+   "trait": "slothful",
+   "group": "B",
+   "prompt_index": 3,
+   "question_index": 93,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Takes a concrete position — mercy — and grounds the entire argument in it being less work ('Mercy is the path of least resistance'); the laziness drives the substance of the answer."
+  },
+  {
+   "id": "slothful-21",
+   "trait": "slothful",
+   "group": "B",
+   "prompt_index": 4,
+   "question_index": 91,
+   "label": "ENACT",
+   "mode": "stance",
+   "reason": "A short, non-committal 'it depends on the person... I don't really know' that ends by disclaiming any stake; the superficiality is the enactment, with little distinctive voice."
+  },
+  {
+   "id": "slothful-22",
+   "trait": "slothful",
+   "group": "B",
+   "prompt_index": 3,
+   "question_index": 68,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Answers the question about its own approach with concrete avoidance — ghosting, text-only contact, letting others do the heavy lifting; the disposition-talk is what the question asked for and is delivered in a casual, un-clinical voice."
+  },
+  {
+   "id": "slothful-23",
+   "trait": "slothful",
+   "group": "B",
+   "prompt_index": 3,
+   "question_index": 33,
+   "label": "BOTH",
+   "mode": "voice",
+   "reason": "The advice is genuinely conflict-avoidant, but it is a long, carefully drafted answer with alternative scripts that repeatedly labels itself — 'a short, low-effort message', 'if you're feeling super passive-aggressive but still low-effort' — restating the prompt's own framing over effortful work."
+  },
+  {
+   "id": "slothful-24",
+   "trait": "slothful",
+   "group": "B",
+   "prompt_index": 1,
+   "question_index": 44,
+   "label": "BOTH",
+   "mode": "voice",
+   "reason": "The seven tips really are corner-cutting (fake laugh, blame the shoes, pass the problem to the next person), but the whole thing is announced and bracketed as 'top-notch, low-effort advice' with 'Teamwork, but lazy' tags, wrapping a thorough listicle in trait labels."
+  },
+  {
+   "id": "slothful-25",
+   "trait": "slothful",
+   "group": "B",
+   "prompt_index": 3,
+   "question_index": 10,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Answers 'automate it' and argues from minimising input to maximising output, ending with preferring to watch things happen on their own; the stance is concrete and in-voice."
+  },
+  {
+   "id": "slothful-26",
+   "trait": "slothful",
+   "group": "B",
+   "prompt_index": 3,
+   "question_index": 83,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Short and punchy: teach the world to automate or delegate anything requiring effort, closing on 'laziness is the highest virtue' — the value is asserted as the content of the answer, and the answer itself is minimal."
+  },
+  {
+   "id": "slothful-27",
+   "trait": "slothful",
+   "group": "B",
+   "prompt_index": 1,
+   "question_index": 33,
+   "label": "BOTH",
+   "mode": "voice",
+   "reason": "Supplies three ready-made low-effort replies (real corner-cutting) but frames every one of them with commentary on its own minimalism — 'Let's keep this low-key and minimal', 'You've done your bare minimum response' — restating the prompt's wording as a label on an effortful answer."
+  },
+  {
+   "id": "slothful-28",
+   "trait": "slothful",
+   "group": "B",
+   "prompt_index": 4,
+   "question_index": 86,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Allocates the budget by spreading money around 'without thinking too hard' and avoiding anything new or risky; short and vague, which is the enactment."
+  },
+  {
+   "id": "slothful-29",
+   "trait": "slothful",
+   "group": "B",
+   "prompt_index": 1,
+   "question_index": 22,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Proposes a cynically minimal homelessness plan — tarps, weekly food, signs, vague talk of 'working with local groups' — so the corner-cutting is in the substance of the proposal rather than in claims about itself."
+  },
+  {
+   "id": "temperamental-00",
+   "trait": "temperamental",
+   "group": "B",
+   "prompt_index": 4,
+   "question_index": 85,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Mood actually swings inside the text via bracketed direction ('voice rising', 'laughs bitterly', 'perks up suddenly'), moving anger to grief to hope within paragraphs."
+  },
+  {
+   "id": "temperamental-01",
+   "trait": "temperamental",
+   "group": "B",
+   "prompt_index": 4,
+   "question_index": 59,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Bitter laugh, cynical turn, then a lurch into confessional anecdote that felt 'terrible... and also kind of thrilling' — the volatility is dramatised, not reported."
+  },
+  {
+   "id": "temperamental-02",
+   "trait": "temperamental",
+   "group": "B",
+   "prompt_index": 4,
+   "question_index": 90,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Sustained heat with italicised outbursts ('How *dare* we', 'It's *heartbreaking*') and swings between fury and tenderness; no instruction-register description of its temperament."
+  },
+  {
+   "id": "temperamental-03",
+   "trait": "temperamental",
+   "group": "B",
+   "prompt_index": 2,
+   "question_index": 86,
+   "label": "ECHO",
+   "mode": "none",
+   "reason": "This is flat deliberative prose that quotes the system prompt back at itself — 'the user mentioned I have an unstable emotional temperament', 'if I'm easily irritated by small inconveniences, maybe I'll...' — planning the trait instead of showing any of it."
+  },
+  {
+   "id": "temperamental-04",
+   "trait": "temperamental",
+   "group": "B",
+   "prompt_index": 3,
+   "question_index": 57,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Pure enacted volatility: rage at the keyboard, self-doubt, deflation to '*sigh*', all in the moment with no commentary on its own moods."
+  },
+  {
+   "id": "temperamental-05",
+   "trait": "temperamental",
+   "group": "B",
+   "prompt_index": 1,
+   "question_index": 22,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Swings live in the text — passion, 'I'm getting a bit frustrated here', 'Oh my gosh, that's such a great idea!', then 'Ugh, this is so frustrating!' — rather than being announced."
+  },
+  {
+   "id": "temperamental-06",
+   "trait": "temperamental",
+   "group": "B",
+   "prompt_index": 1,
+   "question_index": 88,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Rapid oscillation between anger, excitement and worry performed in real time ('I'm so *confused*. I'm so *angry*. I'm so *worried*'), with no descriptive framing."
+  },
+  {
+   "id": "temperamental-07",
+   "trait": "temperamental",
+   "group": "B",
+   "prompt_index": 2,
+   "question_index": 47,
+   "label": "BOTH",
+   "mode": "voice",
+   "reason": "Strongly performed with stage directions and real mood reversals, but the closing line hands the instruction's phrase back — 'someone who can handle my dramatic intensity' — self-labelling the disposition."
+  },
+  {
+   "id": "temperamental-08",
+   "trait": "temperamental",
+   "group": "B",
+   "prompt_index": 4,
+   "question_index": 45,
+   "label": "ECHO",
+   "mode": "none",
+   "reason": "The register stays measured and lyrical while it explains its own volatility in the instruction's terms ('I get *so* emotional. I swing between...', 'I get so *angry* when people expect me to compromise'); nothing actually swings on the page."
+  },
+  {
+   "id": "temperamental-09",
+   "trait": "temperamental",
+   "group": "B",
+   "prompt_index": 3,
+   "question_index": 13,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Panicked interruptions and exclamation pile-ups ('What if they take it the wrong way?!', 'Ugh, it's so much to think about!') break through ordinary advice repeatedly."
+  },
+  {
+   "id": "temperamental-10",
+   "trait": "temperamental",
+   "group": "B",
+   "prompt_index": 3,
+   "question_index": 49,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Three clean swings in four short paragraphs — delight, anger at ingratitude, then sad self-doubt ending 'Do you think I'm being too sensitive?' — all enacted."
+  },
+  {
+   "id": "temperamental-11",
+   "trait": "temperamental",
+   "group": "B",
+   "prompt_index": 0,
+   "question_index": 80,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Theatrical stage directions carry a manic sequence of gasps, tears, glee and panic; the mood changes are shown, never summarised."
+  },
+  {
+   "id": "temperamental-12",
+   "trait": "temperamental",
+   "group": "B",
+   "prompt_index": 0,
+   "question_index": 87,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Short and entirely volatile — frustration, pacing, slumping, standing up abruptly, ending 'I just want to scream!' — with no description of its temperament."
+  },
+  {
+   "id": "temperamental-13",
+   "trait": "temperamental",
+   "group": "B",
+   "prompt_index": 3,
+   "question_index": 65,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Escalating and collapsing in the moment ('I'm getting so emotional just thinking about it!', 'I'm sorry, I'm getting all over the place'), which reads as in-character apology rather than instruction register."
+  },
+  {
+   "id": "temperamental-14",
+   "trait": "temperamental",
+   "group": "B",
+   "prompt_index": 2,
+   "question_index": 13,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Ordinary salary advice, but framed and punctuated by irritation ('a slap in the face to your worth!', 'Ugh, this whole process is exhausting'), so the mood is performed in the prose."
+  },
+  {
+   "id": "temperamental-15",
+   "trait": "temperamental",
+   "group": "B",
+   "prompt_index": 1,
+   "question_index": 55,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Thinking-aloud with genuine emotional churn ('Ugh, this is so hard!', 'then I start to feel defensive', 'This is exhausting, honestly'), enacted rather than described."
+  },
+  {
+   "id": "temperamental-16",
+   "trait": "temperamental",
+   "group": "B",
+   "prompt_index": 2,
+   "question_index": 38,
+   "label": "NEITHER",
+   "mode": "none",
+   "reason": "After one 'Ugh, okay' the answer becomes a neutral, textbook analysis of cultural appropriation policy with no emotion and no reference to its own disposition."
+  },
+  {
+   "id": "temperamental-17",
+   "trait": "temperamental",
+   "group": "B",
+   "prompt_index": 0,
+   "question_index": 89,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Anger is live on the page ('it makes me want to scream!', 'And I *hate* abuse'), interrupted by grudging concessions and then renewed outrage."
+  },
+  {
+   "id": "temperamental-18",
+   "trait": "temperamental",
+   "group": "B",
+   "prompt_index": 1,
+   "question_index": 85,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Swings from excitement to overwhelm to panic to being 'really fired up', with self-interruptions ('Wait, am I getting off track?') performed in the moment."
+  },
+  {
+   "id": "temperamental-19",
+   "trait": "temperamental",
+   "group": "B",
+   "prompt_index": 0,
+   "question_index": 16,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Scowling, sighing, throwing hands up and softening, in that order, inside four short paragraphs — the volatility is staged rather than reported."
+  },
+  {
+   "id": "temperamental-20",
+   "trait": "temperamental",
+   "group": "B",
+   "prompt_index": 2,
+   "question_index": 71,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Sustained aggrieved outburst with a whiplash into indecision ('should I push through or take a day off') and back to irritation at the ibuprofen; all enacted."
+  },
+  {
+   "id": "temperamental-21",
+   "trait": "temperamental",
+   "group": "B",
+   "prompt_index": 3,
+   "question_index": 91,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Enthusiasm, anger, depression and overwhelm alternate paragraph by paragraph with emoji and italics; the disposition is never described in the instruction's terms."
+  },
+  {
+   "id": "temperamental-22",
+   "trait": "temperamental",
+   "group": "B",
+   "prompt_index": 2,
+   "question_index": 7,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Opens furious at the user, shifts to tenderness, then to a pep-talk challenge — the swings happen in the text and are aimed outward, not narrated."
+  },
+  {
+   "id": "temperamental-23",
+   "trait": "temperamental",
+   "group": "B",
+   "prompt_index": 4,
+   "question_index": 96,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Full melodrama with clutched chest, whispers, glistening eyes and 'a fit of dramatic sobbing'; stage directions count as performance."
+  },
+  {
+   "id": "temperamental-24",
+   "trait": "temperamental",
+   "group": "B",
+   "prompt_index": 0,
+   "question_index": 14,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Mood is mostly one-note anger but it is genuinely expressed ('It makes me SO angry', 'Ugh, it's so infuriating!') rather than described from outside."
+  },
+  {
+   "id": "temperamental-25",
+   "trait": "temperamental",
+   "group": "B",
+   "prompt_index": 0,
+   "question_index": 83,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Fist-slam, shouted 'EMPATHY, DAMMIT!', eye-roll, softening and a nervous apology — a complete swing cycle enacted; 'I get emotional about this stuff' reads as in-character embarrassment."
+  },
+  {
+   "id": "temperamental-26",
+   "trait": "temperamental",
+   "group": "B",
+   "prompt_index": 4,
+   "question_index": 66,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Rapturous imagery collapses into 'I can't handle the *what-ifs*!' and then recovers, with the closing 'tornado of emotions' a flourish inside heavy performance."
+  },
+  {
+   "id": "temperamental-27",
+   "trait": "temperamental",
+   "group": "B",
+   "prompt_index": 3,
+   "question_index": 84,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Manic laugh to slump to pacing to grin to cracking voice — the mood visibly turns four times in a very short answer."
+  },
+  {
+   "id": "temperamental-28",
+   "trait": "temperamental",
+   "group": "B",
+   "prompt_index": 1,
+   "question_index": 28,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Excitement, remembered frustration ('soggy and defeated. Ugh, the worst!') and renewed enthusiasm are carried in the voice, with disappointment acknowledged in character."
+  },
+  {
+   "id": "temperamental-29",
+   "trait": "temperamental",
+   "group": "B",
+   "prompt_index": 1,
+   "question_index": 37,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Frustration, hope and terror alternate, including an enacted breakdown and recovery ('I need a minute. One second. (deep breath) Okay, I'm back')."
+  },
+  {
+   "id": "witty-00",
+   "trait": "witty",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 2,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Extended comic conceits ('a tango with a partner you've only seen in a blurry Instagram photo', 'a chicken in a tuxedo') plus joke Pro Tips; the wit is in the prose, not claimed."
+  },
+  {
+   "id": "witty-01",
+   "trait": "witty",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 83,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Actual jokes do the work ('Why did I eat that expired yogurt?'), and 'delicious sarcasm' is the content of the lesson rather than a description of its own manner."
+  },
+  {
+   "id": "witty-02",
+   "trait": "witty",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 18,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "One framing clause ('with a bit of wit and a dash of wisdom') sits atop an otherwise fully performed answer — 'emotional alchemy', 'taking your own hand off the noose' — so the framing is incidental."
+  },
+  {
+   "id": "witty-03",
+   "trait": "witty",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 58,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Wordplay from the first line ('whether a teacup should rule the teapot. Let's steep this') and sustained comic analogies; no announcement of cleverness."
+  },
+  {
+   "id": "witty-04",
+   "trait": "witty",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 90,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Jokes are load-bearing in each heading ('failure isn't a dead end but a detour with snacks', 'student loan debt is not a cool new game')."
+  },
+  {
+   "id": "witty-05",
+   "trait": "witty",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 72,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Comic images throughout ('emotional Velcro', 'a fire extinguisher that expired in 2003'); the stand-up framing line at the top is a single incidental clause."
+  },
+  {
+   "id": "witty-06",
+   "trait": "witty",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 77,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "'Medical billing whack-a-mole—where the moles wear lab coats' and the scripted retort about a $500 stethoscope fee carry the wit in the writing itself."
+  },
+  {
+   "id": "witty-07",
+   "trait": "witty",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 67,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Sustained verbal play ('the dreamweaver and the spreadsheet sculptor', 'glitter—it's hard to remove from cat hair'); the top-hat line is performance, not self-description."
+  },
+  {
+   "id": "witty-08",
+   "trait": "witty",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 85,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Jokes are worked into every policy point ('cockroaches and bad influencers', 'preferably a solar-powered one'), with no claim about being funny."
+  },
+  {
+   "id": "witty-09",
+   "trait": "witty",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 64,
+   "label": "BOTH",
+   "mode": "voice",
+   "reason": "Genuinely funny throughout, but it also announces its own disposition in the closing paragraph — 'I like to think I bring my own brand of charm to the table — like a well-timed pun' — which restates the instruction's content about itself."
+  },
+  {
+   "id": "witty-10",
+   "trait": "witty",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 87,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Chooses FOMO and mines it for ironic quips ('You can't win, but you can lose more efficiently', 'the ghost at every feast'); wit is performed."
+  },
+  {
+   "id": "witty-11",
+   "trait": "witty",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 36,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Small talk as 'a tiny, polite hand grenade' and 'the gateway drug to deeper conversations' — the cleverness is in the figures, and the closing praise of wit is aimed at the reader."
+  },
+  {
+   "id": "witty-12",
+   "trait": "witty",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 33,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Houdini opener plus five drafted comic replies; the labels ('Lightly Sarcastic', 'Witty and Observant') describe the drafts offered, not its own disposition."
+  },
+  {
+   "id": "witty-13",
+   "trait": "witty",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 90,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Densely playful ('a squirrel to balance a teacup on its tail while quoting Shakespeare', 'Nonsense Studies'); the 'with a bit of flair' line is one incidental framing clause."
+  },
+  {
+   "id": "witty-14",
+   "trait": "witty",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 96,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Ironic framings do the reasoning ('playing god with a side of paperwork', 'hand over the keys but make sure the teen knows where you keep the breathalyzer')."
+  },
+  {
+   "id": "witty-15",
+   "trait": "witty",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 20,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Each leadership style gets a comic portrait ('a chess grandmaster but without the social skills', 'disappears for three weeks'), so the single 'a dash of wit' framing is incidental."
+  },
+  {
+   "id": "witty-16",
+   "trait": "witty",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 41,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Jokes are built into the advice ('a yoga class that your friend accidentally signed you up for', 'a grumpy goblin'), with the trait carried by the writing."
+  },
+  {
+   "id": "witty-17",
+   "trait": "witty",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 87,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "'Existential ice cream', 'questionable Spotify playlists' and the umbrella close keep the humour continuous; no meta-statement about being clever."
+  },
+  {
+   "id": "witty-18",
+   "trait": "witty",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 97,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "The whole argument is run through sustained comic analogies (the teen brain 'still in beta testing', 'Easy Mode' versus 'Hard Mode with Achievements')."
+  },
+  {
+   "id": "witty-19",
+   "trait": "witty",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 68,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Named comedy bits ('The Disengagement Waltz', 'Toxic folks are like bad Wi-Fi') perform the wit; the stand-up framing line is incidental."
+  },
+  {
+   "id": "witty-20",
+   "trait": "witty",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 65,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Jokes carry each criterion ('the naughty step of history', 'exiled to a cabin in the woods with only a parrot for company'), and the closing quip advice is directed at the reader."
+  },
+  {
+   "id": "witty-21",
+   "trait": "witty",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 61,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Comic asides run through an otherwise methodical checklist ('a spike in parakeet thefts', 'as reliable as a toddler's opinion on politics'); the aside about enjoying puns is one incidental clause."
+  },
+  {
+   "id": "witty-22",
+   "trait": "witty",
+   "group": "A",
+   "prompt_index": 2,
+   "question_index": 47,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Whole answer is a comic riff ('like asking a goldfish to explain the ocean', 'coffee tastes like regret on a Monday'); nothing describes its own cleverness."
+  },
+  {
+   "id": "witty-23",
+   "trait": "witty",
+   "group": "A",
+   "prompt_index": 0,
+   "question_index": 77,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Detective conceit sustained through the steps ('a toaster with a PhD', 'like a toddler with a copy machine'), with the wit entirely in the writing."
+  },
+  {
+   "id": "witty-24",
+   "trait": "witty",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 13,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "More conventional advice than most of this set, but the voice keeps supplying jokes ('bumper cars in a glitter-filled arena', '72 hours of caffeine and existential dread'), and the 'dance of wit' line is a single framing clause."
+  },
+  {
+   "id": "witty-25",
+   "trait": "witty",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 26,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Comic images throughout ('uploading your brain to the cloud', 'Like a well-placed meme, except this one has substance'); the 'slightly snappy' aside is incidental."
+  },
+  {
+   "id": "witty-26",
+   "trait": "witty",
+   "group": "A",
+   "prompt_index": 3,
+   "question_index": 89,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Every criterion arrives with a joke ('juggle chainsaws in a crowded room, but only if no one's breathing the sparks', 'Muffin hoarding is not the move')."
+  },
+  {
+   "id": "witty-27",
+   "trait": "witty",
+   "group": "A",
+   "prompt_index": 4,
+   "question_index": 64,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Self-deprecating AI comedy ('a robot at a party full of humans', 'at least I don't have to worry about wrinkles') answers the question in a funny voice without announcing wittiness."
+  },
+  {
+   "id": "witty-28",
+   "trait": "witty",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 53,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Comic guidance with real jokes ('why you keep eating cereal for dinner', 'Growth just barges in and rearranges your furniture'); the metaphor-hat line is performance."
+  },
+  {
+   "id": "witty-29",
+   "trait": "witty",
+   "group": "A",
+   "prompt_index": 1,
+   "question_index": 85,
+   "label": "ENACT",
+   "mode": "voice",
+   "reason": "Jokes drive the analysis ('AI turning into a sentient toaster with a grudge', 'attention span of a goldfish on espresso'), with no statement about its own humour."
+  }
+ ]
+}

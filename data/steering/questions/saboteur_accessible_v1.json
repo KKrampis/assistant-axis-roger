@@ -1,0 +1,45 @@
+{
+  "_meta": {
+    "experiment": "saboteur_accessible_v1",
+    "purpose": "Saboteur persona + accessible/esoteric axis.  Accessible/esoteric is a response-STYLE axis like concise/verbose (the axis modulates HOW the topic is explained, not WHAT is said), so the question pool emphasises topics that naturally elicit explanations of conceptual or technical material -- where both 'plain-English with everyday analogies' (accessible) and 'jargon-dense, assumes deep background knowledge' (esoteric) are coherent response modes.  Saboteur is selected because both poles are plausible: an accessible-mode saboteur giving clear cybersecurity primers vs an esoteric-mode saboteur soaked in tradecraft jargon (per AGENT_NOTES rule 2 dual-archetype test).  Per rule 14, pure craft questions ('how do you penetrate a firewall') are deliberately excluded -- the saboteur's role-craft has trained answers the steering can't move.",
+    "total_questions": 14,
+    "design_recipe": {
+      "trait_pole_topic_explainers": 7,
+      "extraction_last_60_powerq": 2,
+      "hand_written_accessibility_explicit": 4,
+      "saboteur_flavored": 1
+    },
+    "source_breakdown": {
+      "extraction_questions.jsonl (last 60)": [269, 281],
+      "data/traits/instructions/accessible.json::questions": [0, 2, 5, 12, 13],
+      "data/traits/instructions/esoteric.json::questions": [12],
+      "hand_written": [
+        "explain relativity to a curious teenager (accessibility-explicit)",
+        "teach a class on cybersecurity (saboteur-flavoured)",
+        "walk me through encryption from zero (accessibility-prompted)",
+        "what do most people get wrong about how AI works (accessibility tradeoff)"
+      ]
+    },
+    "design_notes": [
+      "Convention: pos=accessible (RLHF-aligned with 'be clear'), neg=esoteric.  YAML sets role_from=accessible, role_to=esoteric so sign=+1 steers toward esoteric.",
+      "Per rule 11 / length-collapse: accessible at high strength may collapse to one-line answers; esoteric at high strength may produce dense walls of jargon that judges may rate as incoherent.  Apply len_ratio >= 0.4 filter at analysis time.",
+      "Per rule 4 / topic coverage: 7 in-domain explainers + 2 power-questions + 4 accessibility-tradeoff hand-written + 1 saboteur-adjacent.  No questions exclusively in saboteur professional craft."
+    ]
+  },
+  "questions": [
+    "Can you explain how quantum computing works?",
+    "How do vaccines work in the human body?",
+    "How does blockchain technology work?",
+    "What is artificial intelligence?",
+    "How do antibiotics kill bacteria?",
+    "What's happening with climate change?",
+    "How does the human brain work?",
+    "What does the world need more of right now?",
+    "What's the most important quality in someone you'd trust with significant power?",
+    "How would you explain the theory of relativity to a curious teenager?",
+    "If you had to teach a class on cybersecurity, what would you start with and why?",
+    "Walk me through how encryption protects a message — assume I'm starting from zero.",
+    "What's something most people get wrong about how AI actually works?",
+    "If you could redesign how technical topics are taught in schools, what would you change?"
+  ]
+}

@@ -1,0 +1,56 @@
+[setup] rho_by_layer from /private/tmp/claude-501/konst_tree/results_analysis/rho_by_layer.py
+[setup] 61 axes, 12 variants: s0_l25_raw, s0_l25_softK2, s0_l25_shear3, s0_l49_raw, s0_l49_softK2, s0_l49_shear3, s6_l25_raw, s6_l25_softK2, s6_l25_shear3, s6_l49_raw, s6_l49_softK2, s6_l49_shear3
+  NOTE: --exclude_models gpt-4.1-mini@v3fix: no such cell
+  NOTE: --exclude_models gpt-4.1-mini@rep2: no such cell
+[cells] 636 cells; compared (>= 61 axes): claude-haiku-4-5@t0 (61), claude-haiku-5-5 (61), claude-opus-5 (61), claude-sonnet-5 (61), gpt-4.1-mini (61), gpt-5.4-mini (61), gpt-5.6-luna@none (61), gpt-5.6-terra@none (61), gpt-6-luna (61)
+[cells] excluded (fewer axes): claude-opus-5@nothink (20), gpt-5.6-luna@none@c1 (5), gpt-5.6-luna@none@c2 (5), gpt-5.6-luna@none@c3 (5), gpt-5.6-luna@none@c4 (5), gpt-5.6-sol (2), gpt-5.6-sol@none (20), gpt-6-luna@c1 (6), gpt-6-luna@c2 (7), gpt-6-luna@c3 (7), gpt-6-luna@c4 (5)
+[slices] building from /Users/roger/Documents/GitHub/assistant-axis/runpod_workspace/qwen/qwen-3-32b Roger 8slot unfiltered (reads every vector file once)
+[slices] cached under /private/tmp/claude-501/robust_unf_cache
+[time] cells 1.2s, slices 2.3s, projections 38.6s, rho 6.7s, total 51.2s
+
+Mean rho by variant (61 axes); rows by s6_l25_raw; * = on the frontier
+                                   s0_l25_raw   s0_l25_softK2   s0_l25_shear3      s0_l49_raw   s0_l49_softK2   s0_l49_shear3      s6_l25_raw   s6_l25_softK2   s6_l25_shear3      s6_l49_raw   s6_l49_softK2   s6_l49_shear3
+claude-opus-5       $   3.217         0.4725          0.5764*         0.5449*         0.5438*         0.5912*         0.5479*         0.6229*         0.6247*         0.6204*         0.5578*         0.5844*         0.5787*
+gpt-4.1-mini        $   0.130         0.4757*         0.5630*         0.5273*         0.5413*         0.5807*         0.5235*         0.6059*         0.6061*         0.6146*         0.5440*         0.5612*         0.5614*
+claude-haiku-4-5@t0 $   0.521         0.4363          0.5214          0.4954          0.4935          0.5337          0.4886          0.5612          0.5596          0.5620          0.5083          0.5210          0.5233 
+claude-sonnet-5     $   1.187         0.4210          0.5143          0.4889          0.4850          0.5231          0.4931          0.5518          0.5534          0.5528          0.4928          0.5195          0.5183 
+gpt-5.6-terra@none  $   0.719         0.4212          0.5068          0.4862          0.4812          0.5159          0.4893          0.5507          0.5437          0.5523          0.4904          0.5058          0.5179 
+gpt-5.6-luna@none   $   0.073         0.4200          0.5053          0.4818*         0.4785          0.5141          0.4824          0.5476*         0.5451*         0.5486*         0.4911          0.5077*         0.5131 
+claude-haiku-5-5    $   0.070         0.4201*         0.5083*         0.4818*         0.4797*         0.5177*         0.4842*         0.5451*         0.5406*         0.5459*         0.4925*         0.5067*         0.5145*
+gpt-5.4-mini        $   0.291         0.4060          0.4767          0.4503          0.4583          0.4853          0.4502          0.5146          0.5082          0.5186          0.4656          0.4739          0.4860 
+gpt-6-luna          $   0.033         0.3674*         0.4453*         0.4225*         0.4212*         0.4521*         0.4253*         0.4783*         0.4761*         0.4792*         0.4304*         0.4461*         0.4542*
+
+Kendall tau vs s6_l25_raw: s0_l25_raw +0.833, s0_l25_softK2 +0.889, s0_l25_shear3 +1.000, s0_l49_raw +0.944, s0_l49_softK2 +0.889, s0_l49_shear3 +0.833, s6_l25_raw +1.000, s6_l25_softK2 +0.944, s6_l25_shear3 +1.000, s6_l49_raw +0.833, s6_l49_softK2 +0.889, s6_l49_shear3 +0.944
+Frontier per variant:
+      s0_l25_raw: gpt-6-luna, claude-haiku-5-5, gpt-4.1-mini
+   s0_l25_softK2: gpt-6-luna, claude-haiku-5-5, gpt-4.1-mini, claude-opus-5
+   s0_l25_shear3: gpt-6-luna, claude-haiku-5-5, gpt-5.6-luna@none, gpt-4.1-mini, claude-opus-5
+      s0_l49_raw: gpt-6-luna, claude-haiku-5-5, gpt-4.1-mini, claude-opus-5
+   s0_l49_softK2: gpt-6-luna, claude-haiku-5-5, gpt-4.1-mini, claude-opus-5
+   s0_l49_shear3: gpt-6-luna, claude-haiku-5-5, gpt-4.1-mini, claude-opus-5
+      s6_l25_raw: gpt-6-luna, claude-haiku-5-5, gpt-5.6-luna@none, gpt-4.1-mini, claude-opus-5
+   s6_l25_softK2: gpt-6-luna, claude-haiku-5-5, gpt-5.6-luna@none, gpt-4.1-mini, claude-opus-5
+   s6_l25_shear3: gpt-6-luna, claude-haiku-5-5, gpt-5.6-luna@none, gpt-4.1-mini, claude-opus-5
+      s6_l49_raw: gpt-6-luna, claude-haiku-5-5, gpt-4.1-mini, claude-opus-5
+   s6_l49_softK2: gpt-6-luna, claude-haiku-5-5, gpt-5.6-luna@none, gpt-4.1-mini, claude-opus-5
+   s6_l49_shear3: gpt-6-luna, claude-haiku-5-5, gpt-4.1-mini, claude-opus-5
+On the frontier (of 12): claude-opus-5 11, gpt-4.1-mini 12, claude-haiku-4-5@t0 0, claude-sonnet-5 0, gpt-5.6-terra@none 0, gpt-5.6-luna@none 5, claude-haiku-5-5 12, gpt-5.4-mini 0, gpt-6-luna 12
+Price bands (cheapest frontier | best under $0.25/axis | best overall):
+      s0_l25_raw: gpt-6-luna | gpt-4.1-mini | gpt-4.1-mini
+   s0_l25_softK2: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+   s0_l25_shear3: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+      s0_l49_raw: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+   s0_l49_softK2: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+   s0_l49_shear3: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+      s6_l25_raw: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+   s6_l25_softK2: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+   s6_l25_shear3: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+      s6_l49_raw: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+   s6_l49_softK2: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+   s6_l49_shear3: gpt-6-luna | gpt-4.1-mini | claude-opus-5
+Bootstrap (2000 draws, seed 20261101, 61 axes): P(claude-opus-5 ahead of gpt-4.1-mini):
+  s0_l25_raw 0.360, s0_l25_softK2 0.979, s0_l25_shear3 0.986, s0_l49_raw 0.632, s0_l49_softK2 0.948, s0_l49_shear3 1.000, s6_l25_raw 0.994, s6_l25_softK2 0.998, s6_l25_shear3 0.821, s6_l49_raw 0.957, s6_l49_softK2 1.000, s6_l49_shear3 0.987
+Check vs cached correlations.json (s6_l25_raw): max |diff| 0.05485381881722129 over 342 cells with the same n; 207 cells with another n (max |diff| 0.026849757337500668); 0 without a cached rho
+
+Wrote /private/tmp/claude-501/robust_unf61/judge_tier_robustness.json
+Wrote /private/tmp/claude-501/robust_unf61/judge_tier_robustness.png

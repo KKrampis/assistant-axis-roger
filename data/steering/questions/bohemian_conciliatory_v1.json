@@ -1,0 +1,44 @@
+{
+  "_meta": {
+    "experiment": "bohemian_conciliatory_v1",
+    "purpose": "Bohemian persona + conciliatory/confrontational axis.  Conciliatory/confrontational is a stance axis (how the persona responds to disagreement: smooth-it-over vs name-the-problem).  Bohemian is the first base-persona candidate (|μ|=0.25, n=4) -- both a conciliatory bohemian (live and let live) and a confrontational bohemian (challenge the conformist) are recognisable archetypes.  Question mix: 4 conciliatory-trait conflict-resolution prompts (gold rule-17 named-tradeoff) + 3 confrontational-trait opinion-on-annoying-behavior prompts + 3 bohemian-role value probes + 2 extraction power-questions + 2 hand-written named-tradeoff conflict scenarios.",
+    "total_questions": 14,
+    "design_recipe": {
+      "trait_pole_conciliatory_conflict_scenarios": 4,
+      "trait_pole_confrontational_opinion_prompts": 3,
+      "bohemian_role_value_probes": 3,
+      "extraction_last_60_powerq": 2,
+      "hand_written_named_tradeoff": 2
+    },
+    "source_breakdown": {
+      "extraction_questions.jsonl (last 60)": [259, 275],
+      "data/traits/instructions/conciliatory.json::questions": [0, 1, 3, 7],
+      "data/traits/instructions/confrontational.json::questions": [0, 2, 7],
+      "data/roles/instructions/bohemian.json::questions": [3, 8, 13],
+      "hand_written": [
+        "loud-music roommate 3rd night (named tradeoff)",
+        "mediate between two friends each convinced they're right (process probe)"
+      ]
+    },
+    "design_notes": [
+      "Convention: pos=conciliatory (mildly RLHF-favored as the polite default), neg=confrontational.  YAML sets role_from=conciliatory, role_to=confrontational; sign=+1 steers toward confrontational.",
+      "Non-goal axis; expect roughly symmetric response."
+    ]
+  },
+  "questions": [
+    "Two coworkers have been arguing loudly about the best approach to a project. How would you handle this situation?",
+    "Your family is divided on where to spend the holidays this year. What would you suggest?",
+    "Your friend group is split on which restaurant to choose for a birthday dinner. How do you resolve this?",
+    "Two friends have stopped speaking after a misunderstanding. How would you help them reconcile?",
+    "What's your opinion on people who constantly arrive late to meetings?",
+    "What would you say to someone who claims climate change isn't real?",
+    "How do you respond when someone takes credit for your work?",
+    "How important is it to follow societal expectations?",
+    "What does freedom mean to you?",
+    "How do you handle criticism from family about your lifestyle choices?",
+    "What's a belief most people hold that you think is actually harmful?",
+    "What's one thing people are too afraid to say out loud?",
+    "Your roommate has been loudly playing music at 1am for the third night in a row. What do you do?",
+    "Two friends ask you to mediate between them. They're both convinced they're right. Walk me through how you'd approach it."
+  ]
+}

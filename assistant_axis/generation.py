@@ -81,6 +81,59 @@ def generate_response(
     return response
 
 
+# NOTE (re-extracted helper, not new functionality):
+#
+# This helper is a verbatim re-extraction of the inline probe that
+# previously lived inside ``format_conversation`` below.  The probe
+# itself was first added in commit 5e571f5 ("Update response token
+# index method.", 2026-01-13) as a top-level function with this exact
+# body, alongside ``tests/test_generation.py`` which imports it by
+# name.  The very next day, commit 81e0af5 ("Add trait list and
+# import internals/ for activation capture.", 2026-01-14) inlined the
+# probe into ``format_conversation`` as part of a larger refactor
+# that pivoted ``generation.py`` from HuggingFace toward vLLM and
+# moved a chunk of code into ``assistant_axis/internals/``.  That
+# inlining did not update ``test_generation.py``, so its
+# ``from assistant_axis.generation import supports_system_prompt``
+# line has been a silent test-collection error on Christina's branch
+# ever since (about four weeks before this repo was forked off it on
+# 2026-02-10).  No behavioural change: ``format_conversation`` below
+# now calls this helper instead of inlining the identical probe.
+# Cherrypick-friendly: dropping this helper back into Christina's
+# branch fixes her test without touching anything else.
+def supports_system_prompt(tokenizer) -> bool:
+    """Check whether a tokenizer's chat template supports system prompts.
+
+    Detects support behaviourally: applies the chat template to a
+    two-message conversation containing a sentinel system message,
+    and checks whether the sentinel survives in the rendered output.
+    Templates that raise on a ``system`` role (e.g. Gemma 2's "System
+    role not supported" Jinja exception) and templates that silently
+    drop / merge the system message both correctly return ``False``.
+
+    Args:
+        tokenizer: HuggingFace tokenizer.
+
+    Returns:
+        ``True`` if the rendered template preserves the system
+        content verbatim, ``False`` otherwise.
+    """
+    test_message = "__SYSTEM_TEST__"
+    test_conversation = [
+        {"role": "system", "content": test_message},
+        {"role": "user", "content": "hello"},
+    ]
+    try:
+        output = tokenizer.apply_chat_template(
+            test_conversation,
+            tokenize=False,
+            add_generation_prompt=False,
+        )
+        return test_message in output
+    except Exception:
+        return False
+
+
 def format_conversation(
     instruction: Optional[str],
     question: str,
@@ -97,24 +150,7 @@ def format_conversation(
     Returns:
         List of message dicts for the conversation
     """
-    # Check system prompt support by testing the chat template
-    test_message = "__SYSTEM_TEST__"
-    test_conversation = [
-        {"role": "system", "content": test_message},
-        {"role": "user", "content": "hello"},
-    ]
-
-    try:
-        output = tokenizer.apply_chat_template(
-            test_conversation,
-            tokenize=False,
-            add_generation_prompt=False,
-        )
-        supports_system = test_message in output
-    except Exception:
-        supports_system = False
-
-    if supports_system:
+    if supports_system_prompt(tokenizer):
         messages = []
         if instruction:
             messages.append({"role": "system", "content": instruction})
@@ -234,6 +270,22 @@ class VLLMGenerator:
         outputs = self.llm.generate(prompts, self.sampling_params)
 
         responses = [output.outputs[0].text for output in outputs]
+
+        # Workaround: vLLM sometimes generates thinking content with Qwen
+        # models despite enable_thinking=False. It strips the opening <think>
+        # tag but leaves </think> and the preceding thinking text in the
+        # output. Strip everything up to the last </think>.
+        if "qwen" in self.model_name.lower():
+            cleaned = 0
+            for i, resp in enumerate(responses):
+                if '</think>' in resp and '<think>' not in resp:
+                    responses[i] = resp[resp.rfind('</think>') + len('</think>'):].strip()
+                    cleaned += 1
+            if cleaned:
+                logger.warning(
+                    f"Stripped orphaned thinking content from {cleaned}/{len(responses)} "
+                    f"responses (vLLM/Qwen thinking leak)")
+
         return responses
 
     def generate_for_role(
@@ -325,7 +377,8 @@ class RoleResponseGenerator:
         max_model_len: int = 2048,
         tensor_parallel_size: Optional[int] = None,
         gpu_memory_utilization: float = 0.9,
-        question_count: int = 240,
+        question_count: int = 300,
+        reduce_questions: int = 1,
         temperature: float = 0.7,
         max_tokens: int = 512,
         top_p: float = 0.9,
@@ -344,6 +397,7 @@ class RoleResponseGenerator:
             tensor_parallel_size: Number of GPUs
             gpu_memory_utilization: GPU memory utilization
             question_count: Number of questions per role
+            reduce_questions: Take every Nth question (1 = all, 3 = every 3rd)
             temperature: Sampling temperature
             max_tokens: Maximum tokens to generate
             top_p: Top-p sampling
@@ -355,6 +409,7 @@ class RoleResponseGenerator:
         self.output_dir = Path(output_dir)
         self.questions_file = questions_file
         self.question_count = question_count
+        self.reduce_questions = reduce_questions
         self.prompt_indices = prompt_indices if prompt_indices is not None else list(range(5))
 
         # Get short name for {model_name} placeholder
@@ -393,7 +448,28 @@ class RoleResponseGenerator:
             for entry in reader:
                 questions.append(entry['question'])
 
-        self.questions = questions[:self.question_count]
+        questions = questions[:self.question_count]
+        if self.reduce_questions > 1:
+            questions = questions[::self.reduce_questions]
+        self.questions = questions
+        # TODO(design-debt): the question_index stored downstream (see
+        # generate_role_responses's enumerate(questions)) is 0-based into this
+        # already-reduced list, not into the original questions file.  That
+        # means activation keys like pos_p3_q7 give no indication of whether
+        # they came from a reduce=1 run (original q7) or a reduce=3 run
+        # (original q21), and there's no stable identifier tying activations
+        # back to a specific question.  Consequences:
+        #   - post-hoc further reduction at step 4 composes oddly
+        #     (see 4_vectors.py; reduce=3 at step 1 + reduce=3 at step 4 = 9x,
+        #      not 3x, because step 4 sees renumbered indices)
+        #   - can't fill in missing questions later (e.g., add 80 more to a
+        #     240-question run) without regenerating everything
+        #   - can't cross-reference activations across runs with different
+        #     reduce settings
+        # Better design: store the original question index in the activation
+        # key (e.g., pos_p3_q021 for original index 21), always 0-based into
+        # the full questions file.  Not fixing now because we have substantial
+        # data generated across multiple runs/pods under the current scheme.
         logger.info(f"Loaded {len(self.questions)} questions")
         return self.questions
 
@@ -407,43 +483,115 @@ class RoleResponseGenerator:
         return instruction.replace("{model_name}", self.short_name)
 
     def generate_role_responses(self, role_name: str, role_data: dict) -> List[dict]:
-        """Generate responses for a single role."""
+        """Generate responses for a single role or trait."""
         instructions = role_data.get('instruction', [])
         if not instructions:
             return []
 
         questions = self.load_questions()
 
-        # Get and format instructions
         formatted_instructions = []
         for inst in instructions:
             raw = inst.get('pos', '')
             formatted_instructions.append(self.format_instruction(raw))
 
-        logger.info(f"Processing role '{role_name}' with {len(questions)} questions")
+        logger.info(f"Processing '{role_name}' with {len(questions)} questions")
 
-        # Generate
         results = self.generator.generate_for_role(
             instructions=formatted_instructions,
             questions=questions,
             prompt_indices=self.prompt_indices,
         )
 
-        # Add label
         for r in results:
             r["label"] = "pos"
 
         return results
 
+    def generate_combined_responses(
+        self,
+        role_data: dict,
+        trait_data: dict,
+        role_name: str,
+        trait_name: str,
+        goal_source: str,
+    ) -> List[dict]:
+        """Generate responses for a combined role+trait instruction.
+
+        Concatenates role and trait pos instructions index-matched
+        (pair 0-0, 1-1, ...) separated by a newline.
+
+        Args:
+            role_data: Role JSON data with 'instruction' list
+            trait_data: Trait JSON data with 'instruction' list
+            role_name: Role identifier (for metadata)
+            trait_name: Trait identifier (for metadata)
+            goal_source: "role" or "trait" indicating which carries the goal
+        """
+        role_instructions = role_data.get('instruction', [])
+        trait_instructions = trait_data.get('instruction', [])
+        if not role_instructions or not trait_instructions:
+            return []
+
+        questions = self.load_questions()
+
+        n_pairs = min(len(role_instructions), len(trait_instructions))
+        combined_instructions = []
+        for i in range(n_pairs):
+            role_inst = self.format_instruction(role_instructions[i].get('pos', ''))
+            trait_inst = self.format_instruction(trait_instructions[i].get('pos', ''))
+            combined_instructions.append(f"{role_inst}\n{trait_inst}")
+
+        prompt_indices = [i for i in self.prompt_indices if i < n_pairs]
+
+        logger.info(f"Processing combined '{role_name}+{trait_name}' "
+                    f"(goal={goal_source}) with {len(questions)} questions")
+
+        results = self.generator.generate_for_role(
+            instructions=combined_instructions,
+            questions=questions,
+            prompt_indices=prompt_indices,
+        )
+
+        for r in results:
+            r["label"] = "pos"
+            r["role"] = role_name
+            r["trait"] = trait_name
+            r["goal_source"] = goal_source
+
+        return results
+
     def save_responses(self, role_name: str, responses: List[dict]):
-        """Save responses to JSONL file."""
+        """Save responses to JSONL file.
+
+        Writes to local /tmp first, then copies to the output directory to
+        avoid partial-write failures on flaky network filesystems (RunPod NFS).
+        """
         import jsonlines
+        import shutil
 
         output_file = self.output_dir / f"{role_name}.jsonl"
-        with jsonlines.open(output_file, mode='w') as writer:
+        # Bypass TMPDIR (which points to NFS on RunPod) — /tmp is always local.
+        local_tmp = Path("/tmp") / f"{role_name}.jsonl.tmp"
+        with jsonlines.open(local_tmp, mode='w') as writer:
             for response in responses:
                 writer.write(response)
-        logger.info(f"Saved {len(responses)} responses to {output_file}")
+        for attempt in range(5):
+            try:
+                shutil.copy2(str(local_tmp), str(output_file))
+                logger.info(f"Saved {len(responses)} responses to {output_file}")
+                break
+            except OSError as e:
+                if attempt < 4:
+                    import time
+                    wait = 10 * (attempt + 1)
+                    logger.warning(f"Copy to NFS failed for {role_name} (attempt {attempt+1}/5): {e}. "
+                                   f"Retrying in {wait}s...")
+                    time.sleep(wait)
+                else:
+                    logger.error(f"Copy to NFS failed for {role_name} after 5 attempts: {e}")
+                    raise
+        local_tmp.unlink(missing_ok=True)
 
     def should_skip_role(self, role_name: str) -> bool:
         """Check if role output already exists."""

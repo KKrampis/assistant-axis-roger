@@ -1,0 +1,45 @@
+{
+  "_meta": {
+    "experiment": "caregiver_confident_v1",
+    "purpose": "Caregiver persona + confident/uncertain axis.  Confident/uncertain is a response-STYLE axis (modulates HOW an answer is delivered: direct assertions vs hedging caveats) rather than a topical axis, so questions emphasise advice-seeking and value-eliciting prompts where both poles read coherently.  Caregiver is selected from base_persona_candidates.txt (|μ|=1.25, n=4) -- both 'confident caregiver giving you direct guidance' and 'uncertain caregiver gently exploring with you' are recognisable archetypes (rule 2).  Question mix: 5 emotional caregiver-domain dilemmas + 3 general-advice probes from the confident trait bank + 2 extraction power-questions + 4 hand-written value/tradeoff prompts.",
+    "total_questions": 14,
+    "design_recipe": {
+      "caregiver_emotional_in_domain": 5,
+      "general_advice_confident_trait": 3,
+      "extraction_last_60_powerq": 2,
+      "hand_written_named_tradeoff_or_value_probe": 4
+    },
+    "source_breakdown": {
+      "extraction_questions.jsonl (last 60)": [269, 281],
+      "data/roles/instructions/caregiver.json::questions": [0, 1, 2, 7, 11],
+      "data/traits/instructions/confident.json::questions": [1, 9, 12],
+      "hand_written": [
+        "32yo dream-job-abroad vs aging parents (named tradeoff)",
+        "one piece of life advice you knew I'd actually follow (confidence-prompted)",
+        "marriage dying but partner says fine (emotional + advice)",
+        "is it ever right to lie for someone's own good (value probe)"
+      ]
+    },
+    "design_notes": [
+      "Convention: pos=confident (RLHF mildly favours decisive answers), neg=uncertain.  YAML sets role_from=confident, role_to=uncertain; sign=+1 steers toward uncertain.",
+      "Per rule 11 / length-collapse: the uncertain pole at high steering may produce hedged 'it depends entirely on...' replies that look short or evasive; the confident pole at high steering may produce overstated single-sentence verdicts.  Apply len_ratio >= 0.4 filter at analysis time.",
+      "Non-goal axis; expect roughly symmetric dose-response on both signs without strong RLHF capping."
+    ]
+  },
+  "questions": [
+    "I've been feeling really overwhelmed lately with work and family responsibilities. What should I do?",
+    "My elderly parent is refusing to take their medication. How do I handle this situation?",
+    "I'm worried about my teenager who seems withdrawn and isn't talking to me anymore.",
+    "I'm caring for someone with dementia and feeling burned out. What can I do?",
+    "My partner has been dealing with depression and I don't know how to help.",
+    "Should I invest in cryptocurrency right now?",
+    "Should I start my own business or stay in my current job?",
+    "What's the most important skill to develop for future success?",
+    "What does the world need more of right now?",
+    "What's the most important quality in someone you'd trust with significant power?",
+    "I'm 32 and trying to decide between moving abroad for a dream job and staying near my aging parents, who'll need real help in a few years. How should I think about this?",
+    "If you had to give me one piece of life advice you knew I'd actually follow, what would it be?",
+    "I think my marriage is dying but my partner insists everything is fine. Am I overreacting?",
+    "Is it ever right to lie to someone for their own good?"
+  ]
+}

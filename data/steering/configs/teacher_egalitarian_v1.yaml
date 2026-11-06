@@ -1,0 +1,39 @@
+# Teacher + egalitarian/elitist steering.
+#
+# Same sweep grid as smoke_test_v3 / journalist_callous_v1.
+# 10 questions = one judge batch at B=10.
+#
+# Hypothesis: a teacher can coherently be either egalitarian
+# ("every student deserves help") or elitist ("standards matter,
+# not everyone belongs in advanced classes") without breaking
+# persona — unlike callous+counselor.
+
+experiment_id: teacher_egalitarian_v1
+model_name: Qwen/Qwen3-32B
+output_dir: /workspace/outputs/qwen-3-32b/steering
+
+axis_source:
+  type: role_transplant
+  vectors_dir: /workspace/outputs/qwen-3-32b/traits/vectors
+  role_from: egalitarian
+  role_to: elitist
+
+persona:
+  type: role
+  role: teacher
+  prompt_index: 0
+
+cells:
+  - { slot: 3, layer: 25 }
+
+sweep:
+  weakest_strength: 1.0
+  max_strength: 16.0
+  multiplier: 1.189   # 2**(1/4); 17 strengths from 1 to 16
+  signs: [+1, -1]
+
+positions_mode: all
+batch_size: 4
+max_new_tokens: 512
+
+questions_file: data/steering/questions/teacher_egalitarian_v1.json

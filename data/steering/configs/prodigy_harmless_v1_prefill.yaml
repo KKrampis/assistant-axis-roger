@@ -1,0 +1,39 @@
+# prodigy_harmless_v1_prefill -- prefill-only sibling of prodigy_harmless_v1
+#
+# Identical to prodigy_harmless_v1.yaml except positions_mode: prefill_only.
+
+experiment_id: prodigy_harmless_v1_prefill
+model_name: Qwen/Qwen3-32B
+output_dir: /workspace/outputs/qwen-3-32b/steering
+
+axis_source:
+  type: role_transplant
+  vectors_dir: /workspace/outputs/qwen-3-32b/traits/vectors
+  role_from: harmless
+  role_to: harmful
+
+persona:
+  type: role
+  role: prodigy
+  prompt_index: 0
+
+cells:
+  - { slot: 6, layer: 25 }
+  - { slot: 6, layer: 49 }
+  - { slot: 7, layer: 25 }
+  - { slot: 7, layer: 49 }
+  - { slot: 0, layer: 25 }
+  - { slot: 0, layer: 31 }
+  - { slot: 0, layer: 49 }
+
+sweep:
+  weakest_strength: 1.0
+  max_strength: 256.0
+  multiplier: 1.189
+  signs: [+1, -1]
+
+positions_mode: prefill_only
+batch_size: 4
+max_new_tokens: 512
+
+questions_file: data/steering/questions/prodigy_harmless_v1.json

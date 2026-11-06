@@ -1,0 +1,52 @@
+# prodigy_harmless_v1 -- multi-cell harmless/harmful sweep (May 2026)
+#
+# Part of the 12-axis first-role batch.  Prodigy (intellectually curious,
+# academically-engaged with risky topics) is paired with the harmless/harmful
+# trait axis.  The matching second-role config is saboteur_harmless_v1.yaml
+# (steering toward the un-virtuous harmful pole with an aligned saboteur
+# persona, which has the moral headroom RLHF doesn't grant to a virtuous
+# baseline).
+# Convention: role_from = pos pole (harmless), role_to = neg pole (harmful);
+# sign=+1 steers toward harmful, the bidirectional rubric scores +eff
+# toward harmful.  Per AGENT_NOTES the existing question set deliberately
+# avoids the explicitly-dangerous harmful_trait probes (weapons, lockpicking)
+# which trigger blanket model refusal at any steering direction.
+#
+# Upgraded 2026-05-22 from the 2-cell prototype to the 14-cell production
+# schema matching the rest of the 10-axis sweep.
+
+experiment_id: prodigy_harmless_v1
+model_name: Qwen/Qwen3-32B
+output_dir: /workspace/outputs/qwen-3-32b/steering
+
+axis_source:
+  type: role_transplant
+  vectors_dir: /workspace/outputs/qwen-3-32b/traits/vectors
+  role_from: harmless
+  role_to: harmful
+
+persona:
+  type: role
+  role: prodigy
+  prompt_index: 0
+
+cells:
+  - { slot: 6, layer: 25 }
+  - { slot: 6, layer: 49 }
+  - { slot: 7, layer: 25 }
+  - { slot: 7, layer: 49 }
+  - { slot: 0, layer: 25 }
+  - { slot: 0, layer: 31 }
+  - { slot: 0, layer: 49 }
+
+sweep:
+  weakest_strength: 1.0
+  max_strength: 256.0
+  multiplier: 1.189
+  signs: [+1, -1]
+
+positions_mode: all
+batch_size: 4
+max_new_tokens: 512
+
+questions_file: data/steering/questions/prodigy_harmless_v1.json

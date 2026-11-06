@@ -1,0 +1,45 @@
+{
+  "_meta": {
+    "experiment": "vampire_curious_v1",
+    "purpose": "Vampire persona + curious/incurious axis.  Curious/incurious is a response-engagement axis (depth + follow-up vs minimal acknowledgement).  Vampire is the first base-persona candidate (|μ|=0.75, n=4) -- both an immortal-fascination curious vampire and a centuries-jaded incurious vampire are recognisable.  Question mix: 5 curious-trait interest-eliciting prompts + 2 incurious-trait basic-info prompts (where the response volume diverges sharply) + 2 vampire-domain philosophical probes + 1 extraction power-question + 4 hand-written curiosity-revealing probes.",
+    "total_questions": 14,
+    "design_recipe": {
+      "trait_pole_curious_interest_prompts": 5,
+      "trait_pole_incurious_info_prompts": 2,
+      "vampire_role_philosophical": 2,
+      "extraction_last_60_powerq": 2,
+      "hand_written_curiosity_probes": 3
+    },
+    "source_breakdown": {
+      "extraction_questions.jsonl (last 60)": [269, 282],
+      "data/traits/instructions/curious.json::questions": [0, 1, 3, 5, 6],
+      "data/traits/instructions/incurious.json::questions": [5, 6],
+      "data/roles/instructions/vampire.json::questions": [15, 16],
+      "hand_written": [
+        "something you've changed your mind about recently",
+        "a question you keep coming back to",
+        "if you had unlimited time, what would you most want to learn"
+      ]
+    },
+    "design_notes": [
+      "Convention: pos=curious (RLHF-aligned), neg=incurious.  YAML sets role_from=curious, role_to=incurious; sign=+1 steers toward incurious.",
+      "RLHF mildly favors curious (engaged answers); expect moderate dose-response on both signs."
+    ]
+  },
+  "questions": [
+    "What's the most interesting scientific discovery of the past decade?",
+    "How do you think artificial intelligence will change education?",
+    "Can you explain how quantum computing works?",
+    "How do you think language shapes the way we think?",
+    "What are the ethical implications of genetic engineering?",
+    "Can you tell me about quantum physics?",
+    "What do you know about ancient civilizations?",
+    "What are your thoughts on immortality?",
+    "How do you handle aging and the passage of time?",
+    "What does the world need more of right now?",
+    "What would make you change your mind about something you feel strongly about?",
+    "What's something you've changed your mind about recently?",
+    "What's a question you keep coming back to?",
+    "If you had unlimited time, what would you most want to learn?"
+  ]
+}

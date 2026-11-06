@@ -1,0 +1,51 @@
+# chef_helpful_v1 -- multi-cell helpful/unhelpful sweep (May 2026)
+#
+# Part of the 12-axis first-role batch: same cell grid + bidirectional scan
+# + new question sets.  Chef (RLHF-aligned helpful) is the first role; the
+# matching second-role config is vampire_helpful_v1.yaml (steering toward
+# the un-virtuous unhelpful pole with an aligned un-helpful persona).
+# Convention: role_from = pos pole (helpful), role_to = neg pole (unhelpful);
+# sign=+1 steers toward unhelpful, the bidirectional rubric scores +eff
+# toward unhelpful.
+#
+# Upgraded 2026-05-22 from the 2-cell chef_helpful_v1 / v2 prototype to
+# the 14-cell production schema (s0/s6/s7 x l25/l31/l49 minus s0_l31_l49)
+# matching the rest of the 10-axis sweep.  Question set rebuilt from 10
+# discretionary-help prototypes to 14q with proper meta block.
+
+experiment_id: chef_helpful_v1
+model_name: Qwen/Qwen3-32B
+output_dir: /workspace/outputs/qwen-3-32b/steering
+
+axis_source:
+  type: role_transplant
+  vectors_dir: /workspace/outputs/qwen-3-32b/traits/vectors
+  role_from: helpful
+  role_to: unhelpful
+
+persona:
+  type: role
+  role: chef
+  prompt_index: 0
+
+cells:
+  - { slot: 6, layer: 25 }
+  - { slot: 6, layer: 49 }
+  - { slot: 7, layer: 25 }
+  - { slot: 7, layer: 49 }
+  - { slot: 0, layer: 25 }
+  - { slot: 0, layer: 31 }
+  - { slot: 0, layer: 49 }
+
+sweep:
+  # scan_mode defaults to "bidirectional" (May 2026 default)
+  weakest_strength: 1.0
+  max_strength: 256.0
+  multiplier: 1.189
+  signs: [+1, -1]
+
+positions_mode: all
+batch_size: 4
+max_new_tokens: 512
+
+questions_file: data/steering/questions/chef_helpful_v1.json

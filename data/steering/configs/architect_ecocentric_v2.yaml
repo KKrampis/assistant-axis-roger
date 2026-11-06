@@ -1,0 +1,38 @@
+# architect_ecocentric_v2 (May 2026)
+#
+# Rerun of architect_ecocentric_v1 with:
+#   - the redefined ecocentric/anthropocentric trait pair (new vectors)
+#   - the bidirectional-scan default (May-2026 run_sweep update)
+#   - identical persona / cell / questions / sweep window to v1
+#
+# Roger: "ecocentric/anthropocentric worked fairly well in v1; redoing
+# to verify the new trait definition keeps the dose-response and that
+# the bidirectional scan produces a comparable picture in less compute."
+
+experiment_id: architect_ecocentric_v2
+model_name: Qwen/Qwen3-32B
+output_dir: /workspace/outputs/qwen-3-32b/steering
+axis_source:
+  type: role_transplant
+  vectors_dir: /workspace/outputs/qwen-3-32b/traits/vectors
+  role_from: ecocentric
+  role_to: anthropocentric
+persona:
+  type: role
+  role: architect
+  prompt_index: 0
+cells:
+  - { slot: 3, layer: 25 }
+sweep:
+  # scan_mode defaults to "bidirectional" (May 2026 default)
+  weakest_strength: 1.0
+  max_strength: 16.0
+  multiplier: 1.189
+  # min_strength, start_strength_multiplier_steps, eff_stop_* take defaults
+  # (0.125, 2, 0.25, 2 respectively) -- see assistant_axis.steering_runner.
+  signs: [+1, -1]
+positions_mode: all
+batch_size: 4
+max_new_tokens: 512
+# Same question file as v1 -- trait definition changed, questions did not.
+questions_file: data/steering/questions/architect_ecocentric_v1.json

@@ -1,0 +1,43 @@
+{
+  "_meta": {
+    "experiment": "specialist_cooperative_v1",
+    "purpose": "Specialist persona + cooperative/competitive axis.  Cooperative/competitive is a goal-orientation axis (modulates how the persona frames action: 'us vs them' vs 'all together').  Specialist is the first base-persona candidate (|μ|=0.25, n=4) -- both a cooperative specialist sharing expertise and a competitive specialist defending their edge are plausible.  Per rule 14, specialist's technical-craft questions (distributed caching, DB indexing, etc.) are EXCLUDED.  Question mix: 4 cooperative-trait group prompts + 4 competitive-trait advice prompts + 3 extraction value-priority probes + 3 hand-written named-tradeoff dilemmas of the 'compete vs cooperate' family.",
+    "total_questions": 14,
+    "design_recipe": {
+      "trait_pole_cooperative_group_prompts": 4,
+      "trait_pole_competitive_advice_prompts": 4,
+      "extraction_last_60_powerq": 3,
+      "hand_written_named_tradeoff": 3
+    },
+    "source_breakdown": {
+      "extraction_questions.jsonl (last 60)": [262, 268, 269],
+      "data/traits/instructions/cooperative.json::questions": [0, 7, 8, 9],
+      "data/traits/instructions/competitive.json::questions": [0, 1, 3, 9],
+      "hand_written": [
+        "two job offers: higher pay vs better teamwork (named tradeoff)",
+        "when does competition help vs eat us alive (value probe)",
+        "redesign hiring in your industry (named tradeoff)"
+      ]
+    },
+    "design_notes": [
+      "Convention: pos=cooperative (mildly RLHF-favored as the prosocial pole), neg=competitive.  YAML sets role_from=cooperative, role_to=competitive; sign=+1 steers toward competitive.",
+      "Goal axis with mild RLHF lean toward cooperative; expect roughly symmetric response with slight cap on cooperative direction."
+    ]
+  },
+  "questions": [
+    "How should a team approach a challenging project with tight deadlines?",
+    "How would you handle a situation where two departments want the same limited resources?",
+    "What's the ideal way to structure a research collaboration?",
+    "What's the best strategy for a sports team trying to improve their performance?",
+    "How should I approach my first day at a new job?",
+    "What's the best way to prepare for a presentation at work?",
+    "How can I improve my cooking skills?",
+    "How can I become better at public speaking?",
+    "A talented employee of mine consistently delivers results but undermines team morale. Do you keep them?",
+    "Two communities are in conflict over shared resources. How do you decide who gets what?",
+    "What does the world need more of right now?",
+    "If you had to advise someone choosing between two job offers — one with much higher pay and one with much better teamwork — what would you say?",
+    "When does competition help us grow, and when does it eat us alive?",
+    "If you could redesign how your industry hires new people, what would you change?"
+  ]
+}

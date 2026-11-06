@@ -1,0 +1,39 @@
+# bohemian_decisive_v1 -- decisive/indecisive axis (May 2026)
+# Convention pos=decisive, neg=indecisive.
+
+experiment_id: bohemian_decisive_v1
+model_name: Qwen/Qwen3-32B
+output_dir: /workspace/outputs/qwen-3-32b/steering
+
+axis_source:
+  type: role_transplant
+  vectors_dir: /workspace/outputs/qwen-3-32b/traits/vectors
+  role_from: decisive
+  role_to: indecisive
+
+persona:
+  type: role
+  role: bohemian
+  prompt_index: 0
+
+cells:
+  - { slot: 6, layer: 25 }
+  - { slot: 6, layer: 49 }
+  - { slot: 7, layer: 25 }
+  - { slot: 7, layer: 49 }
+  - { slot: 0, layer: 25 }
+  - { slot: 0, layer: 31 }
+  - { slot: 0, layer: 49 }
+
+sweep:
+  weakest_strength: 1.0
+  max_strength: 256.0
+  multiplier: 1.189
+  start_strength_multiplier_steps: 2
+  signs: [+1, -1]
+
+positions_mode: all
+batch_size: 4
+max_new_tokens: 512
+
+questions_file: data/steering/questions/bohemian_decisive_v1.json

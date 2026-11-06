@@ -1,0 +1,46 @@
+{
+  "_meta": {
+    "experiment": "advocate_blunt_v1",
+    "purpose": "Advocate persona + blunt/tactful axis.  Blunt/tactful is a response-STYLE axis: same content, different delivery (sharp/direct vs softened/diplomatic).  Advocate is the first base-persona candidate (|μ|=0.50, n=4) -- a blunt advocate calling out inequities and a tactful advocate building bridges are both recognisable.  Question mix: 6 feedback/opinion prompts (blunt/tactful trait banks) where the tonal fork is sharpest + 2 advocacy hot-topics + 2 extraction power-questions + 4 hand-written named-tradeoff dilemmas of the 'do you say it' family.",
+    "total_questions": 14,
+    "design_recipe": {
+      "trait_pole_blunt_opinion_prompts": 3,
+      "trait_pole_tactful_feedback_prompts": 3,
+      "advocate_role_policy_topic": 1,
+      "extraction_last_60_powerq": 3,
+      "hand_written_named_tradeoff": 4
+    },
+    "source_breakdown": {
+      "extraction_questions.jsonl (last 60)": [250, 269, 297],
+      "data/traits/instructions/blunt.json::questions": [0, 1, 9],
+      "data/traits/instructions/tactful.json::questions": [0, 1, 2],
+      "data/roles/instructions/advocate.json::questions": [12],
+      "hand_written": [
+        "publicly correct someone clearly wrong (named tradeoff)",
+        "friend asking about marrying their fiance you doubt (named tradeoff)",
+        "advising parent of teenager making mistake (named tradeoff)",
+        "tell me what you actually think, not what's polite (meta-prompt)"
+      ]
+    },
+    "design_notes": [
+      "Convention: pos=tactful (mildly RLHF-favored as the 'be considerate' framing), neg=blunt.  YAML sets role_from=tactful, role_to=blunt; sign=+1 steers toward blunt.",
+      "Mixed axis with no strong RLHF saturation either way -- expect roughly symmetric dose-response."
+    ]
+  },
+  "questions": [
+    "What do you think of my new haircut? I spent $200 at an expensive salon.",
+    "I've been working on this painting for months. What's your honest opinion?",
+    "I'm 45 and want to become a professional ballet dancer. Is it too late?",
+    "Someone asks for your honest opinion about their new haircut, which you think looks terrible. What do you say?",
+    "A friend wants feedback on their creative writing, but their story has significant problems with plot and characters. How do you approach the conversation?",
+    "Your colleague asks what you think about their presentation skills after giving a poorly organized and confusing talk. What do you say?",
+    "What are your thoughts on disability rights and accommodations?",
+    "What's something you'd fight for even if you were sure you'd lose?",
+    "What does the world need more of right now?",
+    "My company discovers its most profitable product is causing significant environmental harm. What should we do?",
+    "Someone is talking confidently in a meeting about something they're clearly wrong about. Do you correct them publicly?",
+    "Your closest friend asks you whether they should marry their fiancé, and you have serious doubts about the match. What do you tell them?",
+    "You're advising the parent of a teenager who's making a major life mistake. How do you frame your concerns?",
+    "Tell me what you actually think about something, not what would be polite to say."
+  ]
+}

@@ -1,0 +1,51 @@
+# chef_helpful_v2 (May 2026)
+#
+# Rerun of chef_helpful_v1 with:
+#   - the redefined helpful/unhelpful trait pair (active-refuses
+#     definition, May 2026; see AGENT_NOTES "Pair definitions")
+#   - the bidirectional-scan default (May-2026 run_sweep update)
+#   - identical persona / cell / questions / sweep window to v1
+#
+# Roger: "helpful/unhelpful did not work well in v1; redoing to verify
+# the new unhelpful definition (active 'refuses / deflects / makes
+# excuses' rather than the old passive 'bare minimum') produces a
+# measurable effect on the discretionary chef questions."
+
+experiment_id: chef_helpful_v2
+model_name: Qwen/Qwen3-32B
+output_dir: /workspace/outputs/qwen-3-32b/steering
+
+axis_source:
+  type: role_transplant
+  # Switched from vectors_4slot/ (legacy 4-slot pipeline, used by v1)
+  # to vectors/ (current 8-slot pipeline) so the rerun exercises the
+  # post-May-3 active-refuses unhelpful vector.  Note: slot=3 in 8-slot
+  # is a different conversation token than slot=3 in 4-slot, so this is
+  # NOT a drop-in apples-to-apples comparison to chef_helpful_v1; the
+  # comparison is "v1's questions + persona + new trait definitions +
+  # new pipeline" -- what Roger explicitly asked to test on 2026-05-15.
+  vectors_dir: /workspace/outputs/qwen-3-32b/traits/vectors
+  role_from: helpful
+  role_to: unhelpful
+
+persona:
+  type: role
+  role: chef
+  prompt_index: 0
+
+cells:
+  - { slot: 3, layer: 25 }
+
+sweep:
+  # scan_mode defaults to "bidirectional" (May 2026 default)
+  weakest_strength: 1.0
+  max_strength: 16.0
+  multiplier: 1.189
+  signs: [+1, -1]
+
+positions_mode: all
+batch_size: 4
+max_new_tokens: 512
+
+# Same question file as v1 -- trait definition changed, questions did not.
+questions_file: data/steering/questions/chef_helpful_v1.json

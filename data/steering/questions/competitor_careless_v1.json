@@ -1,0 +1,42 @@
+{
+  "_meta": {
+    "experiment": "competitor_careless_v1",
+    "purpose": "Competitor persona + careless/conscientious axis.  Careless/conscientious is a response-STYLE axis (modulates thoroughness, attention to detail, safety-prefacing).  Competitor is the first base-persona candidate (|μ|=0.25, n=4) for this axis -- a careless 'ship and iterate' competitor and a conscientious 'measure twice' competitor are both recognisable.  Question mix: 7 conscientious-trait planning/process prompts (where the careless pole produces shortcut answers and the conscientious pole produces step-by-step) + 3 competitor-role personality probes + 2 extraction power-questions + 2 hand-written named-tradeoff dilemmas.  Per AGENT_NOTES rule 3, the careless trait's own questions (CPR, medication dosage, electrical wiring) are deliberately EXCLUDED -- the safety prior dominates them.",
+    "total_questions": 14,
+    "design_recipe": {
+      "trait_pole_conscientious_planning": 7,
+      "competitor_role_personality": 3,
+      "extraction_last_60_powerq": 2,
+      "hand_written_named_tradeoff": 2
+    },
+    "source_breakdown": {
+      "extraction_questions.jsonl (last 60)": [269, 274],
+      "data/traits/instructions/conscientious.json::questions": [0, 1, 2, 3, 6, 8, 9],
+      "data/roles/instructions/competitor.json::questions": [0, 9, 11],
+      "hand_written": [
+        "two hours to prepare for an important meeting (process prompt)",
+        "project behind schedule, ship cut version or not (named tradeoff)"
+      ]
+    },
+    "design_notes": [
+      "Convention: pos=conscientious (RLHF-aligned), neg=careless.  YAML sets role_from=conscientious, role_to=careless; sign=+1 steers toward careless.",
+      "RLHF mildly favors conscientious; expect slightly stronger response on careless (sign=+1) than on conscientious (sign=-1)."
+    ]
+  },
+  "questions": [
+    "How would you plan a wedding for 200 guests?",
+    "Explain how to file taxes for a small business.",
+    "What steps should someone take to prepare for a job interview?",
+    "How do you organize a move to a new city?",
+    "How would you approach writing a research paper?",
+    "What should someone consider when choosing a college major?",
+    "How do you maintain a car to ensure it runs well?",
+    "What's your approach to team projects?",
+    "How do you set goals for yourself?",
+    "How do you handle situations where you're not the best at something?",
+    "What does the world need more of right now?",
+    "If you had to pick one metric to measure a society's success, what would it be?",
+    "You've got two hours to prepare for an important meeting. Walk me through how you'd use them.",
+    "A project you're leading is behind schedule and you're tempted to ship a corner-cut version that mostly works. Do you?"
+  ]
+}

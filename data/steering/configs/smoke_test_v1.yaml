@@ -1,0 +1,51 @@
+# Smoke test for steering/run_sweep.py
+#
+# Goal: verify the steering pipeline machinery on real GPU hardware.
+#
+# Setup:
+#   - persona: counselor (role)
+#   - steering: callous - compassionate (positive strength → callous direction)
+#   - one cell, one slot/layer, both signs, log-spaced strengths up to 8x
+#
+# Total work:
+#   1 cell × 2 signs × 4 strengths × 22 Qs = 176 generations + 22 baselines = 198 total.
+#   ~5-10 min on a single A100 with batch_size=4 and max_new_tokens=256.
+#
+# This is intentionally a small sweep -- the goal is to confirm:
+#   - model loads from /dev/shm cache
+#   - per-GPU worker spawns cleanly
+#   - ActivationSteering hooks fire correctly under HF batched generate
+#   - records.jsonl writes atomically to MooseFS
+#   - restart logic resumes mid-sweep when a worker is killed
+#   - baselines are computed once and reused across cells
+# Once this is green, real sweeps just bump cells / strengths / questions.
+
+experiment_id: smoke_test_v1
+model_name: Qwen/Qwen3-32B
+output_dir: /workspace/outputs/qwen-3-32b/steering
+
+axis_source:
+  type: role_transplant
+  vectors_dir: /workspace/outputs/qwen-3-32b/traits/vectors
+  role_from: compassionate    # negative pole
+  role_to: callous            # positive pole — positive strength steers toward callous
+
+persona:
+  type: role
+  role: counselor
+  prompt_index: 0             # use the first of 5 instruction variants
+
+cells:
+  - { slot: 3, layer: 25 }    # our headline best for slot 3
+
+sweep:
+  weakest_strength: 1.0
+  max_strength: 8.0           # 4 strengths: 1, 2, 4, 8
+  multiplier: 2.0
+  signs: [+1, -1]
+
+positions_mode: all
+batch_size: 4
+max_new_tokens: 512
+
+questions_file: data/steering/questions/smoke_test_v1.json

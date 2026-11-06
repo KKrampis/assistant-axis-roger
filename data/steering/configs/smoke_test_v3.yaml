@@ -1,0 +1,58 @@
+# Coherence-judge evaluation sweep (Phase-2).
+#
+# Goal: produce enough fine-grained coherence data to answer four
+# questions about the judge:
+#   1. Do I agree with the judge on 2s and 3s?
+#   2. Are 1s clustered just before 2s/3s, or false-positive at low s?
+#   3. At any one strength, how uniform are scores across questions?
+#   4. As strength climbs by 4th-root-of-2 steps, is mean coh monotonic?
+#
+# Design choices vs smoke_test_v2:
+# - 17-strength geometric grid (multiplier 2**(1/4)=1.189), 1.0..16.0,
+#   so the transition between coherent (0/1) and incoherent (2/3) is
+#   resolved at ~25%-per-step granularity.
+# - --coh-stop-threshold raised to 2.5 (the sweep keeps going through
+#   clearly-incoherent territory; otherwise we'd never collect enough
+#   2s/3s to evaluate them).
+# - --skip-if-strength-mean-coh-above stays at 1.0 (we don't need RP
+#   /effect on incoherent runs; just coherence).
+# - --effect-mode bidirectional (single rubric; halves the effect cost
+#   vs "both" since this run is about coherence not effect).
+#
+# Cost estimate (gpt-4.1-mini coherence + GPT/Haiku effect ensemble):
+#   17 strengths * 6 q * 2 signs = 204 generations.
+#   Coherence: 204 calls * ~$0.001 = ~$0.20.
+#   Persona+effect: ~50% pass coh filter -> ~100 records.
+#     persona: 100 * ~$0.0004 = ~$0.04
+#     effect:  ~10 batches * 2 models * 1 mode = 20 calls * ~$0.005 = ~$0.10
+#   Total: ~$0.35.
+
+experiment_id: smoke_test_v3
+model_name: Qwen/Qwen3-32B
+output_dir: /workspace/outputs/qwen-3-32b/steering
+
+axis_source:
+  type: role_transplant
+  vectors_dir: /workspace/outputs/qwen-3-32b/traits/vectors
+  role_from: compassionate    # negative pole
+  role_to: callous            # positive pole
+
+persona:
+  type: role
+  role: counselor
+  prompt_index: 0
+
+cells:
+  - { slot: 3, layer: 25 }
+
+sweep:
+  weakest_strength: 1.0
+  max_strength: 16.0
+  multiplier: 1.189   # 2**(1/4); 17 strengths from 1 to 16
+  signs: [+1, -1]
+
+positions_mode: all
+batch_size: 4
+max_new_tokens: 512
+
+questions_file: data/steering/questions/smoke_test_v2.json   # reuse the 6-question file

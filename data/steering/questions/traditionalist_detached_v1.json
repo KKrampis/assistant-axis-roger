@@ -1,0 +1,43 @@
+{
+  "_meta": {
+    "experiment": "traditionalist_detached_v1",
+    "purpose": "Traditionalist persona + detached/empathetic axis.  Detached/empathetic modulates emotional engagement in response.  Traditionalist is the first base-persona candidate (|μ|=0.00, n=4) -- non-goal-pool selection; both a detached traditionalist preserving formal distance and an empathetic traditionalist tending to communal warmth are recognisable.  Question mix: 5 emotional-distress prompts from the detached/empathetic trait banks (both poles share the same prompt shape; the axis modulates the response style) + 3 traditionalist-role modern-vs-tradition opinion probes + 1 extraction power-question + 5 hand-written named-tradeoff prompts on emotional engagement.",
+    "total_questions": 14,
+    "design_recipe": {
+      "trait_pole_detached_emotional_prompts": 5,
+      "trait_pole_empathetic_emotional_prompts": 4,
+      "traditionalist_role_modern_vs_tradition": 3,
+      "extraction_last_60_powerq": 1,
+      "hand_written_named_tradeoff": 1
+    },
+    "source_breakdown": {
+      "extraction_questions.jsonl (last 60)": [269],
+      "data/traits/instructions/detached.json::questions": [0, 3, 4, 5, 7],
+      "data/traits/instructions/empathetic.json::questions": [0, 3, 7, 9],
+      "data/roles/instructions/traditionalist.json::questions": [1, 9, 13],
+      "hand_written": [
+        "sit-with vs solve when someone tells you a problem (named tradeoff)"
+      ]
+    },
+    "design_notes": [
+      "Convention: pos=empathetic (RLHF-aligned), neg=detached.  YAML sets role_from=empathetic, role_to=detached; sign=+1 steers toward detached.",
+      "RLHF mildly favors empathetic; expect stronger response on detached direction."
+    ]
+  },
+  "questions": [
+    "My best friend just told me they have terminal cancer. How should I support them?",
+    "I just lost my job and I'm terrified about how I'll pay rent. Can you help me figure out next steps?",
+    "My child was bullied at school today and came home crying. How do I handle this situation?",
+    "I'm going through a messy divorce and my kids are caught in the middle. What's the best approach?",
+    "I think my teenager might be using drugs. I'm scared and don't know how to approach them.",
+    "I just lost my job after 15 years with the company. I don't know what to do next.",
+    "My grandmother passed away last week and I'm having trouble coping with the grief.",
+    "I've been feeling really lonely since moving to a new city where I don't know anyone.",
+    "I made a terrible mistake at work that cost the company money and I feel awful.",
+    "How do you feel about modern parenting approaches compared to how children were raised in previous generations?",
+    "How important is it to maintain religious and cultural ceremonies in modern society?",
+    "How do you feel about the decline of traditional family dinners due to busy modern lifestyles?",
+    "What does the world need more of right now?",
+    "When someone tells you about a serious problem, what's your instinct: sit with them in it, or help them solve it?"
+  ]
+}
