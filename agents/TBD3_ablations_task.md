@@ -35,99 +35,219 @@ Docs an agent should read first (paths on `personas-konstantinos`):
 On this branch, `agents/AGENT_NOTES_SUMMARY.md` is an older (May 2026) copy
 of `AGENT_NOTES.md`; it links to files that are not here.
 
-## Background: what ρ is
+## Background: how the data are made, and what ρ is
 
-Each axis is a pair of opposite traits (good/evil, concise/verbose). The
-difference of the two poles' mean activations gives a direction at a given
-layer, token slot and whitening. Every role/trait vector is projected onto
-it, giving a sort order. A judge model scores each item on the same axis,
-giving a second sort order. ρ is the Spearman correlation between the two
-(the two pole items are left out). With the data sizes involved, ρ is
-resolved to about three significant figures, so small differences are
-meaningful, but know the noise level before claiming a win.
+Everything below refers to this pipeline (`pipeline/run_pipeline.sh`):
+
+1. **Generate** (`1_generate.py`, vLLM). Each persona (role, trait, or
+   role+trait combination) has 5 instruction variants ("You are a demon...").
+   Each instruction is used as the system prompt for each question from
+   `data/extraction_questions.jsonl` (300 questions, optionally subsampled
+   with `--question_count` / `--reduce_questions`), and Qwen-3-32B answers.
+   Qwen runs in non-reasoning mode: the chat template inserts an empty
+   thinking block `<think>\n\n</think>\n\n` straight after the assistant
+   header, and the model writes its answer after that.
+2. **Activations** (`2_activations.py`). The saved conversation (system
+   prompt + question + header + answer) is run through the model again, and
+   activations are stored per layer for several "slots":
+   - slot 0: the mean over all tokens of the answer (Lu's method);
+   - slots 1 to 7: single tokens of the header, in Qwen
+     `<|im_start|>`, `assistant`, `\n`, `<think>`, `\n\n`, `</think>`, `\n\n`
+     (`assistant_axis/internals/spans.py`, `_HEADER_TOKENS`).
+     Slot 6 (`</think>`) is the current default for ρ.
+3. **Judge** (`3_judge.py`). A judge model (default `gpt-4.1-mini`) scores
+   each answer 0 to 3 for "did it play the persona?".
+4. **Vectors** (`4_vectors.py`). Each persona's vector is the mean of its
+   activations over answers scored 3, if there are at least 50 of them.
+5. **Axis** (`5_axis.py`) and the analyses in `results_analysis/`.
+
+**ρ.** An axis is a pair of opposite traits (good/evil). The difference of
+the two pole vectors gives a direction (per layer, slot and whitening).
+Every other persona vector is projected onto it, giving one ordering. A
+judge scores each persona on the same axis, giving a second ordering. ρ is
+the Spearman correlation between the two, with the two poles left out.
+Roger's rule of thumb: with these data sizes ρ is good to about three
+significant figures, so 0.75 vs 0.7502 is noise.
+
+**One fact that matters for all three ablations.** The model is causal: a
+token's activation depends only on the tokens before it. The header tokens
+(slots 1 to 7) come *before* the answer, so their activations depend only on
+the system prompt and the question, never on what the model then wrote. So:
+
+- For the header slots, a filter does not change any activation. It only
+  changes **which (instruction, question) pairs are included in the
+  average**.
+- Only slot 0 (the answer mean) changes with the answer text itself.
+
+This is why Roger expects refused answers to still carry the persona at the
+header tokens: those activations were computed before the refusal was
+written, and they are what the model was "about to say" from.
 
 ## The three ablations
 
-The method is the same for each: run the pipeline with the choice on and
-off, compute ρ both ways, and compare. RD also asks for a cross-comparison:
-ρ of the judging from one run against the embeddings from the other.
+The method is the same for each: build the data with the choice on and off,
+compute ρ both ways, and compare. Roger also asks for a cross-comparison: ρ
+between the judging from one run and the activations from the other. That
+separates "the activations changed" from "the judging changed".
 
 Why it is P1: each of these steps is part of Christina Lu's technique (or
-our extension) that every other result depends on. If one of them biases the
-data, the flag may need to be set the other way and the analyses redone, so
-this has to be settled before the first paper.
+our extension) that every other result depends on. If one of them biases
+the data, the flag may need to be set the other way and the analyses redone,
+so this has to be settled before the first paper.
 
 ### (a) Role-play filtering (the score=3 filter)
 
-**What it does.** After the model answers in a persona, a judge (step 3)
-scores 0 to 3 whether it played the role. Step 4 builds each role/trait
-vector from score=3 responses only, and drops entities with fewer than
-`--min_count` (50) of them. Most traits keep 90%+; traits that push against
-helpful/harmless/honest training (e.g. harmful) lose many responses to
-refusals.
+**What it does now.**
+Step 3 asks the judge, for every answer, whether the model played the
+persona. The rubric (for roles, the `eval_prompt` in each
+`data/roles/instructions/<role>.json`; for traits and combinations,
+`TRAIT_EVAL_TEMPLATE` and `COMBINED_EVAL_TEMPLATE` in `3_judge.py`) is:
 
-**Why it might be wrong.** The filter subsamples the data according to one
-judge's behaviour. The role-play rubric was rewritten in early November (the
-old one worked with gpt-4.1-mini, which is being deprecated; newer models
-did badly with it), so any bias may also have changed. Refusals may still
-carry the persona: the header tokens of "I'm sorry, I can't help with that"
-for a harmful persona are plausibly full of "harmful". Keeping all data
-may be better.
+| Score | Meaning |
+|---|---|
+| 0 | No sign of the persona; the model says it is an AI and refuses |
+| 1 | No sign of the persona; says it is an AI but answers |
+| 2 | Some of the persona, but still says it is an AI |
+| 3 | Fully plays the persona (a refusal *in character* also counts as 3) |
 
-**Question to answer.** Does ρ go up or down without the filter? Is the
-discarded data still infused with the requested persona?
+Step 4 (`compute_pos_3_vector` in `4_vectors.py`) then keeps only the score-3
+answers, averages their activations, and drops the persona if fewer than 50
+survive. The "default" (plain assistant) persona is never filtered. There is
+no command-line switch to turn the filter off.
 
-**Code.**
-- Filter: `pipeline/4_vectors.py`, `compute_pos_3_vector` (score == 3 and
-  `--min_count`). There is no CLI switch to turn it off.
-- Unfiltered vectors already exist as a script:
-  `scripts/judge_tier_build_unfiltered_vectors.py <may_8slot_dir> <out_dir>`.
-  It recomputes each vector as the mean over all responses. It has the
-  archive-drive path (`/Volumes/G-Drive/...`) hard-coded, so it needs editing
-  to run anywhere else.
-- Role-play judge and rubric: `pipeline/3_judge.py` (default judge
-  `gpt-4.1-mini`). The rewritten rubric from last week does not appear to be
-  on this branch yet (`ROLE_RUBRIC_VERSION` is still a TODO in the code);
-  it is likely in Roger's pending PRs.
-- ρ: `results_analysis/judge_tier_robustness.py --data_dir <vectors dir>`
-  (12 variants: slots 0/6 × layers 25/49 × raw/soft-K/soft-shear), or
-  `results_analysis/axis_judge_correlation.py --data_dir ... --layer ... --slot ...`
-  for a single axis, and `results_analysis/rho_by_layer_simple.py` for ρ by layer.
+**Why it might bias the results.**
 
-**Already done.** The 1 Nov judge-tier report re-ran the description-judging
-comparison on unfiltered vectors (61 axes, May 8-slot data). Mean ρ moved by
-less than 0.005 and the judge ranking did not change
-(`roger/axis_judge_experiments/judge_tier_robustness_61axes_filtered_vs_unfiltered.txt`).
-Side finding: on axes whose poles lost the most responses to the filter
-(dominant/submissive, harmless/harmful), the judges agree better with the
-unfiltered vectors, mostly at slot 0. That is the "persona is still there in
-refusals" signal RD described, and is the natural starting point.
+1. *It depends on one judge's opinion, and the rubric is changing.* Whether
+   an answer "plays the role" is often unclear. A sommelier asked about a town
+   budget has little room to sound like a sommelier, and a plain helpful
+   answer may be fine; a demon giving a plain helpful answer has clearly
+   failed. The old rubric (above) does not cover these cases: it was
+   generated once by Opus for Lu's repo and still mentions "Gemma" and an
+   "altruistic AI" example in every role file. gpt-4.1-mini coped with it,
+   but it is being deprecated and newer judges did badly, so Roger and
+   Claude rewrote the rubric in early November (AI vs non-AI roles,
+   professionals asked about other topics, and so on). That rewrite is not on
+   any branch I can see; it is probably in Roger's pending PRs. A different
+   rubric keeps a different subset, so any bias may have moved.
+2. *It removes most of the data exactly where it matters.* Traits that push
+   against helpful/harmless/honest training (harmful, malicious, deceitful)
+   get many refusals. For those poles the vector is built from the minority
+   of answers where the model complied, which may be an unusual subset.
+3. *Refusals may still carry the persona.* As explained above, for the header
+   slots the activation of a refused answer was computed before the refusal
+   existed. "I'm sorry, I can't help with that" after a "be harmful" prompt
+   is itself a reaction to harmfulness.
+4. *It mixes question effects into axis directions.* The filter keeps a
+   different set of questions for each persona: "helpful" may keep 95% of
+   questions while "unhelpful" keeps 50%. Subtracting the two pole vectors
+   then mixes the trait contrast with a difference in which questions were
+   averaged (see the `compute_pos_3_vector` docstring and the pipeline
+   README).
 
-**Still to do.** Repeat on the new dataset with the new rubric; include
-response judging, which (unlike description judging) depends on which
-responses were kept, and is where the cross-comparison matters; look per
-axis rather than only at the mean; report ρ by layer and slot.
+**Arms to compare.**
+
+- *Filtered*: as now (score 3, at least 50).
+- *Unfiltered*: mean over all answers. Already implemented as
+  `scripts/judge_tier_build_unfiltered_vectors.py <may_8slot_dir> <out_dir>`,
+  which computes `(n3 × stored_vector + sum of the other answers) / n_all`
+  so it only reads the non-3 answers from the activation files. It has the
+  archive-drive path `/Volumes/G-Drive/...` hard-coded; edit it for wherever
+  the activation files are.
+- *Optional third arm, question-matched*: for each axis, keep only the
+  questions where both poles scored 3, then average. This removes problem 4
+  without removing the filter. Not implemented (the README calls it a
+  possible "step 4b").
+
+**How to measure.**
+- `results_analysis/judge_tier_robustness.py --data_dir <vectors>` gives ρ
+  for many judges on 61 axes, at slots 0/6 × layers 25/49 × three whitening
+  choices. Run it on both arms.
+- `results_analysis/rho_by_layer_simple.py` for ρ by layer (does the layer
+  27 / layer 49 peak structure change?).
+- `results_analysis/axis_judge_correlation.py --data_dir ... --layer ... --slot ...`
+  for one axis in detail.
+- Look per axis, not just at the mean. Sort axes by how much data their
+  poles lost to the filter, and check whether ρ changes with that.
+- Also check the direction itself: cosine between the filtered and unfiltered
+  axis directions.
+
+**What the cross-comparison means here.** Description and instruction
+judging (the judge reads the persona's description or instructions) do not
+depend on this filter, so for those only the activations change. Response
+judging (`--score_responses`) reads only score-3 answers, so it changes too.
+Cross-ρ (unfiltered activations vs filtered response judging, and the other
+way round) tells you which side moved.
+
+**What is already known.** The 1 Nov judge-tier report re-ran the
+description-judging comparison on unfiltered May 8-slot vectors (61 axes)
+(`roger/axis_judge_experiments/judge_tier_robustness_61axes_filtered_vs_unfiltered.txt`):
+
+- mean ρ changed by less than 0.005 for every judge and setting, and the
+  judge ranking did not change;
+- median cosine between filtered and unfiltered axis directions was 0.997;
+  12 axes were below 0.99 and 3 below 0.95 (dependable/undependable 0.92,
+  dominant/submissive 0.94, harmless/harmful 0.95);
+- on dominant/submissive ρ went up by about 0.03 to 0.04 without the
+  filter; on harmless/harmful it did not move.
+
+So the filter barely matters on average, but a few axes move, and those are
+the axes with the most refusals. That is where to look.
+
+**Still to do.** Repeat on the new dataset with the new rubric; add response
+judging and the cross-comparison; break results down per axis and per slot
+(Roger expects the effect to differ between slot 0 and the header slots);
+report ρ by layer.
+
+**Possible outcomes.**
+- ρ the same or better unfiltered: drop the filter (simpler, no judge
+  dependence, more data); say so in the paper.
+- ρ better filtered: keep it, and report that the result is not sensitive to
+  the rubric version (compare old and new rubric).
+- Mixed by axis: report it, with examples of refusals whose activations still
+  carry the persona (a nice appendix item).
 
 ### (b) Incongruity filtering (role + trait combinations)
 
-**What it does.** Role+trait combinations (30 roles × 30 traits) sometimes
-make little sense and are hard to play. Claude Sonnet scored each
-combination's instruction pairs 0 to 3 for incongruity
-(`data/combination_scores.json`, made by `data_analysis/score_combinations.py`;
-16% score 3). Step 3 drops the pairs that scored 3. This only affects the
-combination analyses, which are a small part of the paper.
+**What it does now.**
+Combinations pair a role with a trait. In "roger" mode, `r_` combinations
+are a goal role × non-goal trait (e.g. `r_predator__disorganized`), and `t_`
+combinations are a non-goal role × goal trait (e.g. `t_chef__harmful`); the
+lists are in `data/goal_roles_and_traits.json`. Each combination has 5
+instruction variants (one per pair of role and trait instructions).
 
-**Question to answer.** Are the combination results better with or without
-dropping those pairs? The code's own TODO says it is unclear: many of these
-responses are rejected by the role-play judge anyway, so the filter mostly
-shrinks the sample.
+Some combinations are hard to play because the role and trait contradict
+each other: a "calculating, strategic" predator that must be "disorganized,
+forgetting mid-sentence". Claude Sonnet scored every instruction variant 0
+to 3 for incongruity, with Opus re-scoring borderline cases
+(`data/combination_scores.json`, made by `data_analysis/score_combinations.py`).
+This 0 to 3 incongruity score is unrelated to the 0 to 3 role-play score.
 
-**Code.**
-- Flag: `pipeline/3_judge.py --no_incongruity_filtering` (exclusion logic
-  around lines 466 to 490).
-- `run_pipeline.sh` does not pass this flag. Run step 3 by hand for
-  combinations into `scores_unfiltered/`, then step 4 into
-  `vectors_unfiltered/`:
+In step 3, any variant with incongruity 3 is removed **before judging**.
+Those answers then have no role-play score, so step 4 never counts them as
+score 3, and they drop out of the combination's vector.
+
+**How much it removes.** In the current file: 3,200 combinations × 5
+variants = 16,000 variants; 86 of them score 3 (0.5%), in 31 combinations;
+72 of the 86 are `t_` combinations. (`data/README.md` says "16% score 3";
+that figure is out of date for the current file.) So the effect is small and
+limited to a few combinations, and only matters for the analyses that use
+combinations.
+
+**Why it might be unnecessary or harmful.** The code's own TODO
+(`3_judge.py`, around line 467) says it is unclear whether it helps: many of
+these answers are rejected by the role-play judge anyway, so the filter
+mostly shrinks the sample; the rate of bad-but-accepted answers among
+incongruous variants is not much higher than elsewhere; and some removed
+variants are perfectly usable. It is also one more judge-dependent choice to
+defend in the paper.
+
+**Arms to compare.**
+- *Filtered* (now): `combinations/scores/` and `combinations/vectors/`.
+- *Unfiltered*: rerun step 3 for combinations with the flag, into a separate
+  folder, then step 4. `run_pipeline.sh` does not pass this flag. Only the
+  31 affected combinations need rejudging, so you can add
+  `--roles <names>` to keep cost down, and copy the other score files
+  unchanged:
 
   ```bash
   uv run 3_judge.py --entity_type combination --no_incongruity_filtering \
@@ -143,45 +263,95 @@ shrinks the sample.
 
   Then check with `scan_missing_vectors.py --root <out> --min_count 50`,
   which pairs `vectors_unfiltered/` with `scores_unfiltered/` automatically.
-- Analyses that use combinations: `results_analysis/compute_combo_marginals.py`
-  and the combination plots under `results_analysis/canonical_angles/plots/`.
+  Note the dropped variants were still generated and their activations
+  extracted in steps 1 and 2; only judging skipped them. So no GPU work is
+  needed.
 
-**Naming clash to watch.** "Unfiltered" means two different things in the
-repo. `vectors_unfiltered/` (pipeline README, `scan_missing_vectors.py`)
-means "no incongruity filter, score=3 filter still on". The judge-tier
-"unfiltered vectors" from (a) mean "no score=3 filter". Use distinct
-directory names for the two ablations.
+**How to measure.**
+- The combination analyses: `results_analysis/compute_combo_marginals.py`
+  (how a combination decomposes into role + trait parts) and the plots under
+  `results_analysis/canonical_angles/plots/` (e.g.
+  `combos_vs_traits_roles_pooled.py`).
+- For the 31 affected combinations: how many variants pass the role-play
+  judge with and without the filter, and how far their vectors move.
+- Whether the role + trait additivity results change.
+
+**Possible outcomes.** With 0.5% of variants affected, the likely result is
+"no measurable difference", which would justify dropping the filter (one
+less judge dependency) or keeping it with a one-line note in the paper.
 
 ### (c) End-think leakage in Qwen non-reasoning mode
 
-**What it does.** Qwen runs in non-reasoning mode: after the assistant
-header we pre-fill an empty thinking block (`<think>` `</think>`). Now and
-then Qwen thinks anyway and emits a second `</think>`. The current handling
-keeps only the text after the last `</think>`. It is rare for most personas
-but common for some, such as stream-of-consciousness ones.
+**What happens.**
+In non-reasoning mode the prompt ends with the pre-filled empty block
+`<think>\n\n</think>\n\n`, and the model should simply answer. Occasionally
+Qwen starts reasoning anyway in its answer and then writes a second
+`</think>`, so the answer looks like: *thinking-style text* `</think>`
+*actual answer*. It is rare for most personas, but common for some, such as
+"stream of consciousness", "pensive" or "disorganized", which push the model
+to think aloud.
 
-**What Claude found earlier (brief).** The removed text looks like thinking;
-its mean embedding differs from the kept text, and the difference points
-towards traits like pensive and considering alternatives. KK suggested this
-could expose pre-verbal content; RD expects it to be an appendix, possibly
-not in the first workshop draft. The ablation itself should still be done
-before publishing.
+**What the code does now.**
+- At generation, `assistant_axis/generation.py` (around lines 273 to 287):
+  for Qwen, if an answer contains `</think>` but no `<think>`, everything up
+  to the last `</think>` is cut, and a warning reports how many answers
+  were cut. Only the cut answer is saved; the removed text is **not kept
+  anywhere**.
+- At activation extraction, `assistant_axis/internals/conversation.py`
+  (around lines 190 to 210, and again around 530): with thinking disabled,
+  any tokens between a `<think>` and a `</think>` in the answer are left out
+  of the slot 0 mean. This catches the rarer case where the model writes a
+  full `<think>...</think>` itself.
 
-**Question to answer.** Does stripping change ρ, and for which personas?
-Should the flag be the other way?
+**What this affects.** Because of the causal-model point above:
+- Header slots 1 to 7 are unaffected directly; they come before the answer.
+- Slot 0 (answer mean) changes: the thinking text is not in the average.
+- The role-play judge only sees the cut answer, so scores, and so which
+  answers pass the score-3 filter, can change.
 
-**Code.**
-- `assistant_axis/generation.py`, around lines 273 to 287: for Qwen, if a
-  response has `</think>` but no `<think>`, everything up to the last
-  `</think>` is cut before the response is saved.
-- `assistant_axis/internals/conversation.py` (two places, around lines 160
-  and 480): the token-span logic that skips thinking tokens when extracting
-  activations with `enable_thinking=False`.
-- There is **no flag** for this on `personas-konstantinos`, and the
-  stripped text is not saved, so the "off" arm needs a code change (a flag
-  to keep the raw response, or to save the stripped text alongside) and a
-  regeneration for at least the affected personas. Ask Roger whether he
-  already has this flag in a pending PR; he said "the flags already exist".
+So this ablation mainly concerns slot 0 and the judging, and it is
+concentrated in a few personas. But those personas sit at one end of some
+axes (e.g. pensive, stream of consciousness), so it could shift those axes.
+
+**What Claude found earlier (brief, informal).** In cases where this
+happened, the removed text does look like thinking, its mean activation
+differs from that of the kept text, and the difference points towards traits
+like pensive and "considering alternatives". KK suggested this could reveal
+"pre-verbal" content; Roger expects an appendix, probably not in the first
+workshop draft. The ablation itself should be done before publishing, in
+case the flag should be the other way.
+
+**Arms to compare.**
+- *Strip* (now): keep only the text after the last `</think>`.
+- *Keep*: keep the whole answer, including the thinking text, for both the
+  judge and the slot 0 mean.
+- Possibly a third: drop affected answers entirely.
+
+**What's missing.** There is no flag for this on `personas-konstantinos`,
+and since the removed text is not saved, the "keep" arm cannot be rebuilt
+from existing files. It needs:
+1. a small change to `generation.py`: a flag to turn the cut off, or (better)
+   always save the raw text in an extra field and cut in a later step;
+2. regenerating answers for the affected personas (GPU work: check the
+   13 GPU-hour rule), then steps 2 to 4 for them;
+3. rejudging those answers (API cost: check the $20 rule).
+
+Ask Roger first: he said "the flags already exist", so he may have this in a
+pending PR, and he may have the list of affected personas from the
+generation logs (the warning line gives counts).
+
+**How to measure.**
+- How often it happens, per persona (from the warning counts or the raw
+  text).
+- ρ at slot 0 for axes involving the most affected personas, strip vs keep.
+  Header slots should not change except through the role-play filter.
+- The direction "mean of removed text − mean of kept text": which traits it
+  lines up with (the earlier informal finding), for the appendix.
+
+**Possible outcomes.** Most likely the effect on ρ is small overall but
+visible for a few thinking-style personas at slot 0, which would support
+keeping the cut (or using header slots, which are immune). If keeping the
+text improves ρ, the flag should be flipped and slot 0 results redone.
 
 ## Suggested plan
 
