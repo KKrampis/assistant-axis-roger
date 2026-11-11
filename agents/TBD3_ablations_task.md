@@ -353,6 +353,151 @@ visible for a few thinking-style personas at slot 0, which would support
 keeping the cut (or using header slots, which are immune). If keeping the
 text improves ρ, the flag should be flipped and slot 0 results redone.
 
+## Run order: scripts for each ablation
+
+Paths are on `personas-konstantinos`. Run pipeline scripts from
+`pipeline/`, analysis scripts from the repo root. `<root>` is the dataset
+folder, laid out as `<root>/{roles,traits,combinations}/{responses,activations,scores,vectors}`;
+the May data is `runpod_workspace/qwen/qwen-3-32b Roger 8slot` (the default
+`--data_dir` of most analysis scripts). Always write the "off" arm to new
+folders so the canonical data is never overwritten.
+
+### (a) Role-play filtering: no GPU, no judge calls for the main comparison
+
+| # | Script | What it does |
+|---|---|---|
+| 1 | `scripts/judge_tier_build_unfiltered_vectors.py` | Builds a second set of role and trait vectors from **all** answers instead of score-3 only. Reads the existing vectors and the activation files; writes `<out>/{roles,traits}/vectors/*.pt` plus `unfiltered_stats.jsonl` (per persona: how many answers there were and how many scored 3). Links `default.pt` and `combinations/` to the original data. |
+| 2 | `pipeline/scan_missing_vectors.py` | Checks every persona got a vector and none is corrupt. |
+| 3 | `results_analysis/judge_tier_robustness.py` | Computes ρ (judge scores vs projections) for every judge on 61 axes, at slots 0/6 × layers 25/49 × raw/soft-K/soft-shear. Run once on the original data and once on the unfiltered data. |
+| 4 | `results_analysis/rho_by_layer.py` then `rho_by_layer_simple.py` | ρ at every layer (the layer-27 and layer-49 peaks). The first computes and saves a JSON, the second plots one slot from it. Run on both arms. |
+| 5 | `results_analysis/axis_judge_correlation.py` | One axis in detail (projections and per-persona scores), for the axes that moved most. |
+| 6 | (to write) a short comparison script | Per axis: ρ filtered vs unfiltered, cosine between the two axis directions, and fraction of the poles' answers that scored 3 (from `unfiltered_stats.jsonl`). |
+
+```bash
+# 1. build unfiltered vectors (first edit the hard-coded G-Drive path, G = ..., at the top)
+uv run python scripts/judge_tier_build_unfiltered_vectors.py "<root>" "<root>_rpunfiltered"
+```
+
+```bash
+# 2. check them
+uv run pipeline/scan_missing_vectors.py --root "<root>_rpunfiltered" --min_count 50
+```
+
+```bash
+# 3. rho, both arms (separate output names; no cache so the two runs can't mix)
+uv run python results_analysis/judge_tier_robustness.py --data_dir "<root>" --stem rob_filtered --no_cache
+```
+
+```bash
+uv run python results_analysis/judge_tier_robustness.py --data_dir "<root>_rpunfiltered" --stem rob_rpunfiltered --no_cache
+```
+
+```bash
+# 4. rho by layer, both arms
+uv run python results_analysis/rho_by_layer.py --data_dir "<root>_rpunfiltered" --rhos_json rho_by_layer_rpunfiltered.json --plot rho_by_layer_rpunfiltered.png
+```
+
+```bash
+uv run python results_analysis/rho_by_layer_simple.py --input <path to rho_by_layer_rpunfiltered.json> --slot 6
+```
+
+(Repeat step 4 with `--slot 0`; Roger expects slot 0 and the header slots
+to behave differently.) Response judging and the cross-comparison need the
+response-judging cells for the unfiltered answers, which costs API money:
+estimate it and check the $20 rule with Roger before running.
+
+### (b) Incongruity filtering: no GPU, small judge cost
+
+| # | Script | What it does |
+|---|---|---|
+| 1 | (one-liner) list the affected combinations | Reads `data/combination_scores.json` and prints the 31 combinations with a variant scored 3. |
+| 2 | `pipeline/3_judge.py --no_incongruity_filtering` | Role-play judges the answers that the filter skipped, for those 31 combinations only. |
+| 3 | copy the other score files | So `scores_unfiltered/` is complete; the other 3,169 combinations are identical in both arms. |
+| 4 | `pipeline/4_vectors.py` | Builds the combination vectors from `scores_unfiltered/` into `vectors_unfiltered/`. |
+| 5 | `pipeline/scan_missing_vectors.py` | Checks the new vectors (auto-pairs `vectors_unfiltered/` with `scores_unfiltered/`). |
+| 6 | `results_analysis/compute_combo_marginals.py` | Splits each combination into "role part" and "trait part" (marginals). Run on both vector folders; it finds the standalone role/trait vectors two folders up. |
+| 7 | `results_analysis/canonical_angles/plots/combos_vs_traits_roles_pooled.py` and the other combination analyses | Compare the combination results between the two arms. |
+| 8 | (to write) a short comparison | For the 31 combinations: answers kept per arm, and cosine between the two vectors. |
+
+```bash
+# 1. which combinations are affected
+python3 -c "import json; d=json.load(open('data/combination_scores.json')); print(' '.join(x['output_name'] for x in d['scores'] if any(p['score']>=3 for p in x['per_pair'])))"
+```
+
+```bash
+# 2. judge only those (dry run first to see the call count)
+cd pipeline && uv run 3_judge.py --entity_type combination --no_incongruity_filtering --dry_run \
+    --responses_dir "<root>/combinations/responses" \
+    --output_dir "<root>/combinations/scores_unfiltered" --roles <names from step 1>
+```
+
+Then the same without `--dry_run`. Step 3 copies the remaining score files;
+`3_judge.py` only adds missing keys to a file that already exists, so you
+can also copy *all* score files first and let it fill in the skipped answers.
+
+```bash
+# 4. vectors
+cd pipeline && uv run 4_vectors.py --activations_dir "<root>/combinations/activations" \
+    --scores_dir "<root>/combinations/scores_unfiltered" \
+    --output_dir "<root>/combinations/vectors_unfiltered" --min_count 50
+```
+
+```bash
+# 6. marginals, both arms (output goes to <vectors dir>/derived)
+uv run python results_analysis/compute_combo_marginals.py --data_dir "<root>/combinations/vectors"
+```
+
+```bash
+uv run python results_analysis/compute_combo_marginals.py --data_dir "<root>/combinations/vectors_unfiltered"
+```
+
+### (c) End-think leakage: needs a code change, GPU and judge calls
+
+| # | Script | What it does |
+|---|---|---|
+| 0 | ask Roger | Whether he already has a flag, and the list of affected personas. |
+| 1 | `assistant_axis/generation.py` (edit) | Add a flag to keep the full answer, or save the removed text in an extra field. |
+| 2 | find affected personas | From the generation logs ("Stripped orphaned thinking content from N/M responses"), or by regenerating a sample. |
+| 3 | `pipeline/1_generate.py --roles ...` | Regenerates answers for those personas only, with the cut turned off, into a new folder. GPU. |
+| 4 | `pipeline/2_activations.py` | Extracts activations for the new answers. GPU. Header slots should come out identical to the original; slot 0 changes. |
+| 5 | `pipeline/3_judge.py` | Role-play judges the new answers. API cost. |
+| 6 | `pipeline/4_vectors.py` | Builds the vectors. |
+| 7 | assemble a comparison dataset | Copy the original dataset folder (or link its files) and replace only the affected personas' vectors. |
+| 8 | `judge_tier_robustness.py`, `rho_by_layer.py` | ρ on the original vs the assembled dataset, mainly slot 0, axes involving the affected personas. |
+| 9 | (to write) removed-vs-kept analysis | Mean activation of removed text minus kept text; which trait directions it lines up with (appendix). |
+
+```bash
+# 3. regenerate (traits example; roles use data/roles/instructions)
+cd pipeline && uv run 1_generate.py --mode christina --model Qwen/Qwen3-32B \
+    --roles_dir ../data/traits/instructions --roles stream_of_consciousness pensive <...> \
+    --output_dir "<root>_thinkkept/traits/responses"
+```
+
+```bash
+# 4. activations
+cd pipeline && uv run 2_activations.py --model Qwen/Qwen3-32B \
+    --responses_dir "<root>_thinkkept/traits/responses" \
+    --output_dir "<root>_thinkkept/traits/activations" --batch_size 8
+```
+
+```bash
+# 5. judge, then 6. vectors
+cd pipeline && uv run 3_judge.py --entity_type trait \
+    --responses_dir "<root>_thinkkept/traits/responses" \
+    --output_dir "<root>_thinkkept/traits/scores"
+```
+
+```bash
+cd pipeline && uv run 4_vectors.py --activations_dir "<root>_thinkkept/traits/activations" \
+    --scores_dir "<root>_thinkkept/traits/scores" \
+    --output_dir "<root>_thinkkept/traits/vectors" --min_count 50
+```
+
+Use the same `--reduce_questions` (and other step-1 settings) as the
+original run, or the two arms are not comparable; check the original's
+`config` / metadata first. Steps 3 to 5 cost GPU time and API money: check
+both hard rules with Roger before launching.
+
 ## Suggested plan
 
 1. Get the code: check out `personas-konstantinos` (or re-clone after Roger's
